@@ -630,6 +630,78 @@ fn a_floating_companion_preserves_the_main_transcript_viewport() {
 }
 
 #[test]
+fn transparent_companion_preserves_transcript_cells_and_restores_them_when_hidden() {
+    for style in ["halo", "hover"] {
+        for position in ["top-right", "bottom-right"] {
+            let mut h = harness(
+                220,
+                Some(json!({"enabled":false,"animate":false,"style":style,"position":position})),
+            );
+            h.store.fold.update(|f| {
+                f.items.clear();
+                f.push_item(Item::Assistant {
+                    text: (0..60)
+                        .map(|_| "0123456789".repeat(22))
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                    final_answer: true,
+                });
+            });
+            h.turn();
+            let baseline = (0..40)
+                .flat_map(|y| (0..220).map(move |x| (x, y)))
+                .map(|(x, y)| h.term.screen().cell(x, y).unwrap().clone())
+                .collect::<Vec<_>>();
+            h.ctx.prefs.borrow_mut().companion.as_mut().unwrap()["enabled"] = json!(true);
+            h.store.companion_tick.update(|n| *n += 1);
+            h.turn();
+            let art = h
+                .app
+                .tree()
+                .accessibility_tree()
+                .entries
+                .into_iter()
+                .find(|e| e.label == "Activity avatar")
+                .unwrap()
+                .bounds;
+            let mut preserved_text = 0;
+            let mut changed = 0;
+            for y in art.y..art.bottom() {
+                for x in art.x..art.right() {
+                    let old = &baseline[(y * 220 + x) as usize];
+                    let now = h.term.screen().cell(x, y).unwrap();
+                    if old == now && !old.display().trim().is_empty() {
+                        preserved_text += 1;
+                    } else if old != now {
+                        changed += 1;
+                    }
+                }
+            }
+            assert!(
+                preserved_text >= 20,
+                "{style}/{position}: rectangular wipe, only {preserved_text} text cells preserved"
+            );
+            assert!(
+                changed >= 40,
+                "{style}/{position}: avatar must still paint its silhouette"
+            );
+            h.ctx.prefs.borrow_mut().companion.as_mut().unwrap()["enabled"] = json!(false);
+            h.store.companion_tick.update(|n| *n += 1);
+            h.turn();
+            for y in art.y..art.bottom() {
+                for x in art.x..art.right() {
+                    assert_eq!(
+                        h.term.screen().cell(x, y).unwrap(),
+                        &baseline[(y * 220 + x) as usize],
+                        "{style}/{position}: stale art at {x},{y}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn floating_art_and_actions_align_under_header_controls_without_stealing_root_keys() {
     for width in [160, 220] {
         let mut h = harness(width, Some(json!({"enabled":true,"animate":false})));

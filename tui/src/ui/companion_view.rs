@@ -230,6 +230,7 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
             .build()
     } else {
         Button::new("")
+            .transparent_background(true)
             .layout(
                 // Button owns a label child. Keep it under the final status
                 // row, with art absolute above it, rather than two flex columns.
@@ -249,6 +250,7 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
             .access_label("Open companion conversation")
             .child(
                 Avatar::new(pose)
+                    .transparent_background(true)
                     .style(if p.style == "hover" {
                         AvatarStyle::Hover
                     } else {
@@ -289,9 +291,8 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
         .measure(move |available| {
             Size::new(panel_width, (available.h - 2).max(0).min(panel_height))
         })
-        // A bounded opaque floating surface: visible content beneath the
-        // companion is covered consistently with its input hit bounds.
-        .draw(move |canvas, rect| canvas.fill(rect, ' ', t.text, t.bg))
+        // Empty art cells leave the transcript untouched. Only the procedural
+        // silhouette, caption and explicit controls paint over the content.
         .child(art);
     if !narrow {
         let mut actions = Element::new()

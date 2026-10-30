@@ -897,8 +897,10 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Position | Top right | Top right or Bottom right within the transcript, clear of composer and audio rows |
 
 The avatar floats below the right header controls or at the bottom right, with its caption and action
-row centred together. Its bounded opaque surface draws above the transcript;
-it does not reserve a sidebar or reduce transcript width. Controls elsewhere
+row centred together. Empty artwork cells leave the transcript visible; only
+the shape, caption and controls paint above it. Occupied terminal cells replace
+the underlying glyph, including soft edges and glow. It does not reserve a sidebar
+or reduce transcript width. Controls elsewhere
 continue to use the normal keyboard/mouse focus path.
 
 The avatar reflects observed activity: ready, thinking, executing tools, waiting,
@@ -942,6 +944,15 @@ Queued automatic side speech respects current opt-out settings, source session a
 side-conversation identity, waits behind active speech/recording, and shares Stop.
 Side speech failures notify without modifying the coding transcript.
 
+
+## Final-answer recovery
+
+A completed answer is displayed as the normal assistant response, outside collapsed
+reasoning cycles. Reconnect terminal checks drain the last ledger page and reconcile
+readable canonical run output before declaring an answer missing. Late canonical
+completion can replace the current provisional missing-answer notice and summary;
+helper outputs, arbitrary cycle text and failed/cancelled/previous turns cannot.
+The existing message playback and historical read-aloud suppression remain in force.
 
 ## Session-list discovery
 

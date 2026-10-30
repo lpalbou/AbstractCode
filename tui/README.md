@@ -343,7 +343,8 @@ MIT. See [LICENSE](LICENSE).
 Open **Companion settings** from the account menu, or use the Companion drawer's
 ⚙ button. Enable the companion to show a Halo orb or Hover robot floating beneath
 the top-right header controls, over a bounded part of the transcript. It preserves
-the transcript's full width. **Position** chooses Top right or Bottom right, above
+the transcript's full width, and empty cells around the artwork leave text visible.
+**Position** chooses Top right or Bottom right, above
 the composer and audio controls. Clicking it opens **Companion**, a separate side
 conversation from **Documentation**. The account menu also opens Companion when
 the avatar is disabled. Small terminals use a compact

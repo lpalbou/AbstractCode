@@ -82,6 +82,10 @@ Choose a workflow explicitly when no default exists. Exit codes are 0 completed,
 CLI reference for workspace, permissions, timeout and streaming options.
 
 Client tool choices are local preferences; they are not a shared policy record.
+Completed canonical answers render outside folded cycles. Terminal reconnect paths
+drain their ledger tails and reconcile run output; historical replay does not
+automatically speak restored replies.
+
 Companion questions report only observed context and may require follow-up after
 loading more history. Terminal graphics depend on capabilities; voice requires
 an installed host audio backend and configured Gateway routes. Windows end-to-end
@@ -96,7 +100,8 @@ Use account menu → Companion settings, or the Companion drawer's ⚙ action. E
 Halo/Hover visuals, choose reduced motion, and optionally enable comments or side
 read-aloud. Click the avatar (compact ◉ on small terminals) to open Companion, separately from Documentation.
 Position selects Top right or Bottom right within the transcript, clearing the
-composer/audio rows. It does not narrow the transcript. Account → Companion works
+composer/audio rows. Empty artwork cells preserve underlying text; occupied cells
+replace that cell's glyph. It does not narrow the transcript. Account → Companion works
 with the avatar disabled. Ready breathes at2fps, Waiting pulses at6fps, active
 phases animate at up to12fps; reduced motion stops clocks.
 Appearance opens a silent, large preview: select Halo/Hover, hold any of seven

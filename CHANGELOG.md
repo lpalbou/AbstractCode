@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Terminal avatar overlays preserve transcript text outside the procedural shape.
+  Reconnect completion handling drains final ledger records and reconciles canonical
+  output, so a completed answer is not left hidden inside a reasoning cycle.
+
 - Terminal companion supports saved Top right / Bottom right placement, expressive
   pose animation, separate Documentation and Companion entries, and current-audio
   pause/resume controls beside the speaking meter and avatar.

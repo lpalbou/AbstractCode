@@ -54,6 +54,11 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
   new run flips every previous flag; posted closures additionally re-check
   that their records belong to the fold's current run tree
   (`Fold::is_following`), so a stale stream can never contaminate a new run.
+- Terminal observations drain the final ledger tail before concluding. A completed
+  run snapshot's own output goes through the same final-output parser/source guard
+  as ledger records; status alone cannot discard a readable answer. A late canonical
+  completion can repair this turn's provisional missing-answer conclusion without
+  promoting a reasoning cycle or resurrecting cancelled/failed/previous turns.
 
 ## Assistant conversations
 

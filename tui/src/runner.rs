@@ -3786,6 +3786,11 @@ fn stream_run(
                             if let Ok(v) = client.get_run(&run_id) {
                                 let status = v.get("status").and_then(Value::as_str).unwrap_or("");
                                 if matches!(status, "completed" | "failed" | "cancelled") {
+                                    // The status probe runs AFTER the page read:
+                                    // completion may have appended in between.
+                                    // Match the SSE/clean-close terminal paths;
+                                    // never discard that final ledger tail.
+                                    drain_rest(&client, &run_id, &mut cursor, &post_records);
                                     finish(
                                         &client,
                                         &wake,
@@ -3867,12 +3872,26 @@ fn finish(
     // may be mid-restart), then report the honest "unknown" (error card +
     // Failed outcome via `run_terminal`).
     let mut status: Option<String> = None;
+    let mut terminal_output = None;
     for attempt in 0..3u32 {
         if let Ok(v) = client.get_run(run_id) {
             if let Some(s) = v.get("status").and_then(Value::as_str) {
                 let s = s.trim();
                 if !s.is_empty() {
                     status = Some(s.to_string());
+                    // The authenticated run snapshot is another authoritative
+                    // output surface. Keep its own output if a final ledger
+                    // read failed, rather than declaring a readable answer lost.
+                    if s == "completed" {
+                        terminal_output = v.get("output").filter(|o| !o.is_null()).map(|output| {
+                            serde_json::json!({
+                                "run_id": run_id,
+                                "node_id": v.get("current_node").and_then(Value::as_str).unwrap_or(""),
+                                "status": "completed",
+                                "result": {"completed": true, "output": output}
+                            })
+                        });
+                    }
                     break;
                 }
             }
@@ -3901,6 +3920,9 @@ fn finish(
         let rid = run_id.to_string();
         let tx = tx.clone();
         wake.post(move || {
+            if let Some(output) = terminal_output {
+                apply_stream_records(&store, &tx, &root, &rid, &[output]);
+            }
             let mut concluded_now = false;
             let mut failed = false;
             let mut short = false;
@@ -3938,7 +3960,12 @@ fn finish(
     }
     let store = *store;
     let root = root_run_id.to_string();
+    let rid = run_id.to_string();
+    let tx = tx.clone();
     wake.post(move || {
+        if let Some(output) = terminal_output {
+            apply_stream_records(&store, &tx, &root, &rid, &[output]);
+        }
         let mut current = false;
         let mut was_finished = false;
         store.fold.update(|f| {
@@ -6255,6 +6282,145 @@ mod tests {
             );
         });
         root.dispose();
+    }
+
+    /// The model result and terminal record straddle a REST page/status probe.
+    /// The old fallback stopped at the terminal status and lost the own final.
+    #[test]
+    fn rest_fallback_drains_completion_appended_between_page_and_status_probe() {
+        use std::io::{BufRead, BufReader, Write};
+        for is_root in [true, false] {
+            let rid = if is_root { "root1" } else { "agent1" };
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let observed = reads.clone();
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else { break };
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut first = String::new();
+                    let _ = reader.read_line(&mut first);
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                            break;
+                        }
+                    }
+                    let path = first.split_whitespace().nth(1).unwrap_or("");
+                    let (status, body) = if path.contains("/ledger/stream") {
+                        ("503 Service Unavailable", "{}".into())
+                    } else if path.contains("/ledger?") {
+                        let n = observed.fetch_add(1, Ordering::Relaxed);
+                        let record = if n == 0 {
+                            json!({"run_id":rid,"step_id":"last-cycle","node_id":"reason",
+                                "status":"completed","effect":{"type":"llm_call"},
+                                "result":{"content":"Visible final answer."}})
+                        } else {
+                            json!({"run_id":rid,"node_id":"done","status":"completed",
+                                "result":{"completed":true,"output":{"answer":"Visible final answer."}}})
+                        };
+                        (
+                            "200 OK",
+                            json!({"items":[record],"next_after":n+1}).to_string(),
+                        )
+                    } else {
+                        // No output here: this case must succeed from the drain,
+                        // independently of the terminal-snapshot recovery belt.
+                        (
+                            "200 OK",
+                            json!({"run_id":rid,"status":"completed"}).to_string(),
+                        )
+                    };
+                    let _ = write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
+                }
+            });
+            let (root, ()) = abstracttui::reactive::create_root(|cx| {
+                let store = Store::create(cx);
+                store.session_id.set("s1".into());
+                let (tx, _rx) = std::sync::mpsc::channel();
+                apply_start_binding(&store, &tx, "root1", "s1");
+                if !is_root {
+                    apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
+                }
+                apply_stream_records(
+                    &store,
+                    &tx,
+                    "root1",
+                    rid,
+                    &[json!({"run_id":rid,
+                    "node_id":"reason","status":"started","effect":{"type":"llm_call"}})],
+                );
+                stream_run(
+                    GatewayClient::new(&url, None),
+                    abstracttui::reactive::wake_handle(),
+                    store,
+                    tx,
+                    "root1".into(),
+                    rid.into(),
+                    is_root,
+                    Arc::new(AtomicBool::new(false)),
+                    0,
+                );
+                assert!(drain_until(|| store.phase.get_untracked() == Phase::Idle));
+                assert_eq!(
+                    reads.load(Ordering::Relaxed),
+                    2,
+                    "final tail must be read after terminal probe"
+                );
+                store.fold.with_untracked(|f| {
+                    assert_eq!(f.items.iter().filter(|i|matches!(i,Item::Assistant{text,final_answer:true} if text=="Visible final answer.")).count(),1);
+                    assert!(!f.items.iter().any(|i|matches!(i,Item::Thinking{content,..} if content=="Visible final answer.")));
+                    assert!(!f.items.iter().any(|i|matches!(i,Item::Info{text} if text.contains("without a readable final answer"))));
+                });
+            });
+            root.dispose();
+        }
+    }
+
+    #[test]
+    fn terminal_snapshot_recovers_own_output_when_the_tail_was_unavailable() {
+        for (output, artifact) in [
+            (json!({"answer":"Snapshot answer."}), false),
+            (json!({"$artifact":"snapshot-answer"}), true),
+        ] {
+            let url = fake_gateway(vec![(
+                "/runs/agent1",
+                json!({"run_id":"agent1","status":"completed","output":output}).to_string(),
+            )]);
+            let (root, ()) = abstracttui::reactive::create_root(|cx| {
+                let store = Store::create(cx);
+                store.session_id.set("s1".into());
+                let (tx, rx) = std::sync::mpsc::channel();
+                apply_start_binding(&store, &tx, "root1", "s1");
+                apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
+                apply_stream_records(
+                    &store,
+                    &tx,
+                    "root1",
+                    "agent1",
+                    &[
+                        json!({"run_id":"agent1","node_id":"reason","status":"started","effect":{"type":"llm_call"}}),
+                    ],
+                );
+                finish(
+                    &GatewayClient::new(&url, None),
+                    &abstracttui::reactive::wake_handle(),
+                    &store,
+                    &tx,
+                    "root1",
+                    "agent1",
+                    false,
+                );
+                assert!(drain_until(|| store.phase.get_untracked() == Phase::Idle));
+                store.fold.with_untracked(|f| {
+                    assert_eq!(f.items.iter().filter(|i|matches!(i,Item::Assistant{final_answer:true,..})).count(),1);
+                    assert!(!f.items.iter().any(|i|matches!(i,Item::Info{text} if text.contains("without a readable final answer"))));
+                });
+                assert_eq!(rx.try_iter().filter(|c|matches!(c,Cmd::FetchAnswer{artifact_id,..} if artifact_id=="snapshot-answer")).count(),usize::from(artifact));
+            });
+            root.dispose();
+        }
     }
 
     /// REVIEW/17: a run can END with a live bubble still open and NO
