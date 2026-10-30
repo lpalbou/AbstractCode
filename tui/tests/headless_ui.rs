@@ -1214,11 +1214,19 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
         "tools modal title:\n{screen}"
     );
     assert!(
+        !screen.contains("read_file"),
+        "categories initially folded:\n{screen}"
+    );
+    h.press_enter(); // Expand files, then select its first tool.
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    let screen = h.turn();
+    assert!(
         screen.contains("[Auto] read_file"),
-        "checked rows:\n{screen}"
+        "expanded rows:\n{screen}"
     );
 
-    // Space toggles the first tool OFF; title flips to explicit-allowlist.
+    // Space toggles the selected tool OFF; category expansion changes no policy.
     h.type_text(" ");
     let screen = h.turn();
     assert!(
@@ -1424,12 +1432,22 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
         "gated count in the title:\n{screen}"
     );
     assert!(
-        screen.contains("[—   ] send_email  Unavailable on this Gateway"),
-        "disabled row renders its gate:\n{screen}"
+        screen.contains("▸ comms  [Unavailable]"),
+        "unavailable category:\n{screen}"
     );
-    // Cursor row 0 is send_email (comms sorts before files): Space
-    // refuses — the user disabled-set is UNCHANGED (the stale pref
-    // stays; no new mutation), a toast names the gate.
+    h.press_enter(); // Expand the initially folded comms category.
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    let screen = h.turn();
+    assert!(
+        screen.contains("[Unavailable] send_email"),
+        "disabled row:\n{screen}"
+    );
+    assert!(
+        screen.contains("Unavailable on this Gateway"),
+        "selected gate details:\n{screen}"
+    );
+    // Space refuses the served-disabled tool; the stale preference stays unchanged.
     h.type_text(" ");
     h.turn();
     assert_eq!(
@@ -1437,8 +1455,8 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
         vec!["send_email".to_string()],
         "Space on a served-disabled row never mutates the selection"
     );
-    // `p` refuses a pin for the same reason.
-    h.type_text("p");
+    // The category shortcut also refuses a pin for the same reason.
+    h.type_text("c");
     h.turn();
     assert!(
         h.store.tool_overrides.get_untracked().is_empty(),
@@ -1446,7 +1464,11 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
     );
     // Disable read_file (cursor down to it) to flip into allowlist mode:
     // the explicit allowlist must exclude the served-disabled row.
-    h.term.push_input(b"\x1b[B\x1b[B"); // Down through category → read_file
+    h.term.push_input(b"\x1b[B"); // files category
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B"); // read_file
     h.turn();
     h.type_text(" ");
     h.turn();
@@ -1562,10 +1584,8 @@ fn approval_modal_names_the_gate_on_a_served_disabled_call() {
     );
 }
 
-/// item 4: `p` in the /tools modal cycles a per-tool approval pin
-/// (none → auto → ask → none), renders it, persists it, and the pin
-/// reaches the run-start policy expansion (auto lifts above the tier,
-/// ask force-asks below it).
+/// Tool modes persist per-tool approval pins and reach run-start policy:
+/// Auto lifts above the tier, while Ask forces approval below it.
 #[test]
 fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
     let mut h = harness();
@@ -1590,6 +1610,10 @@ fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
     h.press_enter();
     h.turn();
 
+    h.press_enter(); // Expand files, then select read_file.
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
     // Auto -> Off -> Ask. The mode is visible and persisted.
     h.type_text(" ");
     h.turn();
@@ -1600,8 +1624,12 @@ fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
         h.prefs.borrow().tool_overrides,
         vec![("read_file".into(), "ask".into())]
     );
-    // Skip the web category to reach fetch_url: Ask -> Auto.
-    h.term.push_input(b"\x1b[B\x1b[B");
+    // Expand web to reach fetch_url: Ask -> Auto.
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
     h.turn();
     h.type_text(" ");
     h.turn();
@@ -1637,9 +1665,6 @@ fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
         }
         other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
     }
-
-    // The full none→auto→ask→none wrap was closed in-modal above (the
-    // third `p` press); the unit test pins the same cycle at the fold.
 }
 
 #[test]
@@ -1777,6 +1802,12 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
         "overflow marker visible when the list exceeds the body:\n{screen}"
     );
     assert!(
+        !screen.contains("tool_00"),
+        "categories initially folded:\n{screen}"
+    );
+    h.press_enter(); // Expand files; its children exceed the available body.
+    let screen = h.turn();
+    assert!(
         screen.contains("tool_00"),
         "top of the list visible initially:\n{screen}"
     );
@@ -1784,11 +1815,12 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
         !screen.contains("tool_29"),
         "bottom rows genuinely beyond the window:\n{screen}"
     );
-    // Walk the cursor to the LAST tool: the window must follow it.
-    for _ in 0..33 {
-        h.term.push_input(b"\x1b[B");
-        h.turn();
-    }
+    // End reaches the web category, then its last child after expansion.
+    h.term.push_input(b"\x1b[F");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[F");
     let screen = h.turn();
     assert!(
         screen.contains("tool_29"),
