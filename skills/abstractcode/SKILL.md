@@ -94,6 +94,9 @@ References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-st
 Use account menu → Companion settings, or the assistant drawer's ⚙ action. Enable
 Halo/Hover visuals, choose reduced motion, and optionally enable comments or side
 read-aloud. Click the avatar (compact ◉ on small terminals) to open This run.
+Appearance opens a silent, large preview: select Halo/Hover, hold any of seven
+phases, Auto cycle or Pause motion. Only Use this saves appearance; Cancel/Esc
+discards preview changes. No inference or microphone access occurs in this preview.
 Comments require new visible conversation content, allow one in-flight request and
 at least 60 seconds between attempts in this TUI. They have no tool/steering/approval
 authority. Shared multi-client cooldown is not implemented. Restored history does

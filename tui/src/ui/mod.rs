@@ -8,6 +8,7 @@ pub mod attention_chip;
 pub mod automations_view;
 pub mod cards;
 pub mod chrome;
+mod companion_preview;
 pub mod companion_view;
 pub mod companion_voice;
 pub mod conversations_view;

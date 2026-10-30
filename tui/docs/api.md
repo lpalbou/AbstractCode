@@ -888,7 +888,7 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Setting | Default | Effect |
 |---|---|---|
 | Enable companion | Off | Show the activity avatar and enable companion interaction preferences |
-| Appearance | Halo orb | Halo / Hover robot; portable cell rendering |
+| Appearance | Halo orb | Preview Halo / Hover and activity phases before saving |
 | Animate activity | On | Activity motion; off gives reduced motion |
 | Offer comments | Off | Short change-driven observations through Gateway |
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
@@ -898,6 +898,15 @@ The avatar reflects observed activity: ready, thinking, executing tools, waiting
 recording, speaking or error. Paused speech is static. Below 120 columns or 22 rows
 it becomes a compact control. The full avatar yields to drawers, modals and entity
 focus. It does not load a model or initiate microphone capture.
+
+Appearance opens a silent preview with both styles and Ready, Listening, Thinking,
+Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
+advances phases about every 3.5 seconds. **Pause motion** freezes the demonstration.
+Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
+The preview labels the saved appearance **In use** and another choice **Not applied**.
+Only **Use this** persists the style; Cancel/Esc discards it. Preview playback can be
+started explicitly with reduced motion enabled, without changing that preference.
+The preview has no inference, recording or speech side effects.
 
 Automatic comments use a dedicated grounded-QA conversation, separate from manual
 Docs/This run history and coding commands. They require a new meaningful visible

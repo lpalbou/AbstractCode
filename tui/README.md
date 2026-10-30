@@ -344,6 +344,12 @@ Open **Companion settings** from the account menu, or use the assistant drawer's
 conversation. Clicking it opens **This run**. Small terminals use a compact
 control; **Animate activity** can be turned off for reduced motion.
 
+Choose **Appearance** to open a large, silent preview. Switch between Halo and
+Hover, watch the activity phases cycle, or choose a phase to hold it. **Auto cycle**
+resumes the demonstration and **Pause motion** freezes it. **Use this** saves the
+appearance; **Cancel** or Esc returns without changing it. Previewing needs no
+inference, microphone or speech playback.
+
 **Offer comments** is off by default. When enabled, meaningful conversation
 changes can trigger a short observation through the existing Gateway pool, with
 one request at a time and at least 60 seconds between attempts in this TUI process.

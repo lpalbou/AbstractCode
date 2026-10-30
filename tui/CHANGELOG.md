@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Companion artwork uses larger shaded Halo/Hover visuals. Appearance opens a
+  silent live phase preview with automatic cycling, manual hold and explicit save.
+
 - Add optional Halo/Hover session companion, observed activity poses, reduced
   motion, change-driven comments and independent side speech preferences. Side
   microphone input stays in the selected question draft; speech shares the existing

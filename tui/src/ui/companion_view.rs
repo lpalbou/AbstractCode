@@ -19,7 +19,7 @@ use std::{
 pub fn prefs(ctx: &UiCtx) -> CompanionPrefs {
     CompanionPrefs::from_json(ctx.prefs.borrow().companion.as_ref())
 }
-fn save(store: Store, ctx: &UiCtx, edit: impl FnOnce(&mut CompanionPrefs)) {
+pub(super) fn save(store: Store, ctx: &UiCtx, edit: impl FnOnce(&mut CompanionPrefs)) {
     let mut p = prefs(ctx);
     edit(&mut p);
     let result = {
@@ -45,7 +45,7 @@ pub fn settings(cx: Scope, store: Store, ctx: &UiCtx) {
                 if p.enabled { "On" } else { "Off" }
             ),
             format!(
-                "Appearance        {}",
+                "Appearance        {} · preview…",
                 if p.style == "hover" {
                     "Hover robot"
                 } else {
@@ -93,7 +93,7 @@ pub fn settings(cx: Scope, store: Store, ctx: &UiCtx) {
         on_choose: Box::new(move |ix| {
             match ix {
                 0 => save(store, &choose, |p| p.enabled = !p.enabled),
-                1 => save(store, &choose, |p| p.style = if p.style == "hover" { "halo" } else { "hover" }.into()),
+                1 => super::companion_preview::open(cx, store, &choose),
                 2 => save(store, &choose, |p| p.animate = !p.animate),
                 3 => save(store, &choose, |p| p.advice = !p.advice),
                 4 => save(store, &choose, |p| p.read_aloud = !p.read_aloud),
@@ -178,6 +178,8 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
         store.docs_open.set(true);
     };
     let cctx = ctx.clone();
+    let art_width = if viewport.w >= 180 { 32 } else { 28 };
+    let art_height = art_width / 2 + 1;
     let art = if narrow {
         Button::new("◉")
             .on_click(open)
@@ -188,8 +190,8 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
         Button::new("")
             .layout(
                 LayoutStyle::default()
-                    .width(Dimension::Cells(18))
-                    .height(Dimension::Cells(9))
+                    .width(Dimension::Cells(art_width))
+                    .height(Dimension::Cells(art_height))
                     .shrink(0.0),
             )
             .on_click(open)
@@ -207,8 +209,8 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
                     .animated(animated)
                     .layout(
                         LayoutStyle::default()
-                            .width(Dimension::Cells(18))
-                            .height(Dimension::Cells(9)),
+                            .width(Dimension::Cells(art_width))
+                            .height(Dimension::Cells(art_height)),
                     )
                     .view(cx),
             )
@@ -217,7 +219,7 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
     let mut side = Element::new()
         .style(
             LayoutStyle::column()
-                .width(Dimension::Cells(if narrow { 3 } else { 18 }))
+                .width(Dimension::Cells(if narrow { 3 } else { art_width }))
                 .shrink(0.0),
         )
         .child(art);

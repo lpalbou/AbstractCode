@@ -231,6 +231,9 @@ fn companion_settings_are_reachable_and_change_only_ephemeral_preferences() {
     assert!(!screen.contains("Talk / ask"), "modal owns interaction");
     h.click("Appearance");
     h.enter();
+    assert!(h.turn().contains("Preview companion appearance"));
+    h.click("Hover robot");
+    h.click("Use this");
     assert_eq!(
         h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
         "hover"
@@ -246,6 +249,99 @@ fn companion_settings_are_reachable_and_change_only_ephemeral_preferences() {
         advice_count(&h.commands()),
         0,
         "editing settings is not an inference trigger"
+    );
+}
+
+#[test]
+fn appearance_preview_holds_every_phase_and_cancel_does_not_save_or_send_commands() {
+    let mut h = harness(
+        220,
+        Some(json!({"enabled":true,"style":"halo","animate":true})),
+    );
+    h.turn();
+    h.commands();
+    h.click("⚙");
+    h.click("Appearance");
+    h.enter();
+    h.click("Hover robot");
+    for label in [
+        "Ready",
+        "Listening",
+        "Thinking",
+        "Working",
+        "Speaking",
+        "Waiting",
+        "Error",
+    ] {
+        // Button and current-phase label share a name. Numeric shortcuts also
+        // provide a keyboard-only path that cannot accidentally hit the label.
+        let key = match label {
+            "Ready" => b'1',
+            "Listening" => b'2',
+            "Thinking" => b'3',
+            "Working" => b'4',
+            "Speaking" => b'5',
+            "Waiting" => b'6',
+            _ => b'7',
+        };
+        h.term.push_input(&[key]);
+        let screen = h.turn();
+        assert!(screen.contains(&format!("{label} · held")), "{screen}");
+    }
+    assert_eq!(
+        h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
+        "halo"
+    );
+    h.click("Cancel");
+    assert!(h.turn().contains("Companion · Enter"));
+    assert_eq!(
+        h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
+        "halo"
+    );
+    assert!(
+        !h.commands().iter().any(|c| matches!(
+            c,
+            Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. } | Cmd::AssistantAsk { .. }
+        )),
+        "preview never executes or changes a run"
+    );
+}
+
+#[test]
+fn preview_motion_can_be_paused_and_resumed_without_changing_reduced_motion_preference() {
+    let mut h = harness(
+        80,
+        Some(json!({"enabled":true,"style":"halo","animate":false})),
+    );
+    // A small viewport exposes the same action from the side drawer.
+    h.turn();
+    h.click("◉");
+    h.click("⚙");
+    h.click("Appearance");
+    h.enter();
+    let screen = h.turn();
+    for label in [
+        "Halo orb",
+        "Hover robot",
+        "Use this",
+        "Cancel",
+        "Auto cycle",
+        "Pause motion",
+    ] {
+        assert!(screen.contains(label), "{label}:\n{screen}");
+    }
+    assert!(screen.contains("Listening · held"));
+    h.click("Auto cycle");
+    assert!(h.turn().contains("Listening · cycling"));
+    h.click("Pause motion");
+    assert!(h.turn().contains("Listening · held"));
+    h.term.push_input(b"c");
+    assert!(h.turn().contains("Listening · cycling"));
+    h.term.push_input(b"\x1b");
+    h.turn();
+    assert_eq!(
+        h.ctx.prefs.borrow().companion.as_ref().unwrap()["animate"],
+        false
     );
 }
 #[test]
