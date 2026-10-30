@@ -125,22 +125,24 @@ Status: **0.12.0**, pre-alpha. Release history is in
   prompt and full activity, pending approvals re-surface. `/pause` parks
   the run durably on the gateway (it survives quitting); `/resume`
   continues it.
-- **Capability control**: `/tools` switches gateway tools on/off per run
-  (checked set = the run's exact allowlist), `/skills` attaches gateway
-  skills (an empty shelf shows the gateway's own explanation), `/mcp` shows
-  the gateway's MCP server registry.
-- **About**: `/about` shows the version, the AbstractFramework links
-  (website, source, documentation, issues, feedback), author and licence,
-  and the gateway's package versions.
-- **Honest telemetry**: the header names what "gateway defaults" actually
-  resolves to (and the model that served the last call) plus the working
-  directory, workspace mode, and capability counts; the footer is a
-  persistent instrument row (context meter, session tokens, `/gpu` and
-  host `mem` meters, skills/MCP counts — the key legend lives behind
-  `?`). Click a skills/MCP count to open its panel, context/tokens for
-  `/cache`, GPU/memory for `/resources`, or `?` for help. The workspace
-  mode opens `/workspace`. These controls also work with Tab, arrows
-  and Enter/Space; closing a panel returns typing to the composer. The activity
+- **Capability control**: the header's **Tools** menu groups Tools, Skills and
+  MCP servers. `/tools` switches gateway tools on/off per run (checked set =
+  the run's exact allowlist), `/skills` attaches gateway skills, and `/mcp`
+  shows the gateway's MCP server registry. Direct commands remain available.
+- **Top-right controls**: **Docs** opens a separate documentation conversation,
+  **Theme** previews appearance choices, **About** shows versions and framework
+  links, and the account/status menu shows your gateway identity, connection
+  details and a confirmed option to disconnect this terminal. Narrow terminals
+  collect the first three controls under **Menu**. Use `/docs` for direct access
+  to the Docs assistant; its answers use the gateway's documentation corpus.
+- **Dialogs**: click outside an ordinary dialog to close it and return to the
+  composer. Approval and user-question steps stay open until you respond.
+- **Honest telemetry**: the header names the workflow, provider/model and
+  workspace mode; the footer keeps context, session token and host resource
+  meters, the workspace, session and keys reference. Click context/tokens for
+  `/cache`, GPU/memory for `/resources`, or `?` for help. Workspace mode opens
+  `/workspace`. Controls also work with Tab, arrows and Enter/Space; closing
+  a panel returns typing to the composer. The activity
   strip shows live context size (`ctx`), cache hits, and the in-flight
   model call with its last-call tok/s; `/cache` is the detail panel:
   prompt-cache posture for the effective route (auto = on when available)

@@ -12,9 +12,10 @@ transcript's source of truth is the gateway's ledger, never client memory.
 flowchart LR
   subgraph terminal [abstractcode process]
     UI[UI thread<br/>AbstractTUI app<br/>signals + views]
-    W[gateway-runner thread<br/>owns all HTTP]
+    W[gateway-runner thread<br/>coding commands + discovery]
     S1[ledger stream thread<br/>root run SSE<br/>+ live reply deltas]
     S2[ledger stream threads<br/>subruns SSE]
+    D[docs worker<br/>separate docs session]
     V[voice threads<br/>TTS stream · dictation]
   end
   BR[voice_bridge.py<br/>Python child process<br/>AbstractVoice: speaker + mic]
@@ -30,6 +31,9 @@ flowchart LR
   W -- "runs/start · commands · discovery<br/>workspace files · about" --> API
   S1 -- "GET ledger/stream (SSE)<br/>step + llm.delta frames" --> API
   S2 -- "GET ledger/stream (SSE)" --> API
+  UI -- "DocsAsk" --> D
+  D -- "docs/corpus · runs/start<br/>follow docs run" --> API
+  D -- "guarded answer/state posts" --> UI
   V -- "voice/defaults · voice/tts/stream<br/>audio/transcribe" --> API
   V -- "JSON lines: play segment, record" --> BR
   V -- "speaking / recording state (post)" --> UI
@@ -50,6 +54,17 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
   new run flips every previous flag; posted closures additionally re-check
   that their records belong to the fold's current run tree
   (`Fold::is_following`), so a stale stream can never contaminate a new run.
+
+## Documentation conversation
+
+The Docs drawer uses the authenticated Gateway client to fetch the Code corpus
+and start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It does
+not inherit the coding run's tools, workspace or transcript. A separate worker
+follows that run, keeping coding commands and approval responses responsive.
+Temporary polling errors back off on the existing run; only an explicit retry
+after failure starts another inference. UI posts check both session and operation
+generation before changing the drawer. This client starts no provider process
+and loads no model.
 
 ## Attention follower
 

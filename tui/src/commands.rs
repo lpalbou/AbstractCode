@@ -3,6 +3,8 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Help,
+    /// Open the independent Gateway-grounded documentation conversation.
+    Docs,
     /// `/files` (also `/workspace files`) — the current run's workspace
     /// on the gateway host: browse folders, preview files (§W).
     Files,
@@ -177,6 +179,7 @@ pub fn parse(text: &str) -> Option<Command> {
     let rest = parts.next().unwrap_or("").trim().to_string();
     let cmd = match head.as_str() {
         "/help" | "/?" => Command::Help,
+        "/docs" => Command::Docs,
         "/about" | "/version" => Command::About,
         "/new" | "/clear" => Command::NewSession,
         "/theme" | "/themes" => Command::Theme(if rest.is_empty() { None } else { Some(rest) }),
@@ -460,6 +463,7 @@ pub const HELP_LINES: &[(&str, &str)] = &[
         "send a task to the agent (steers when a run is active)",
     ),
     ("/help", "this help"),
+    ("/docs", "Docs assistant, separate from the coding task"),
     (
         "/new",
         "fresh session (cancels an active run, new durable id)",
@@ -651,11 +655,11 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ("Ctrl+T", "cycle theme"),
     (
         "theme ▾",
-        "the theme name at the status bar's right end: click (or Tab to the bar, → to it, Enter) for every theme — arrows / the wheel preview LIVE, Enter or a click keeps, Esc restores",
+        "Theme in the top bar (or compact Menu): click, or Tab then arrows and Enter, for every theme — arrows / the wheel preview LIVE, Enter or a click keeps, Esc restores",
     ),
     (
         "chrome",
-        "click workflow, model, gateway, workspace, session or theme; skills/MCP counts open their panels, context/tokens open /cache, GPU/memory open /resources, ? opens help — or Tab to a bar, ←→ between widgets, Enter or Space opens",
+        "Tools groups this session's Tools, Skills and MCP; the top right has Docs, Theme, About and your identity/status menu (compact Menu on narrow terminals); footer meters open /cache or /resources, ? opens help — Tab, arrows, Enter/Space",
     ),
     (
         "Ctrl+P",
@@ -785,6 +789,7 @@ mod tests {
     #[test]
     fn about_parses_and_is_listed() {
         assert_eq!(parse("/about"), Some(Command::About));
+        assert_eq!(parse("/docs"), Some(Command::Docs));
         assert_eq!(parse("/version"), Some(Command::About));
         assert!(HELP_LINES.iter().any(|(k, _)| *k == "/about"));
         assert!(completion_matches("abo").iter().any(|(k, _)| *k == "about"));

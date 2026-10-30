@@ -165,6 +165,13 @@ pub enum Cmd {
         preferred_flow: Option<String>,
     },
     LoadTools,
+    LoadAccount,
+    DocsAsk {
+        session: String,
+        operation: u64,
+        question: String,
+        corpus: Option<String>,
+    },
     /// Load the gateway skill shelf (for `/skills`).
     LoadSkills,
     /// Load the gateway MCP server registry (for `/mcp`).
@@ -871,6 +878,21 @@ impl Runner {
                 preferred_flow,
             } => self.load_catalog(preferred_bundle, preferred_flow),
             Cmd::LoadTools => self.load_tools(),
+            Cmd::LoadAccount => self.load_account(),
+            Cmd::DocsAsk {
+                session,
+                operation,
+                question,
+                corpus,
+            } => crate::runner_docs::ask(
+                self.client.clone(),
+                self.wake.clone(),
+                self.store,
+                session,
+                operation,
+                question,
+                corpus,
+            ),
             Cmd::LoadSkills => self.load_skills(),
             Cmd::LoadMcp => self.load_mcp(),
             Cmd::LoadCacheInfo { provider, model } => self.load_cache_info(provider, model),
@@ -1490,6 +1512,22 @@ impl Runner {
             }
             Err(_) => {} // still unknown — never a fabricated verdict
         }
+    }
+
+    fn load_account(&self) {
+        let store = self.store;
+        let client = self.client.clone();
+        let wake = self.wake.clone();
+        spawn_host_thread("account-identity", wake.clone(), store, move || {
+            let account = match client.account_identity() {
+                Ok(v) => crate::store::AccountIdentity::from_response(&v),
+                Err(e) => crate::store::AccountIdentity {
+                    error: e.to_string(),
+                    ..Default::default()
+                },
+            };
+            wake.post(move || store.account.set(account));
+        });
     }
 
     /// `/host/state` (modal open + `r` only) — OFF-LOOP: see

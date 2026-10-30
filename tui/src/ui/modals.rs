@@ -349,7 +349,7 @@ pub fn open_approval(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
     // tier row 1 + gaps 4 + buttons 1 + hint 1 = 12 fixed rows; the body
     // scroll gets the rest, capped so big batches stay on screen.
     let size = modal_size(width_hint, 12 + (body_rows.len() as i32).clamp(2, 18));
-    ctx.open_modal(cx, size, move |mcx| {
+    ctx.open_blocking_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let run_id = wait.run_id.clone();
         let wait_key = wait.wait_key.clone();
@@ -583,7 +583,7 @@ pub fn open_ask(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
     const FIXED_ROWS: i32 = 10;
     let size = modal_size(panel_w, FIXED_ROWS + prompt_rows);
     let scrollable = size.h < FIXED_ROWS + prompt_rows;
-    ctx.open_modal(cx, size, move |mcx| {
+    ctx.open_blocking_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let run_id = wait.run_id.clone();
         let wait_key = wait.wait_key.clone();

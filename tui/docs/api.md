@@ -69,6 +69,7 @@ abstractcode --help | --version
 | `/voice [read-aloud on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `space on\|off` turns hold-Space-to-talk on or off (on by default) |
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
+| `/docs` | Open the Docs assistant drawer: a separate conversation grounded in the Gateway documentation corpus |
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran. When the gateway keeps your account's **Default for new conversations** (AbstractGateway 0.13.1+; see [Settings panels](#settings-panels-settings)), this picks THIS conversation's workflow only and saves nothing on this computer; with an older gateway the pick is also saved on this computer for new conversations, as before |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
@@ -582,17 +583,18 @@ recovers it.
 | `Ctrl+T` | anywhere | Cycle theme |
 | click on the workflow name | header | Workflow picker (as `/workflow`) |
 | click on the provider/model | header | Model picker (as `/model`) |
-| click on the gateway / connection light | header | Connection status modal (as `/status`) |
+| click on the user / connection light | header, right | Account menu: signed-in identity, Gateway, connection status (as `/status`), copy user id, and confirmed disconnect of this terminal |
 | click on the workspace path (`⌂ …`) | status bar, middle | The conversation's authorised workspaces (as `/workspace`) |
 | click on the session id | status bar, middle | Sessions modal (as `/sessions`) |
 | click on the workspace mode | header | The conversation's authorised workspaces (as `/workspace`) |
-| click on `skills N` | header or status bar | Refresh and open the gateway skills picker (as `/skills`) |
-| click on `mcp N` | header or status bar | Refresh and open the gateway MCP registry (as `/mcp`) |
-| click on context or token counts | header or status bar | Prompt-cache and context metrics for the latest call, run and session (as `/cache`) |
+| click on **Tools** | header | Grouped Tools, Skills and MCP server choices; opens the same panels as `/tools`, `/skills`, `/mcp` |
+| click on **Docs** / **About** | header, right | Documentation assistant drawer / version and framework links |
+| click on **Menu** | narrow header | Workflow, Model, Docs assistant, Theme, About and Connection status |
+| click on context or token counts | status bar | Prompt-cache and context metrics for the latest call, run and session (as `/cache`) |
 | click on GPU or memory meters | status bar | Gateway host resources (as `/resources`); opening the panel does not unload or change a model |
 | click on `? keys + commands` | status bar | Keys and commands reference (as `/help`) |
 | `Tab` to the header or the status bar, then `←`/`→`, `Enter`/`Space` | header, status bar | Moves between that bar's widgets and opens the one highlighted (reverse video) |
-| click / `Tab`+`→`+`Enter` on the theme name | status bar, right | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores |
+| click / `Tab`+`→`+`Enter` on **Theme** | header, right (or **Menu**) | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores |
 | `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |
 | `Space` (held) | empty prompt | Hold to talk: speak, release to SEND (`/voice space off` turns it off) |
 | `Enter` | empty composer, the status line shows the attention chip (**N waiting for you**, **Automations · M new**, or **Automations · N waiting** on an older gateway) | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
@@ -604,6 +606,7 @@ recovers it.
 | `?` + Enter | empty composer | Open the keys + commands reference (the footer's `? keys + commands`) |
 | `Ctrl+Q` | anywhere | Quit |
 | `Ctrl+C` | anywhere | Clear the current prompt (if any) and arm quit — a second Ctrl+C within 2s quits (with a live run, the quit gate opens; a third press = leave & quit) |
+| click outside | ordinary dialogs | Close without activating the control underneath; approval and user-question steps remain open |
 | `↑↓` + `Enter`/`Space` | pickers | Move + choose — Space confirms too, single-select semantics (theme picker previews live) |
 | `Tab` | anywhere | Move focus (composer ↔ transcript ↔ modal fields) |
 | any character | transcript focused | Return focus to the composer and keep the character — typing is never dropped because focus wandered. `/` opens the command dropdown the same way |
@@ -682,7 +685,7 @@ one-line row with its own `▸ N lines` disclosure.
 The bottom line of the window (the status bar) shows the instruments on
 the left, the folder this session was launched for (`⌂ ~/…`; the
 `--workspace` root, else the current directory) and the session id in the
-middle, the theme on the right, and the
+middle, and the
 `hold Space to talk` hint (`Ctrl+R speak` with the gesture off), and — when a turn's answer came from an
 agent subrun while the wrapper root run was still open on the gateway —
 the discreet `◌ root finalizes on gateway` marker (nothing to do: the
@@ -828,15 +831,34 @@ in an automation's Edit panel marks the row being saved with `…` next to
   (when the `/gpu` meter is on) · `mem N%` (host RAM from the last
   `/resources` fetch — graded on the rounded percent, warn ≥75% / error
   ≥90%; `mem N%*` marks a stale snapshot after a failed refresh; absent
-  when no percent is known) · `skills N` · `mcp N` ·
-  `? keys + commands`, plus theme + gateway host (+ error detail when
-  the connection drops). The key legend lives behind `?` (bare `?` +
+  when no percent is known) ·
+  `? keys + commands` (+ error detail when the connection drops). Tools,
+  Skills and MCP share the header Tools menu; Theme and the signed-in
+  identity/connection menu live at the header's right. The key legend lives behind `?` (bare `?` +
   Enter) and `/help`; the phase/focus teachings live in the composer
   placeholder. When the row is too narrow for every instrument,
   segments drop WHOLE from the right — never `…` fragments.
 - **Screen recovery**: `Ctrl+L` / `/redraw` force-repaints the whole
   frame — recovery from an external terminal clear (Cmd+K), which a
   damage-tracked renderer cannot detect on its own.
+
+## Docs assistant
+
+Open **Docs** (under **Menu** on narrow terminals) or run `/docs`. The drawer
+has its own question field, answer history and **New conversation** action.
+Closing and reopening it preserves the conversation and your coding draft.
+A genuine approval or user-question step takes priority and closes the drawer.
+
+Questions use the same Gateway-hosted `docs-qa@0.1.1:docsqa001` workflow as
+Code web, with the corpus from `/docs/corpus?app=code`. They have a dedicated
+`kind=docs` session and use its server-side history. Your coding task's tools,
+workspace and transcript are not passed to this workflow. Missing documentation
+or a failed run displays an error; **Retry** submits the question again. A
+connection interruption during an existing run follows that same run.
+
+This terminal drawer displays completed answers. It preserves its chat while
+the terminal process is open; native history selection and attachments are
+not provided. The Gateway retains the docs session independently.
 
 ## Caching and context
 

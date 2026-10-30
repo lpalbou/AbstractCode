@@ -3,6 +3,7 @@
 //! All signals are written on the UI thread only — worker threads post
 //! closures through `WakeHandle` (the engine rule).
 
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -86,6 +87,31 @@ impl Workflow {
             format!("{} (gateway default)", self.versioned_label())
         } else {
             self.label()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AccountIdentity {
+    pub user_id: String,
+    pub tenant_id: String,
+    pub error: String,
+}
+impl AccountIdentity {
+    pub fn from_response(v: &Value) -> Self {
+        let p = v.get("principal").unwrap_or(v);
+        Self {
+            user_id: p
+                .get("user_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into(),
+            tenant_id: p
+                .get("tenant_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into(),
+            error: String::new(),
         }
     }
 }
@@ -897,6 +923,10 @@ pub struct SessionTotals {
 
 #[derive(Clone, Copy)]
 pub struct Store {
+    pub account: Signal<AccountIdentity>,
+    pub docs_chat: Signal<crate::docs_chat::DocsChat>,
+    pub docs_open: Signal<bool>,
+    pub docs_draft: Signal<String>,
     pub fold: Signal<Fold>,
     pub phase: Signal<Phase>,
     pub conn: Signal<Conn>,
@@ -1279,6 +1309,10 @@ pub struct Store {
 impl Store {
     pub fn create(cx: Scope) -> Store {
         Store {
+            account: cx.signal(Default::default()),
+            docs_chat: cx.signal(Default::default()),
+            docs_open: cx.signal(false),
+            docs_draft: cx.signal(String::new()),
             fold: cx.signal(Fold::new()),
             phase: cx.signal(Phase::Idle),
             animation: cx.signal(0u8),

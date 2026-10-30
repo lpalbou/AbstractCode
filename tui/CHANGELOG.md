@@ -8,10 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Navbar and footer instruments open their tools.** Workspace mode opens Workspace; skills and MCP
-  counts refresh their panels; context and token counts open cache/usage metrics; GPU and memory meters
-  open Resources; the keys pointer opens Help. Mouse and keyboard activation reuse the same panels as
-  the slash commands, preserve narrow-width layout and return keyboard focus to the composer.
+- **The header groups Tools, Skills and MCP under one Tools menu**, with more spacing
+  between actions and no duplicate capability counts in the footer. Context/tokens
+  still open Cache, GPU/memory open Resources, workspace mode opens Workspace and
+  the keys pointer opens Help. Mouse and keyboard activation share the command panels.
+- **Docs, Theme, About and the account/status menu** occupy the header's right end.
+  Narrow terminals use Menu. Docs uses the existing Gateway documentation workflow in
+  a separate conversation; the account menu uses the Gateway identity and offers
+  connection status, copy user id and confirmed disconnection of this terminal.
+- Ordinary dialogs close on outside click without click-through. Approval and
+  user-question steps remain protected. Focused entity chips remain visible at narrow widths.
 
 - `assets/automation_controls.json` is the kit's file again, byte-identical. AbstractUIC 0067 adds the attention
   badge's glyph and words, which this crate does not draw yet. The `.sha256` pin is updated.

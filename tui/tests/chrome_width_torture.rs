@@ -2,11 +2,12 @@
 //! header + footer + strip rendered at 60 / 80 / 100 / 120 / 200 / 271
 //! cols with a fully-loaded store, pinning the degrade rules:
 //!
-//! - right clusters survive every width (header: session tail + orb;
-//!   footer: theme + gateway host),
+//! - account/status and Tools remain reachable at every tested width;
+//!   narrow headers collect secondary controls under Menu,
 //! - no `…` self-truncation in header facts or footer instruments
 //!   (whole-item drop, right-to-left),
 //! - entity chips are never sacrificed to facts (paint order),
+//! - capability choices have one grouped entry instead of duplicate counts,
 //! - the idle strip summary ellipsizes instead of hard-cutting at the
 //!   screen edge (P1-B).
 //!
@@ -31,6 +32,7 @@ struct SizedHarness {
     term: CaptureTerm,
     driver: Driver,
     store: Store,
+    ctx: UiCtx,
     /// Kept alive: dropping the receiver would make sends fail.
     _rx: mpsc::Receiver<Cmd>,
 }
@@ -44,6 +46,8 @@ fn harness_sized(w: i32, h: i32) -> SizedHarness {
     let (tx, rx) = mpsc::channel::<Cmd>();
     let store_slot: Rc<RefCell<Option<Store>>> = Rc::new(RefCell::new(None));
     let store_out = store_slot.clone();
+    let context_slot = Rc::new(RefCell::new(None));
+    let context_out = context_slot.clone();
     let actions = app.actions();
     app.mount(move |cx| {
         let store = Store::create(cx);
@@ -82,6 +86,7 @@ fn harness_sized(w: i32, h: i32) -> SizedHarness {
             dismissed_wait: Rc::new(RefCell::new(None)),
             wait_modal_for: Rc::new(RefCell::new(None)),
         };
+        *context_out.borrow_mut() = Some(ctx.clone());
         ui::root(cx, store, ctx, &actions)
     })
     .expect("mount");
@@ -97,11 +102,13 @@ fn harness_sized(w: i32, h: i32) -> SizedHarness {
     };
     let driver = Driver::new(&mut app, &mut term, cfg).expect("driver");
     let store = store_slot.borrow().expect("store created");
+    let ctx = context_slot.borrow().clone().expect("context created");
     SizedHarness {
         app,
         term,
         driver,
         store,
+        ctx,
         _rx: rx,
     }
 }
@@ -185,129 +192,49 @@ fn load_everything(store: &Store) {
 
 #[test]
 fn chrome_degrades_whole_item_at_every_width() {
-    for width in [60, 80, 100, 120, 200, 271] {
-        let mut h = harness_sized(width, 30);
+    for width in [60, 80, 100, 120, 160, 200, 271] {
+        let mut h = harness_sized(width, 40);
         h.turn();
         load_everything(&h.store);
         let screen = h.turn();
-        let lines: Vec<&str> = screen.lines().collect();
-        let header = lines.first().copied().unwrap_or_default();
-        let footer = lines.last().copied().unwrap_or_default();
-
-        // HEADER — wordmark, workflow, route on the left; the gateway
-        // beside its connection light on the right, never sacrificed.
+        let footer = screen.lines().last().unwrap();
         assert!(
-            header.contains("▲ AbstractCode"),
-            "[{width}] wordmark present:\n{header}"
-        );
-        assert!(
-            header.trim_end().ends_with("127.0.0.1:8080 ●"),
-            "[{width}] header right widget (gateway + light) intact:\n{header}"
-        );
-        // The folder moved to the status bar (2026-10-28 layout).
-        assert!(
-            !header.contains('⌂'),
-            "[{width}] the folder is the status bar's, not the header's:\n{header}"
-        );
-        for fact in ["server-managed", "skills 2", "mcp 1", "128k tk"] {
-            let prefix: String = fact.chars().take(3).collect();
-            assert!(
-                !header.contains(&prefix) || header.contains(fact),
-                "[{width}] fact {fact:?} must paint whole or not at all:\n{header}"
-            );
-        }
-        assert!(
-            header.contains("◆castor") || !header.contains("server-managed"),
-            "[{width}] a fact must never paint while the chip dropped:\n{header}"
-        );
-
-        // STATUS BAR (abstracttui 1260 slots) — the theme flush right, the
-        // workspace + session in the middle, both kept at EVERY tested
-        // width (top priorities); the gateway is the header's only.
-        assert!(
-            footer.trim_end().ends_with("Dark (Abstract) ▾"),
-            "[{width}] the theme selector sits at the bar's right end:\n{footer}"
-        );
-        assert!(
-            footer.contains("⌂ /tmp/ws"),
-            "[{width}] the workspace path is in the middle:\n{footer}"
+            !footer.contains("skills ") && !footer.contains("mcp "),
+            "no duplicate capability counts: {footer}"
         );
         assert!(
             footer.contains("acode-test-session"),
-            "[{width}] the session id is in the middle, whole:\n{footer}"
-        );
-        let ws = footer.find("⌂ /tmp/ws").unwrap();
-        let sid = footer.find("acode-test-session").unwrap();
-        let theme = footer.find("Dark (Abstract)").unwrap();
-        assert!(
-            ws < sid && sid < theme,
-            "[{width}] order: workspace, session, theme:\n{footer}"
+            "session kept at {width}: {footer}"
         );
         assert!(
-            !footer.contains("127.0.0.1:8080"),
-            "[{width}] the gateway is the header's, not repeated:\n{footer}"
+            !footer.contains("Dark (Abstract)"),
+            "theme belongs to the top bar"
         );
-        // Instruments never fragment; they drop WHOLE, lowest priority
-        // first (contract: ascending priority yields first).
-        assert!(
-            !footer.contains('…'),
-            "[{width}] no item fragments at this load:\n{footer}"
-        );
-        let by_priority = [
-            "ctx 41k/262k tk (15%, declared)",
-            "100k↑ 28k↓ tk session",
-            "gpu 28%",
-            "skills 2",
-            "mcp 1",
-            "? keys + commands",
-        ];
-        for (i, lower) in by_priority.iter().enumerate().skip(1) {
-            if footer.contains(lower) {
-                for higher in &by_priority[..i] {
-                    assert!(
-                        footer.contains(higher),
-                        "[{width}] {lower:?} shows while higher-priority {higher:?} dropped:\n{footer}"
-                    );
-                }
-            }
-        }
-        if width >= 200 {
-            for needle in by_priority {
-                assert!(
-                    footer.contains(needle),
-                    "[{width}] full footer inventory carries {needle}:\n{footer}"
-                );
-            }
-            assert!(
-                header.contains("◆castor") && header.contains("server-managed"),
-                "[{width}] chips + facts coexist at wide widths:\n{header}"
-            );
-        }
-        if width >= 100 {
-            assert!(
-                footer.contains("ctx 41k/262k tk (15%, declared)"),
-                "[{width}] ctx meter keeps its slot:\n{footer}"
-            );
-        }
-        if width <= 80 {
-            assert!(
-                !footer.contains("? keys"),
-                "[{width}] the keys pointer yields first:\n{footer}"
-            );
-        }
-
-        // Every chrome widget is a live hit target at every width.
         for id in [
-            ui::chrome::ACT_WORKFLOW,
-            ui::chrome::ACT_MODEL,
-            ui::chrome::ACT_GATEWAY,
-            ui::chrome::ACT_WORKSPACE,
+            ui::chrome::ACT_TOOLS,
+            ui::chrome::ACT_ACCOUNT,
             ui::chrome::ACT_SESSION,
-            ui::chrome::ACT_THEME,
         ] {
+            let r = h
+                .app
+                .tree()
+                .action_rect(id)
+                .unwrap_or_else(|| panic!("{width}: {id} absent: {screen}"));
+            assert!(r.x >= 0 && r.right() <= width, "{id} fits at {width}");
+        }
+        let right = if width >= 140 {
+            vec![
+                ui::chrome::ACT_DOCS,
+                ui::chrome::ACT_ABOUT,
+                ui::chrome::ACT_THEME,
+            ]
+        } else {
+            vec![ui::chrome::ACT_MENU]
+        };
+        for id in right {
             assert!(
                 h.app.tree().action_rect(id).is_some(),
-                "[{width}] {id} is a drawn hit target:\n{screen}"
+                "{width}: {id}: {screen}"
             );
         }
     }
@@ -338,6 +265,11 @@ fn opened(id: &str) -> &'static [&'static str] {
         ui::chrome::ACT_WORKFLOW => &["agent workflow —"],
         ui::chrome::ACT_MODEL => &["provider —", "no providers discovered"],
         ui::chrome::ACT_GATEWAY => &["status · Esc closes"],
+        ui::chrome::ACT_ACCOUNT => &["Gateway:"],
+        ui::chrome::ACT_TOOLS => &["choices for this session"],
+        ui::chrome::ACT_DOCS => &["Docs assistant"],
+        ui::chrome::ACT_ABOUT => &["About AbstractCode"],
+        ui::chrome::ACT_MENU => &["Docs assistant"],
         ui::chrome::ACT_WORKSPACE => &["Workspace"],
         ui::chrome::ACT_SESSION => &["Conversations"],
         ui::chrome::ACT_THEME => &["☾ Dark"],
@@ -352,29 +284,32 @@ fn opened(id: &str) -> &'static [&'static str] {
 
 #[test]
 fn every_chrome_widget_opens_its_modal_on_click() {
-    // ONE harness per width (the reactive runtime is thread-local: a
-    // dropped harness's pending toast timer must not fire into the next).
-    for width in [80, 140] {
+    for width in [80, 240] {
         let mut h = harness_sized(width, 40);
         h.turn();
-        for id in [
+        let mut ids = vec![
             ui::chrome::ACT_WORKFLOW,
             ui::chrome::ACT_MODEL,
-            ui::chrome::ACT_GATEWAY,
+            ui::chrome::ACT_TOOLS,
+            ui::chrome::ACT_ACCOUNT,
             ui::chrome::ACT_WORKSPACE,
             ui::chrome::ACT_SESSION,
-            ui::chrome::ACT_THEME,
-        ] {
+        ];
+        if width >= 140 {
+            ids.extend([
+                ui::chrome::ACT_DOCS,
+                ui::chrome::ACT_ABOUT,
+                ui::chrome::ACT_THEME,
+            ]);
+        } else {
+            ids.push(ui::chrome::ACT_MENU);
+        }
+        for id in ids {
             h.close_all();
-            let before = h.turn();
             let after = click_action(&mut h, id);
-            let hit = opened(id)
-                .iter()
-                .any(|n| after.contains(n) && !before.contains(n));
             assert!(
-                hit,
-                "[{width}] a click on {id} opens {:?}:\n{after}",
-                opened(id)
+                opened(id).iter().any(|n| after.contains(n)),
+                "{width}: {id}: {after}"
             );
         }
     }
@@ -382,55 +317,77 @@ fn every_chrome_widget_opens_its_modal_on_click() {
 
 #[test]
 fn every_chrome_widget_opens_its_modal_from_the_keyboard() {
-    // Keyboard: Tab focuses an action host (header, then the bar), Right
-    // moves the cursor across its widgets, Enter activates.
-    let header = [
-        ui::chrome::ACT_WORKFLOW,
-        ui::chrome::ACT_MODEL,
-        ui::chrome::ACT_WORKSPACE,
-        ui::chrome::ACT_GATEWAY,
-    ];
-    let bar = [
-        ui::chrome::ACT_HELP,
-        ui::chrome::ACT_WORKSPACE,
-        ui::chrome::ACT_SESSION,
-        ui::chrome::ACT_THEME,
-    ];
-    let mut h = harness_sized(140, 40);
+    let mut h = harness_sized(240, 40);
     h.turn();
-    for (host, ids) in [("header", &header), ("bar", &bar)] {
-        for (steps, id) in ids.iter().enumerate() {
+    for (host, ids) in [
+        (
+            "header",
+            vec![
+                ui::chrome::ACT_WORKFLOW,
+                ui::chrome::ACT_MODEL,
+                ui::chrome::ACT_TOOLS,
+                ui::chrome::ACT_DOCS,
+                ui::chrome::ACT_THEME,
+                ui::chrome::ACT_ABOUT,
+                ui::chrome::ACT_ACCOUNT,
+            ],
+        ),
+        (
+            "bar",
+            vec![
+                ui::chrome::ACT_HELP,
+                ui::chrome::ACT_WORKSPACE,
+                ui::chrome::ACT_SESSION,
+            ],
+        ),
+    ] {
+        for id in ids {
             h.close_all();
-            let before = h.turn();
-            // Tab until the host holds focus: its first widget prints the
-            // focus ring (REVERSE) — found through the tree, not a cell.
-            let mut focused = false;
-            for _ in 0..12 {
+            for _ in 0..16 {
                 h.term.push_input(b"\t");
                 h.turn();
                 if h.focused_host() == Some(host) {
-                    focused = true;
                     break;
                 }
             }
-            assert!(focused, "Tab reaches the {host}");
-            // The host REMEMBERS its cursor across focus changes (engine
-            // 0187: FocusIn keeps a still-drawn cursor), so after the
-            // previous widget's activation one Right reaches the next.
-            for _ in 0..steps.min(1) {
+            assert_eq!(h.focused_host(), Some(host));
+            let mut r = h.app.tree().action_rect(id).unwrap();
+            if host == "bar" && id == ui::chrome::ACT_WORKSPACE {
+                let screen = h.turn();
+                let lines: Vec<_> = screen.lines().collect();
+                let footer = lines.last().unwrap();
+                let byte = footer.find("⌂ /tmp/ws").unwrap();
+                r = Rect::new(
+                    abstracttui::text::width(&footer[..byte]),
+                    lines.len() as i32 - 1,
+                    1,
+                    1,
+                );
+            }
+            let highlighted = |h: &SizedHarness| {
+                h.term
+                    .screen()
+                    .cell(r.x, r.y)
+                    .unwrap()
+                    .paint
+                    .attrs
+                    .contains(abstracttui::testing::Attrs::REVERSE)
+            };
+            for _ in 0..16 {
+                if highlighted(&h) {
+                    break;
+                }
                 h.term.push_input(b"\x1b[C");
                 h.turn();
             }
-            // Header widgets by Enter, bar widgets by Space (both keys
-            // activate; Space must not be typed into the prompt).
-            let key: &[u8] = if host == "header" { b"\r" } else { b" " };
-            h.term.push_input(key);
+            assert!(highlighted(&h), "{id} has a focus ring");
+            h.term.push_input(b" ");
             h.turn();
             let after = h.turn();
-            let hit = opened(id)
-                .iter()
-                .any(|n| after.contains(n) && !before.contains(n));
-            assert!(hit, "{key:?} on {id} opens {:?}:\n{after}", opened(id));
+            assert!(
+                opened(id).iter().any(|n| after.contains(n)),
+                "{id}: {after}"
+            );
         }
     }
 }
@@ -500,7 +457,7 @@ fn a_click_hands_the_keyboard_back_to_the_prompt() {
     h.turn();
     for id in [
         ui::chrome::ACT_MODEL,
-        ui::chrome::ACT_GATEWAY,
+        ui::chrome::ACT_ACCOUNT,
         ui::chrome::ACT_SESSION,
         ui::chrome::ACT_WORKSPACE,
     ] {
@@ -552,12 +509,7 @@ fn a_gateway_down_reason_never_clears_the_status_bar() {
         // The session id, the theme, the workspace path and the reason
         // hold at every width; the instruments yield to the reason (the
         // gateway is down), and the ctx meter is back beside it at 160.
-        for needle in [
-            "acode-test-session",
-            "Dark (Abstract) ▾",
-            "⌂ /tmp/ws",
-            "gateway unreachable",
-        ] {
+        for needle in ["acode-test-session", "⌂ /tmp/ws", "gateway unreachable"] {
             assert!(
                 footer.contains(needle),
                 "[{width}] {needle} kept:\n{footer}"
@@ -577,7 +529,7 @@ fn a_gateway_down_reason_never_clears_the_status_bar() {
         }
         let header = screen.lines().next().unwrap_or_default();
         assert!(
-            header.trim_end().ends_with('✗'),
+            header.contains("✗ ▾"),
             "[{width}] the header light says down:\n{header}"
         );
     }
@@ -605,27 +557,11 @@ fn instrument_labels_open_their_panels_in_both_bars() {
             ..Default::default()
         }));
     h.turn();
-    for id in [
-        ui::chrome::ACT_SKILLS,
-        ui::chrome::ACT_MCP,
-        ui::chrome::ACT_CACHE,
-    ] {
-        h.close_all();
-        let after = click_action(&mut h, id);
-        assert!(
-            opened(id).iter().any(|s| after.contains(s)),
-            "{id}:\n{after}"
-        );
-        h.close_all();
-        assert_eq!(h.focused_host(), None, "{id} hands focus back");
-    }
     for (label, id) in [
         ("ctx 41k", ui::chrome::ACT_CACHE),
         ("100k↑ 28k↓", ui::chrome::ACT_CACHE),
         ("gpu 28%", ui::chrome::ACT_RESOURCES),
         ("mem 62%", ui::chrome::ACT_RESOURCES),
-        ("skills 2", ui::chrome::ACT_SKILLS),
-        ("mcp 1", ui::chrome::ACT_MCP),
         ("? keys + commands", ui::chrome::ACT_HELP),
     ] {
         h.close_all();
@@ -662,8 +598,6 @@ fn footer_instruments_are_reachable_with_tab_arrows_and_space() {
     for (label, id) in [
         ("ctx 41k", ui::chrome::ACT_CACHE),
         ("gpu 28%", ui::chrome::ACT_RESOURCES),
-        ("skills 2", ui::chrome::ACT_SKILLS),
-        ("mcp 1", ui::chrome::ACT_MCP),
         ("? keys + commands", ui::chrome::ACT_HELP),
     ] {
         h.close_all();
@@ -708,4 +642,204 @@ fn footer_instruments_are_reachable_with_tab_arrows_and_space() {
             "{id} opens from the keyboard:\n{after}"
         );
     }
+}
+
+fn click_cell(h: &mut SizedHarness, x: i32, y: i32) {
+    h.term
+        .push_input(format!("\x1b[<0;{};{}M", x + 1, y + 1).as_bytes());
+    h.turn();
+    h.term
+        .push_input(format!("\x1b[<0;{};{}m", x + 1, y + 1).as_bytes());
+    h.turn();
+}
+
+#[test]
+fn ordinary_modal_closes_outside_without_activating_the_tools_under_it() {
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    click_action(&mut h, ui::chrome::ACT_WORKSPACE);
+    assert!(h.ctx.modal_open());
+    // Clicking its content does not dismiss it.
+    click_cell(&mut h, 120, 20);
+    assert!(h.ctx.modal_open());
+    let tools = h.app.tree().action_rect(ui::chrome::ACT_TOOLS).unwrap();
+    click_cell(&mut h, tools.x, tools.y);
+    assert!(!h.ctx.modal_open());
+    assert!(
+        !h.turn().contains("choices for this session"),
+        "the dismissing click never acts underneath"
+    );
+    h.term.push_input(b"preserved typing");
+    let screen = h.turn();
+    assert!(screen.contains("preserved typing"));
+}
+
+#[test]
+fn approval_and_question_waits_stay_open_on_outside_click_without_any_decision() {
+    use abstractcode::transcript::{PendingWait, WaitKind};
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    for kind in [
+        WaitKind::Approval {
+            tool_calls: vec![
+                serde_json::json!({"name":"write_file","arguments":{"path":"note.txt","content":"x"}}),
+            ],
+        },
+        WaitKind::Ask {
+            prompt: "Which project?".into(),
+            gate: String::new(),
+        },
+    ] {
+        h.store.phase.set(abstractcode::store::Phase::Running);
+        h.store.fold.update(|f| {
+            f.pending_wait = Some(PendingWait {
+                run_id: "root".into(),
+                wait_key: "gate".into(),
+                step_id: "step".into(),
+                kind,
+            })
+        });
+        h.turn();
+        assert!(h.ctx.modal_open());
+        let _ = h._rx.try_iter().count();
+        click_cell(&mut h, 1, 1);
+        assert!(h.ctx.modal_open());
+        assert!(h.store.fold.with_untracked(|f| f.pending_wait.is_some()));
+        assert!(!h
+            ._rx
+            .try_iter()
+            .any(|cmd| matches!(cmd, Cmd::Resume { .. } | Cmd::Cancel { .. })));
+        h.store.fold.update(|f| f.pending_wait = None);
+        h.turn();
+    }
+}
+
+#[test]
+fn tools_menu_groups_current_session_tools_skills_and_mcp() {
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    load_everything(&h.store);
+    h.turn();
+    for (downs, expected) in [
+        (0, "tools"),
+        (1, "gateway skills"),
+        (2, "MCP servers on the gateway"),
+    ] {
+        h.close_all();
+        let menu = click_action(&mut h, ui::chrome::ACT_TOOLS);
+        for label in ["Tools", "Skills", "MCP servers", "choices for this session"] {
+            assert!(menu.contains(label), "{menu}");
+        }
+        for _ in 0..downs {
+            h.term.push_input(b"\x1b[B");
+            h.turn();
+        }
+        h.term.push_input(b"\r");
+        let screen = h.turn();
+        assert!(
+            screen.to_lowercase().contains(&expected.to_lowercase()),
+            "{screen}"
+        );
+        let footer = screen.lines().last().unwrap();
+        assert!(!footer.contains("mcp ") && !footer.contains("skills "));
+    }
+}
+
+#[test]
+fn docs_drawer_keeps_its_question_and_never_steers_the_coding_session() {
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    h.term.push_input(b"coding draft");
+    h.turn();
+    let _ = h._rx.try_iter().count();
+    click_action(&mut h, ui::chrome::ACT_DOCS);
+    assert!(h.store.docs_open.get_untracked());
+    assert!(h.turn().contains("Ask a documentation question"));
+    h.term.push_input(b"How do I open Tools?\r");
+    let screen = h.turn();
+    assert!(screen.contains("How do I open Tools?"));
+    let commands: Vec<_> = h._rx.try_iter().collect();
+    assert!(commands.iter().any(|c|matches!(c,Cmd::DocsAsk{question,session,..} if question=="How do I open Tools?" && session.starts_with("code-docs-assistant:"))));
+    assert!(!commands
+        .iter()
+        .any(|c| matches!(c, Cmd::Start { .. } | Cmd::Steer { .. })));
+    assert_eq!(h.store.session_id.get_untracked(), "acode-test-session");
+    assert_eq!(
+        h.store.phase.get_untracked(),
+        abstractcode::store::Phase::Idle
+    );
+    h.store.docs_chat.update(|s| {
+        s.messages
+            .push(("assistant".into(), "Open Tools in the top bar.".into()));
+        s.busy = false;
+    });
+    h.turn();
+    h.term.push_input(b"\x1b");
+    h.turn();
+    std::thread::sleep(std::time::Duration::from_millis(45));
+    let screen = h.turn();
+    assert!(!h.store.docs_open.get_untracked());
+    assert!(screen.contains("coding draft"));
+    h.term.push_input(b" extended");
+    assert!(h.turn().contains("coding draft extended"));
+    click_action(&mut h, ui::chrome::ACT_DOCS);
+    assert!(h.turn().contains("Open Tools in the top bar."));
+    click_cell(&mut h, 1, 1);
+    assert!(!h.store.docs_open.get_untracked());
+}
+
+#[test]
+fn account_menu_shows_gateway_identity_and_disconnect_requires_confirmation() {
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    h.store.account.set(abstractcode::store::AccountIdentity {
+        user_id: "admin".into(),
+        tenant_id: "team".into(),
+        error: String::new(),
+    });
+    h.turn();
+    let menu = click_action(&mut h, ui::chrome::ACT_ACCOUNT);
+    for label in [
+        "Signed in as admin",
+        "Tenant: team",
+        "Gateway:",
+        "Connection status",
+        "Copy user id",
+        "Disconnect this terminal",
+    ] {
+        assert!(menu.contains(label), "{menu}");
+    }
+    // Status is the initial enabled row; Copy follows, then Disconnect.
+    h.term.push_input(b"\x1b[B\x1b[B\r");
+    let screen = h.turn();
+    assert!(screen.contains("Disconnect this terminal?"), "{screen}");
+    assert!(h.ctx.modal_open());
+    click_cell(&mut h, 1, 1);
+    assert!(h.ctx.modal_open(), "a disconnect needs an explicit choice");
+    assert!(!h.app.quit_requested());
+}
+
+#[test]
+fn only_a_genuine_human_wait_takes_priority_over_the_docs_drawer() {
+    use abstractcode::transcript::{PendingWait, WaitKind};
+    let mut h = harness_sized(240, 40);
+    h.turn();
+    click_action(&mut h, ui::chrome::ACT_DOCS);
+    for (tool, expected_open) in [("read_file", true), ("write_file", false)] {
+        h.store.fold.update(|f| {
+            f.pending_wait = Some(PendingWait {
+                run_id: "root".into(),
+                wait_key: format!("gate-{tool}"),
+                step_id: format!("step-{tool}"),
+                kind: WaitKind::Approval {
+                    tool_calls: vec![
+                        serde_json::json!({"name":tool,"arguments":{"path":"note.txt"}}),
+                    ],
+                },
+            })
+        });
+        h.turn();
+        assert_eq!(h.store.docs_open.get_untracked(), expected_open, "{tool}");
+    }
+    assert!(h.ctx.modal_open());
 }

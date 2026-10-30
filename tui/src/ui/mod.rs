@@ -9,6 +9,7 @@ pub mod automations_view;
 pub mod cards;
 pub mod chrome;
 pub mod conversations_view;
+pub mod docs_assistant;
 pub mod entity_actions;
 pub mod entity_modals;
 pub mod goal;
@@ -29,6 +30,7 @@ pub mod splash;
 pub mod stance;
 pub mod theme_menu;
 pub mod thinking;
+pub mod top_bar;
 pub mod transcript_view;
 pub mod voice_view;
 pub mod workspace_view;
@@ -171,6 +173,21 @@ impl UiCtx {
     /// swallowed every key while the new modal painted over it: a
     /// visible, dead picker (live 2026-07-21, /model stage 2).
     pub fn open_modal(&self, cx: Scope, size: Size, build: impl FnOnce(Scope) -> View) {
+        self.open_modal_policy(cx, size, true, build);
+    }
+
+    /// Approval/question steps require an explicit decision or deferral.
+    pub fn open_blocking_modal(&self, cx: Scope, size: Size, build: impl FnOnce(Scope) -> View) {
+        self.open_modal_policy(cx, size, false, build);
+    }
+
+    fn open_modal_policy(
+        &self,
+        cx: Scope,
+        size: Size,
+        dismiss_outside: bool,
+        build: impl FnOnce(Scope) -> View,
+    ) {
         // Take in its own statement (RefMut must not live across retire).
         let replaced = self.modal.borrow_mut().take();
         if let Some(old) = replaced {
@@ -181,6 +198,15 @@ impl UiCtx {
             self.wait_modal_for.borrow_mut().take();
         }
         let modal = Modal::open(&self.overlays, cx, current_viewport(), size, build);
+        if dismiss_outside {
+            let ctx = self.clone();
+            let epoch = self.modal_epoch.get_untracked().wrapping_add(1);
+            self.overlays.on_outside_press(modal.layer(), move || {
+                if ctx.modal_epoch.get_untracked() == epoch {
+                    ctx.close_modal();
+                }
+            });
+        }
         *self.modal.borrow_mut() = Some(modal);
         // Select mode stays ON across modals since abstracttui 0.2.8
         // (our first-app/0285, fixed at the engine): the selection layer
@@ -205,6 +231,7 @@ impl UiCtx {
 }
 
 pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Actions) -> View {
+    docs_assistant::install(cx, store, &ctx);
     let theme = use_theme(cx);
     let spin = cx.signal(0u64);
     // Engine follow-tail (0.2.0): the Scroll pins to the bottom while
@@ -231,7 +258,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         let ctx = ctx.clone();
         cx.memo(move || {
             let _ = ctx.modal_epoch.get();
-            ctx.modal_open() || stance_mode.get() != stance::OFF
+            ctx.modal_open() || store.docs_open.get() || stance_mode.get() != stance::OFF
         })
     };
     let splash_visible = cx.memo(move || {
@@ -1335,7 +1362,14 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
     match id {
         chrome::ACT_WORKFLOW => open_workflow(cx, store, ctx),
         chrome::ACT_MODEL => modals::open_model_picker(cx, store, ctx),
-        chrome::ACT_GATEWAY => open_status(cx, store, ctx),
+        chrome::ACT_GATEWAY | chrome::ACT_CONNECTION => open_status(cx, store, ctx),
+        chrome::ACT_DOCS => {
+            store.docs_open.update(|open| *open = !*open);
+        }
+        chrome::ACT_ABOUT => {
+            ctx.send(Cmd::LoadCapabilities);
+            modals::open_about(cx, store, ctx);
+        }
         chrome::ACT_WORKSPACE => {
             rail_view::open_settings(cx, store, ctx, Some(crate::rail::Panel::Workspace))
         }
@@ -1362,6 +1396,7 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
 fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_mode: Signal<u8>) {
     match cmd {
         Command::Help => modals::open_help(cx, ctx),
+        Command::Docs => { chrome_action(cx,store,ctx,chrome::ACT_DOCS); },
         Command::About => {
             // Gateway package versions come from the capabilities probe;
             // refresh it so the modal fills in live (rows are reactive).
@@ -2965,6 +3000,7 @@ fn wire_wait_modals(cx: Scope, store: Store, ctx: UiCtx) {
 /// `open_modal` starts by closing the previous modal, which clears the
 /// marker (write-before-open would be undone immediately).
 pub fn open_wait_modal(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
+    store.docs_open.set(false);
     match &wait.kind {
         WaitKind::Approval { .. } => modals::open_approval(cx, store, ctx, wait.clone()),
         WaitKind::Ask { .. } => modals::open_ask(cx, store, ctx, wait.clone()),

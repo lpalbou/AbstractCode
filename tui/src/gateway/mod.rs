@@ -8,6 +8,7 @@
 //! This client lives on the worker thread; the UI never blocks on HTTP.
 
 pub mod automations;
+pub mod docs;
 pub mod entities;
 pub mod gpu;
 pub mod me_events;
@@ -338,6 +339,10 @@ impl GatewayClient {
             agent,
             stream_agent,
         }
+    }
+
+    pub fn account_identity(&self) -> GwResult<Value> {
+        self.get_json("/me")
     }
 
     fn url(&self, path: &str) -> String {

@@ -2415,14 +2415,13 @@ fn the_theme_name_is_a_dropdown_with_live_preview() {
     let mut h = harness_sized(Size::new(140, 40));
     h.turn();
     let screen = h.turn();
-    let last_row = screen.lines().count() - 1;
-    let label_col = |screen: &str| -> usize {
-        let last = screen.lines().last().unwrap_or_default();
-        let b = last
-            .find("Dark (Abstract) ▾")
-            .unwrap_or_else(|| panic!("the trigger:\n{last}"));
-        last[..b].chars().count()
-    };
+    let trigger = h
+        .app
+        .tree()
+        .action_rect(abstractcode::ui::chrome::ACT_THEME)
+        .expect("theme trigger");
+    let last_row = trigger.y as usize;
+    let label_col = |_screen: &str| trigger.x as usize;
     let col = label_col(&screen);
     let mouse = |h: &mut Harness, button: u32, col: usize, row: usize| {
         h.term
@@ -2504,11 +2503,14 @@ fn the_theme_name_is_a_dropdown_with_live_preview() {
 fn quitting_with_the_theme_dropdown_open_does_not_panic() {
     let mut h = harness_sized(Size::new(140, 40));
     h.turn();
-    let screen = h.turn();
-    let last = screen.lines().last().unwrap_or_default().to_string();
-    let b = last.find("Dark (Abstract) ▾").expect("the trigger");
-    let col = last[..b].chars().count() + 2;
-    let row = screen.lines().count();
+    h.turn();
+    let trigger = h
+        .app
+        .tree()
+        .action_rect(abstractcode::ui::chrome::ACT_THEME)
+        .expect("theme trigger");
+    let col = trigger.x as usize + 2;
+    let row = trigger.y as usize + 1;
     h.term
         .push_input(format!("\x1b[<0;{};{row}M\x1b[<0;{};{row}m", col + 1, col + 1).as_bytes());
     h.turn();
@@ -3679,7 +3681,7 @@ fn header_names_what_gateway_defaults_resolves_to() {
     });
     let screen = h.turn();
     assert!(
-        screen.contains("gateway defaults (lmstudio · ornith-2)"),
+        screen.contains("lmstudio · ornith-2"),
         "served model wins, provider kept:\n{screen}"
     );
 }
@@ -3693,14 +3695,14 @@ fn help_modal_opens_and_closes() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/sessions [id]"),
+        screen.contains("▲ AbstractCode v"),
         "help modal lists commands:\n{screen}"
     );
     h.press_escape();
     h.turn(); // deferred close lands
     let screen = h.turn();
     assert!(
-        !screen.contains("/sessions [id]"),
+        !screen.contains("▲ AbstractCode v"),
         "help closed on Esc:\n{screen}"
     );
 }
@@ -4181,7 +4183,7 @@ fn slash_completion_offers_partials_and_never_hijacks_prompts() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/sessions [id]"),
+        screen.contains("▲ AbstractCode v"),
         "first Enter submitted the command (help open):\n{screen}"
     );
     h.press_escape();
@@ -6700,8 +6702,8 @@ fn header_carries_cockpit_facts_and_footer_carries_instruments() {
         screen.lines().last().unwrap_or_default()
     );
     assert!(
-        chrome.contains("skills 2") && (!chrome.contains("mcp") || chrome.contains("mcp 1")),
-        "capability counts render when nonzero:\n{screen}"
+        chrome.contains("Tools ▾") && !chrome.contains("skills 2") && !chrome.contains("mcp 1"),
+        "capabilities are grouped instead of repeated:\n{screen}"
     );
     assert!(
         screen.contains("100k↑ 28k↓ tk session"),
@@ -7071,7 +7073,7 @@ fn question_mark_opens_the_keys_reference() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/sessions [id]"),
+        screen.contains("▲ AbstractCode v"),
         "`?` opens the commands+keys reference:\n{screen}"
     );
     assert!(
@@ -7292,9 +7294,7 @@ fn status_bar_drops_whole_segments_never_self_ellipsis() {
     // The middle (workspace + session id) and the theme are never
     // sacrificed to the instruments.
     assert!(
-        footer.contains("acode-test-session")
-            && footer.contains("⌂ /tmp/ws")
-            && footer.trim_end().ends_with("Dark (Abstract) ▾"),
+        footer.contains("acode-test-session") && footer.contains("⌂ /tmp/ws"),
         "workspace, session id and theme survive:\n{footer}"
     );
 }
@@ -7304,7 +7304,7 @@ fn header_facts_drop_whole_before_workflow_and_route() {
     // HDR-1 degrade rule: when the middle span tightens, cockpit FACTS
     // drop whole (right-to-left) before workflow/route lose a char —
     // and never as `…` fragments.
-    let mut h = harness();
+    let mut h = harness_sized(Size::new(260, 40));
     h.turn();
     h.store
         .selected_skills
@@ -7350,7 +7350,7 @@ fn header_facts_drop_whole_before_workflow_and_route() {
     );
     // Gateway + orb keep the right edge.
     assert!(
-        header.contains("127.0.0.1:8080"),
+        header.contains("Account"),
         "the gateway survives on the right:\n{header}"
     );
 }
@@ -7392,7 +7392,7 @@ fn ctrl_l_redraws_even_with_a_modal_open() {
         before = h.turn();
     }
     assert!(
-        before.contains("/sessions [id]"),
+        before.contains("▲ AbstractCode v"),
         "help modal is up:\n{before}"
     );
     let settled = h
@@ -7415,7 +7415,7 @@ fn ctrl_l_redraws_even_with_a_modal_open() {
     let after = h.turn();
     assert_eq!(before, after, "redraw never changes the scene (modal kept)");
     assert!(
-        after.contains("/sessions [id]"),
+        after.contains("▲ AbstractCode v"),
         "the modal survives the redraw:\n{after}"
     );
 }
