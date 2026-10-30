@@ -1,0 +1,32 @@
+ ▲ AbstractCode   no workflow yet   ·   gateway defaults   ·   server-managed          Tools ▾   Menu ▾   ◎ Account ● ▾ 
+                                                                                                                      █ 
+ ✗                                                                                                                    █ 
+                                                                                                                      █ 
+    gateway skills — 48 available · 0 attached                                                                        █ 
+                                                                                                                      █ 
+    [ ] skill-35                                                                                            Attach ▏  █ 
+ ·  [ ] skill-36                                                                                            Attach ▏  █ 
+    [ ] skill-37                                                                                            Attach ▏  █ 
+    [ ] skill-38                                                                                            Attach ▏  █ 
+    [ ] skill-39                                                                                            Attach ▏  █ 
+    [ ] skill-40                                                                                            Attach ▏  █ 
+    [ ] skill-41                                                                                            Attach ▏  █ 
+    [ ] skill-42                                                                                            Attach ▏  █ 
+    [ ] skill-43                                                                                            Attach ▏  █ 
+    [ ] skill-44                                                                                            Attach ▏  █ 
+    [ ] skill-45                                                                                            Attach █  █ 
+    [ ] skill-46                                                                                            Attach █  █ 
+    [ ] skill-47                                                                                            Attach █  █ 
+                                                                                                                      █ 
+    skill-00 · Adopted · Not attached                                                                                 █ 
+                                                                                                                      █ 
+    Native description 00.                                                                                            █ 
+                                                                                                                      █ 
+    Description tail 00.                                                                                              █ 
+                                                                                                                      █ 
+                                                                                                                      █ 
+    ↑↓/PgUp/PgDn browse · wheel scroll · space switch · Enter/Esc close                                               █ 
+                                                                                                                        
+ s                                                                                                                      
+❯ ▐  describe a task — Enter sends · Ctrl+J newline · /help                                                            ▌
+ ? keys + commands                               skills-native-fixture                               hold Space to talk 

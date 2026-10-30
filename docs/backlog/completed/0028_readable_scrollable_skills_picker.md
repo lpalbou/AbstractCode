@@ -1,6 +1,7 @@
 # 0028 — Larger, readable Skills picker with mouse scrolling
 
-- Status: planned
+- Status: completed
+- Completed: 2026-10-30
 - Created: 2026-10-30
 - Area: AbstractCode TUI
 - Work-item id: abstractcode-0028
@@ -25,3 +26,21 @@ Verify long and changing catalogs, mouse wheel in both directions, scrollbar and
 pointer selection, keyboard paging, dark/light rendering and narrow terminals.
 Retain loading/empty/error feedback. Run affected and full terminal checks, build
 and install locally without restarting a running user session.
+
+## Completion report
+
+Implemented in f4a207f and c0d6b7d: a viewport-clamped 128×42 picker using the
+engine List, separate scrollable details, explicit mouse Attach/Detach, ordinary
+wheel/scrollbar/paging behavior and complete multiline descriptions from discovery.
+Selection and scrolling never attach; Space, Enter/Escape, blocked trust checks,
+preference persistence and run propagation retain their contracts.
+
+The pinned clean-source full suite passes 1221 tests (23 existing ignored), Clippy
+with warnings denied and formatting pass. Dark/light captures inspected; real
+keyboard/mouse tests cover 80×24 through 180×60, scroll in both directions, drag to
+the tail, independent detail scrolling, catalog insertion identity and blocked
+attachment. Native installed-binary PTY check passed with isolated settings and
+zero run starts. Atomically installed locally; no running session restart or release.
+
+[Review, screenshots and receipts](../../../design/skills-picker-0028/REVIEW.md).
+No additional follow-up or ADR change required.

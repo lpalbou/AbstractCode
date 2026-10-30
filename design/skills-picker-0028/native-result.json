@@ -1,0 +1,12 @@
+{
+  "binary": "/Users/albou/.cargo/bin/abstractcode",
+  "wheel_both_directions_headless": true,
+  "native_wheel_down": true,
+  "native_tail_reachable": true,
+  "pointer_attach": true,
+  "multiline_description": true,
+  "isolated_preferences": true,
+  "exit_code": 0,
+  "run_starts": 0,
+  "request_count": 25
+}

@@ -1848,14 +1848,10 @@ fn open_model_stage(cx: Scope, store: Store, ctx: &UiCtx, provider: crate::store
 // Legacy windowed rows (new interactive pickers use the engine List)
 // ---------------------------------------------------------------------------
 //
-// A hand-rolled row surface instead of `List`/`Scroll`: multi-select needs
-// live checkbox re-render on toggle, and `List::on_select` fires on plain
-// arrow movement BY DESIGN (0.2.0 kept it as the selection-changed
-// notification; the new `on_activate` fires on Enter AND Space, so a
-// List-based multi-select could not tell Space-toggles from Enter-closes
-// either) — a toggle-on-move list would flip checkboxes while browsing.
-// Here the modal ROOT owns focus + keys; rows are pure draws windowed by
-// a cursor signal.
+// Retained by older informational surfaces that paint cursor-windowed rows.
+// Interactive pickers such as Tools and Skills use the engine List instead,
+// with unbound activation keys handled by their modal: pointer scrolling and
+// selection stay in the shared widget, while explicit actions change state.
 
 /// The state marker in front of a row.
 ///
