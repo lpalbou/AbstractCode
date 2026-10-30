@@ -176,7 +176,7 @@ pub fn open(cx: Scope, store: Store, ctx: &UiCtx) {
         if size.h >= 16 {
             root = root.child(dyn_view_scoped(
                 LayoutStyle::default()
-                    .height(Dimension::Cells(if size.h >= 24 { 6 } else { 3 }))
+                    .height(Dimension::Percent(0.4))
                     .shrink(0.0),
                 move |scx| {
                     let catalog = store.skills_catalog.get();

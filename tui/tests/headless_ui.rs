@@ -2769,7 +2769,10 @@ mod skills_picker_readability {
             let mut h = harness_sized(Size::new(180, 60));
             abstracttui::app::set_theme_by_id(theme);
             let screen = open(&mut h, 40);
-            assert!(rows(&screen).len() >= 25, "larger list: {screen}");
+            assert!(
+                rows(&screen).len() >= 15,
+                "scrollable list beside the larger detail pane: {screen}"
+            );
             let (x, y) = point(&screen, "[ ] skill-00");
             let (action_x, _) = point(&screen, "Attach");
             assert!(
