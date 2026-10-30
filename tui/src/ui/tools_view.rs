@@ -277,9 +277,11 @@ pub fn open(cx: Scope, store: Store, ctx: &UiCtx) {
             let detail = match rows.get(picker.cursor.get()) {
                 Some(Target::Tool(n)) => {
                     let tool = tools.iter().find(|t| &t.name == n).expect("row from inventory");
-                    let mut text = format!("**{n}** — {}", tool.description);
-                    if tool.served_disabled { text.push_str(&format!("\n\nUnavailable on this Gateway. {}", tool.enable_gate)); }
-                    if let Some(sb) = &tool.sandbox { text.push_str(&format!("\n\nCommand sandbox: {}", sb.label)); }
+                    let mut text = format!("**{n}**");
+                    // Availability and confinement matter before a long tool description.
+                    if tool.served_disabled { text.push_str(&format!("\nUnavailable on this Gateway. {}", tool.enable_gate)); }
+                    if let Some(sb) = &tool.sandbox { text.push_str(&format!("\nCommand sandbox: {}", sb.label)); }
+                    text.push_str(&format!("\n\n{}", tool.description));
                     text
                 }
                 Some(Target::Category(c)) => format!("**{}** — Set the category's mode below, or expand to adjust individual tools. Gateway restrictions apply.", if c.is_empty() { "Other" } else { c }),

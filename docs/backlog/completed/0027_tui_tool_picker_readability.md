@@ -40,16 +40,20 @@ cannot grant a Gateway-disabled tool.
 
 Tool rows use a visible tree guide with indented status/name, semantic Off/Ask/Auto
 ink, neutral tool names and neutral selection background. Full descriptions,
-sandbox labels and Gateway enable gates remain in the selected detail pane. The
+sandbox labels and Gateway enable gates appear before long descriptions in the
+selected detail pane. The
 modal is bounded to116columns/34rows; compact keyboard help fits80columns and uses
 readable foreground instead of decoration ink. No new engine API or dependency.
 
-Validation: all231 enabled existing headless UI tests plus4 new keyboard/mouse/
-render tests passed (4 existing tests ignored), with dark/light semantic-colour
+Validation: the clean committed-source full Code all-target suite passed1208 tests
+with23 existing tests ignored. This includes231 existing headless UI tests and4
+new keyboard/mouse/render tests, with dark/light semantic-colour
 and neutral-name assertions,80/120column mouse expansion, grouping, collapsed
 reopening, inventory insertion selection, category/individual policy preservation,
 Gateway gates, long-list scrolling and actual run-start allowlist/pin propagation.
-Clippy with warnings denied, scoped formatting and diff checks passed. Reviewed
+Existing tool-mode and sandbox screenshot tests were adapted to expand categories
+and select a tool before asserting its mode or sandbox details. All-target Clippy
+with warnings denied, scoped formatting and diff checks passed. Reviewed
 actual exported dark/light SVG-to-PNG captures. Evidence is in
 `/tmp/code-tools-0027-tests.log` and `/tmp/code-tools-0027-captures/` for this session.
 Local binary installation is coordinated by the parent task to avoid overwriting

@@ -621,8 +621,21 @@ fn tool_cards_show_the_gateway_sandbox_state() {
         );
         h.esc();
         let screen = h.command("/tools");
+        assert!(
+            screen.contains("▸ system") && !screen.contains("execute_command"),
+            "categories start folded:\n{screen}"
+        );
+        h.keys(b"\x1b[B"); // system category
+        h.keys(b"\r"); // expand
+        let screen = h.keys(b"\x1b[B"); // execute_command
         h.shot("tools-modal-sandbox-state");
-        h.assert_rows(&screen, &["[Sandboxed to this run's workspaces]"]);
+        h.assert_rows(
+            &screen,
+            &[
+                "execute_command",
+                "Command sandbox: Sandboxed to this run's workspaces",
+            ],
+        );
     });
 }
 

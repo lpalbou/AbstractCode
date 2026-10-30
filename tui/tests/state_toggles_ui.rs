@@ -373,9 +373,14 @@ fn tools_rows_are_switches_labelled_by_the_tool() {
     let mut h = harness(Size::new(120, 40));
     h.set_tools();
     let screen = h.command("/tools");
+    assert!(
+        screen.contains("▸ files") && !screen.contains("read_file"),
+        "collapsed overview: {screen}"
+    );
+    let screen = h.keys(b"\r");
     assert!(screen.contains("[Auto] read_file"), "{screen}");
     assert!(screen.contains("[Off ] write_file"), "{screen}");
-    assert!(screen.contains("Ask") && screen.contains("Auto") && screen.contains("cycles mode"));
+    assert!(screen.contains("Ask") && screen.contains("Auto") && screen.contains("expand/cycle"));
 }
 
 #[test]
