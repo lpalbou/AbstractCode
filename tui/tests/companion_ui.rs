@@ -530,3 +530,102 @@ fn a_ready_companion_emits_no_terminal_output_on_idle_turns() {
     );
     assert_eq!(advice_count(&h.commands()), 0);
 }
+
+#[test]
+fn a_floating_companion_preserves_the_main_transcript_viewport() {
+    for width in [80, 160, 220] {
+        let mut hidden = harness(width, Some(json!({"enabled":false})));
+        hidden.turn();
+        let mut shown = harness(width, Some(json!({"enabled":true,"animate":false})));
+        shown.turn();
+        let scroll_bounds = |h: &mut Harness| {
+            h.app
+                .tree()
+                .accessibility_tree()
+                .entries
+                .into_iter()
+                .filter(|e| e.role == abstracttui::ui::Role::ScrollArea)
+                .map(|e| e.bounds)
+                .collect::<Vec<_>>()
+        };
+        let original = scroll_bounds(&mut hidden);
+        assert!(!original.is_empty(), "main transcript must be measurable");
+        assert_eq!(
+            scroll_bounds(&mut shown),
+            original,
+            "enabling the companion must not narrow or shorten the transcript at {width} columns"
+        );
+    }
+}
+
+#[test]
+fn floating_art_and_actions_align_under_header_controls_without_stealing_root_keys() {
+    for width in [160, 220] {
+        let mut h = harness(width, Some(json!({"enabled":true,"animate":false})));
+        h.turn();
+        let entries = h.app.tree().accessibility_tree().entries;
+        let bounds = |label: &str| {
+            entries
+                .iter()
+                .find(|e| e.label == label)
+                .unwrap_or_else(|| panic!("missing {label} at {width} columns"))
+                .bounds
+        };
+        let art = bounds("Activity avatar");
+        let button = bounds("Open companion conversation");
+        assert_eq!(art, button, "art should fill its clickable surface");
+        assert!(
+            art.w >= 28 && art.h >= 15,
+            "main art should retain preview detail"
+        );
+        let header = h
+            .app
+            .tree()
+            .action_targets()
+            .into_iter()
+            .filter(|(id, r)| {
+                r.y == 0
+                    && matches!(
+                        id.as_str(),
+                        "chrome.tools"
+                            | "chrome.docs"
+                            | "chrome.theme"
+                            | "chrome.about"
+                            | "chrome.account"
+                    )
+            })
+            .map(|(_, r)| r)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            header.len(),
+            5,
+            "measure the complete visible right header group"
+        );
+        let header_left = header.iter().map(|r| r.x).min().unwrap();
+        let header_right = header.iter().map(|r| r.right()).max().unwrap();
+        let twice_center = 2 * art.x + art.w;
+        assert!((twice_center - header_left - header_right).abs() <= 1);
+        let talk = bounds("Talk / ask");
+        let settings = bounds("Companion settings");
+        assert_eq!(talk.y, settings.y, "actions should share one row");
+        assert!(talk.y >= art.bottom(), "actions must not cover the artwork");
+        assert!((talk.x + settings.right() - twice_center).abs() <= 1);
+
+        let x = button.x + button.w / 2 + 1;
+        let y = button.y + button.h / 2 + 1;
+        h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+        h.turn();
+        h.term.push_input(b"\x1b[<0;1;39m");
+        h.turn();
+        assert!(
+            !h.store.docs_open.get_untracked(),
+            "cancelled press should not activate"
+        );
+        h.term.push_input(b"\x11");
+        h.turn();
+        assert!(
+            h.app.quit_requested(),
+            "root Ctrl+Q remains reachable after cancelled art press"
+        );
+    }
+}
