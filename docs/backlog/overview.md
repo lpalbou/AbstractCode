@@ -16,7 +16,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 |---|---|---|
 | Planned | 4 | 0001, 0002, 0003, 0008 |
 | Proposed | 3 | 0004, 0005, 0006 |
-| Completed | 0 | |
+| Completed | 1 | 0007 |
 | Deprecated | 0 | |
 | Recurrent | 0 | |
 
@@ -34,7 +34,8 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 3. [0004](proposed/0004_session_tool_choices_on_the_gateway.md) — a session's tool choices are still stored per client
    (the TUI's last local session state). Waiting on an operator decision; no gateway change before an explicit go.
 4. [0005](proposed/0005_tool_result_blocks_prompt_inset_clickable_chrome.md) — tool-result envelopes print as flat text
-   (operator screenshot 2026-10-28); JSON blocks, a "› " prompt inset and clickable chrome, on abstracttui 0186/0187/0188/1260. Root 1055.
+   (operator screenshot 2026-10-28); JSON blocks and input inset await AbstractTUI 0188/0186. Core chrome controls
+   and instrument controls are implemented; the 2026-10-30 local installation is terminal 0.12.0. Root 1055.
 
 ## Planned
 
@@ -52,7 +53,9 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 ## Completed
 
-None.
+| ID | Item | Area |
+|---|---|---|
+| 0007 | [Shared message footer](completed/0007_kit_message_footer_spec.md) | web |
 
 ## Deprecated
 

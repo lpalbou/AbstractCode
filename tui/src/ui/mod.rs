@@ -1290,6 +1290,43 @@ fn open_status(cx: Scope, store: Store, ctx: &UiCtx) {
     modals::open_status(cx, store, ctx);
 }
 
+fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
+    // GATED on the gateway's declared host_state contract: with
+    // the contract confirmed, fetch at the gesture (`/host/state`
+    // is slow by contract — open + `r` only, never polled); with
+    // contracts still unanswered, re-probe capabilities so the
+    // open modal can heal live; with the contract known-absent,
+    // fetch nothing — the modal says so honestly.
+    store.host_estimate.set(None);
+    match store.host_contracts.get_untracked() {
+        Some(c) if c.host_state => {
+            // Held facts (fresh or stale) stay visible while the
+            // open-time fetch runs; only a factless state shows
+            // the Pending screen.
+            if !matches!(
+                store.host_state.get_untracked(),
+                crate::store::HostState::Ready(_) | crate::store::HostState::Stale(_)
+            ) {
+                store.host_state.set(crate::store::HostState::Pending);
+            }
+            ctx.send(Cmd::LoadHostState);
+        }
+        None => {
+            ctx.send(Cmd::LoadCapabilities);
+        }
+        Some(_) => {}
+    }
+    modals::open_resources(cx, store, ctx);
+}
+
+fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
+    ctx.send(Cmd::LoadCacheInfo {
+        provider: store.provider.get_untracked(),
+        model: store.model.get_untracked(),
+    });
+    modals::open_cache(cx, store, ctx);
+}
+
 /// Run the chrome widget `id` (`chrome::ACT_*`): each opens exactly the
 /// modal its slash command opens. Returns false for an unknown id —
 /// `ACT_THEME` included: the status bar opens the theme DROPDOWN itself,
@@ -1303,6 +1340,17 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
             rail_view::open_settings(cx, store, ctx, Some(crate::rail::Panel::Workspace))
         }
         chrome::ACT_SESSION => conversations_view::open_sessions(cx, store, ctx),
+        chrome::ACT_SKILLS => {
+            ctx.send(Cmd::LoadSkills);
+            modals::open_skills(cx, store, ctx);
+        }
+        chrome::ACT_MCP => {
+            ctx.send(Cmd::LoadMcp);
+            modals::open_mcp(cx, store, ctx);
+        }
+        chrome::ACT_CACHE => open_cache(cx, store, ctx),
+        chrome::ACT_RESOURCES => open_resources(cx, store, ctx),
+        chrome::ACT_HELP => modals::open_help(cx, ctx),
         chrome::ACT_WAITING => {
             attention_chip::open_waiting(cx, store, ctx);
         }
@@ -1346,13 +1394,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             ctx.send(Cmd::LoadMcp);
             modals::open_mcp(cx, store, ctx);
         }
-        Command::Cache => {
-            ctx.send(Cmd::LoadCacheInfo {
-                provider: store.provider.get_untracked(),
-                model: store.model.get_untracked(),
-            });
-            modals::open_cache(cx, store, ctx);
-        }
+        Command::Cache => open_cache(cx, store, ctx),
         Command::Sessions(None) => conversations_view::open_sessions(cx, store, ctx),
         Command::Sessions(Some(id)) => switch_session(store, ctx, &id),
         Command::Cancel => {
@@ -1394,34 +1436,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
         // (carries the dead-worker revert; two concurrent lanes landed
         // an arm each, folded here).
         Command::Gpu => toggle_gpu_meter(store, ctx),
-        Command::Resources => {
-            // GATED on the gateway's declared host_state contract: with
-            // the contract confirmed, fetch at the gesture (`/host/state`
-            // is slow by contract — open + `r` only, never polled); with
-            // contracts still unanswered, re-probe capabilities so the
-            // open modal can heal live; with the contract known-absent,
-            // fetch nothing — the modal says so honestly.
-            store.host_estimate.set(None);
-            match store.host_contracts.get_untracked() {
-                Some(c) if c.host_state => {
-                    // Held facts (fresh or stale) stay visible while the
-                    // open-time fetch runs; only a factless state shows
-                    // the Pending screen.
-                    if !matches!(
-                        store.host_state.get_untracked(),
-                        crate::store::HostState::Ready(_) | crate::store::HostState::Stale(_)
-                    ) {
-                        store.host_state.set(crate::store::HostState::Pending);
-                    }
-                    ctx.send(Cmd::LoadHostState);
-                }
-                None => {
-                    ctx.send(Cmd::LoadCapabilities);
-                }
-                Some(_) => {}
-            }
-            modals::open_resources(cx, store, ctx);
-        }
+        Command::Resources => open_resources(cx, store, ctx),
         Command::Details(arg) => match arg.as_deref().map(str::trim) {
             None | Some("") => toggle_details(store, ctx),
             Some("full") | Some("expand") | Some("on") => {

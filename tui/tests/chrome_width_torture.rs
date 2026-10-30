@@ -341,6 +341,11 @@ fn opened(id: &str) -> &'static [&'static str] {
         ui::chrome::ACT_WORKSPACE => &["Workspace"],
         ui::chrome::ACT_SESSION => &["Conversations"],
         ui::chrome::ACT_THEME => &["☾ Dark"],
+        ui::chrome::ACT_SKILLS => &["gateway skills —"],
+        ui::chrome::ACT_MCP => &["MCP servers on the gateway"],
+        ui::chrome::ACT_CACHE => &["prompt cache", "prompt-cache"],
+        ui::chrome::ACT_RESOURCES => &["host resources"],
+        ui::chrome::ACT_HELP => &["▲ AbstractCode v"],
         _ => &[],
     }
 }
@@ -382,9 +387,11 @@ fn every_chrome_widget_opens_its_modal_from_the_keyboard() {
     let header = [
         ui::chrome::ACT_WORKFLOW,
         ui::chrome::ACT_MODEL,
+        ui::chrome::ACT_WORKSPACE,
         ui::chrome::ACT_GATEWAY,
     ];
     let bar = [
+        ui::chrome::ACT_HELP,
         ui::chrome::ACT_WORKSPACE,
         ui::chrome::ACT_SESSION,
         ui::chrome::ACT_THEME,
@@ -572,6 +579,133 @@ fn a_gateway_down_reason_never_clears_the_status_bar() {
         assert!(
             header.trim_end().ends_with('✗'),
             "[{width}] the header light says down:\n{header}"
+        );
+    }
+}
+
+/// Exercise both hosts: the same action may be drawn in both bars.
+/// Locate footer clicks from their rendered labels, without fixed cells.
+#[test]
+fn instrument_labels_open_their_panels_in_both_bars() {
+    let mut h = harness_sized(320, 40);
+    h.turn();
+    load_everything(&h.store);
+    h.store
+        .host_state
+        .set(abstractcode::store::HostState::Ready(
+            abstractcode::store::HostFacts {
+                ram_percent: Some(62.0),
+                ..Default::default()
+            },
+        ));
+    h.store
+        .host_contracts
+        .set(Some(abstractcode::store::HostContracts {
+            host_state: true,
+            ..Default::default()
+        }));
+    h.turn();
+    for id in [
+        ui::chrome::ACT_SKILLS,
+        ui::chrome::ACT_MCP,
+        ui::chrome::ACT_CACHE,
+    ] {
+        h.close_all();
+        let after = click_action(&mut h, id);
+        assert!(
+            opened(id).iter().any(|s| after.contains(s)),
+            "{id}:\n{after}"
+        );
+        h.close_all();
+        assert_eq!(h.focused_host(), None, "{id} hands focus back");
+    }
+    for (label, id) in [
+        ("ctx 41k", ui::chrome::ACT_CACHE),
+        ("100k↑ 28k↓", ui::chrome::ACT_CACHE),
+        ("gpu 28%", ui::chrome::ACT_RESOURCES),
+        ("mem 62%", ui::chrome::ACT_RESOURCES),
+        ("skills 2", ui::chrome::ACT_SKILLS),
+        ("mcp 1", ui::chrome::ACT_MCP),
+        ("? keys + commands", ui::chrome::ACT_HELP),
+    ] {
+        h.close_all();
+        let screen = h.turn();
+        let lines: Vec<_> = screen.lines().collect();
+        let footer = lines.last().unwrap();
+        let byte = footer
+            .find(label)
+            .unwrap_or_else(|| panic!("{label} absent: {footer}"));
+        let col = abstracttui::text::width(&footer[..byte]) + 2;
+        let row = lines.len();
+        h.term
+            .push_input(format!("\x1b[<0;{col};{row}M").as_bytes());
+        h.turn();
+        h.term
+            .push_input(format!("\x1b[<0;{col};{row}m").as_bytes());
+        h.turn();
+        let after = h.turn();
+        assert!(
+            opened(id).iter().any(|s| after.contains(s)),
+            "{label} opens {id}:\n{after}"
+        );
+        h.close_all();
+        assert_eq!(h.focused_host(), None, "{label} hands focus back");
+    }
+}
+
+#[test]
+fn footer_instruments_are_reachable_with_tab_arrows_and_space() {
+    let mut h = harness_sized(320, 40);
+    h.turn();
+    load_everything(&h.store);
+    h.turn();
+    for (label, id) in [
+        ("ctx 41k", ui::chrome::ACT_CACHE),
+        ("gpu 28%", ui::chrome::ACT_RESOURCES),
+        ("skills 2", ui::chrome::ACT_SKILLS),
+        ("mcp 1", ui::chrome::ACT_MCP),
+        ("? keys + commands", ui::chrome::ACT_HELP),
+    ] {
+        h.close_all();
+        let screen = h.turn();
+        let lines: Vec<_> = screen.lines().collect();
+        let footer = lines.last().unwrap();
+        let byte = footer
+            .find(label)
+            .unwrap_or_else(|| panic!("{label}: {footer}"));
+        let x = abstracttui::text::width(&footer[..byte]);
+        let y = lines.len() as i32 - 1;
+        for _ in 0..12 {
+            h.term.push_input(b"\t");
+            h.turn();
+            if h.focused_host() == Some("bar") {
+                break;
+            }
+        }
+        assert_eq!(h.focused_host(), Some("bar"));
+        let highlighted = |h: &SizedHarness| {
+            h.term
+                .screen()
+                .cell(x, y)
+                .unwrap()
+                .paint
+                .attrs
+                .contains(abstracttui::testing::Attrs::REVERSE)
+        };
+        for _ in 0..12 {
+            if highlighted(&h) {
+                break;
+            }
+            h.term.push_input(b"\x1b[C");
+            h.turn();
+        }
+        assert!(highlighted(&h), "{label} has a keyboard focus ring");
+        h.term.push_input(b" ");
+        h.turn();
+        let after = h.turn();
+        assert!(
+            opened(id).iter().any(|s| after.contains(s)),
+            "{id} opens from the keyboard:\n{after}"
         );
     }
 }

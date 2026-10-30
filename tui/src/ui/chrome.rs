@@ -27,6 +27,16 @@ pub const ACT_SESSION: &str = "chrome.session";
 pub const ACT_THEME: &str = "chrome.theme";
 /// "Automations · N waiting" → the automation that waits.
 pub const ACT_WAITING: &str = "chrome.waiting";
+/// Attached skills → the skills picker (`/skills`).
+pub const ACT_SKILLS: &str = "chrome.skills";
+/// MCP server count → the gateway registry (`/mcp`).
+pub const ACT_MCP: &str = "chrome.mcp";
+/// Context and token meters → prompt-cache and usage details (`/cache`).
+pub const ACT_CACHE: &str = "chrome.cache";
+/// GPU and memory meters → gateway host resources (`/resources`).
+pub const ACT_RESOURCES: &str = "chrome.resources";
+/// The keys pointer → the keys and commands reference (`/help`).
+pub const ACT_HELP: &str = "chrome.help";
 
 /// Focus of the two chrome action hosts (header, status bar). Root scope:
 /// it outlives the chrome's rebuilds. The root's type-to-prompt capture
@@ -167,23 +177,24 @@ pub fn header_facts(
     mcp: usize,
     idle: bool,
     session_tokens: u64,
-) -> Vec<String> {
-    let mut facts: Vec<String> = Vec::new();
-    facts.push(if workspace_mode.trim().is_empty() {
+) -> Vec<(String, &'static str)> {
+    let mut facts = Vec::new();
+    let workspace = if workspace_mode.trim().is_empty() {
         "server-managed".to_string()
     } else {
         workspace_mode.trim().to_string()
-    });
+    };
+    facts.push((workspace, ACT_WORKSPACE));
     if skills > 0 {
-        facts.push(format!("skills {skills}"));
+        facts.push((format!("skills {skills}"), ACT_SKILLS));
     }
     if mcp > 0 {
-        facts.push(format!("mcp {mcp}"));
+        facts.push((format!("mcp {mcp}"), ACT_MCP));
     }
     // Session token total AT REST only: during a run the activity strip
     // carries the live numbers — a second live counter would just race it.
     if idle && session_tokens > 0 {
-        facts.push(format!("{} tk", fmt_tokens(session_tokens)));
+        facts.push((format!("{} tk", fmt_tokens(session_tokens)), ACT_CACHE));
     }
     facts
 }
@@ -193,7 +204,8 @@ pub fn header_facts(
 /// workflow, provider/model and gateway+light are WIDGETS (abstracttui
 /// 0187 action spans): a click, or Tab to the header then ←/→ and
 /// Enter/Space, opens the workflow picker, the model picker and the
-/// `/status` connection modal. Chips render only when ≥1 conversation
+/// `/status` connection modal. Workspace mode, skills/MCP counts and
+/// token usage open their corresponding command panels too. Chips render only when ≥1 conversation
 /// exists; the focused chip is highlighted; a running turn's chip
 /// carries elapsed.
 pub fn header(
@@ -355,13 +367,21 @@ pub fn header(
                 // already gives workflow/route/chips priority over them.
                 let fact_widths: Vec<usize> = facts
                     .iter()
-                    .map(|f| text::width(f).max(0) as usize)
+                    .map(|(label, _)| text::width(label).max(0) as usize)
                     .collect();
                 let fit = prefix_fit(&fact_widths, 5, 3, (clip_to - x).max(0) as usize);
-                for (i, fact) in facts.iter().take(fit).enumerate() {
+                for (i, (fact, action)) in facts.iter().take(fit).enumerate() {
                     let sep = if i == 0 { "  ·  " } else { " · " };
                     x += canvas.print(Point::new(x, rect.y), sep, t.text_faint, t.surface);
-                    x += canvas.print(Point::new(x, rect.y), fact, t.text_muted, t.surface);
+                    let style = abstracttui::render::Style::new()
+                        .fg(t.text_muted)
+                        .bg(t.surface);
+                    x += canvas.print_action(
+                        Point::new(x, rect.y),
+                        fact,
+                        &style,
+                        &abstracttui::ui::ActionId::new(*action),
+                    );
                 }
                 let mut x2 = rx;
                 // The gateway in MUTED ink: the faint tier measured 2.77:1
@@ -391,7 +411,7 @@ pub fn header(
     Element::new()
         .style(LayoutStyle::line(1))
         .role(abstracttui::ui::Role::Region)
-        .access_label("header: workflow, model, gateway")
+        .access_label("header: workflow, model, workspace, skills, MCP, usage, gateway")
         .focusable()
         .focus_signal(focus.header)
         .on_action({
@@ -1311,9 +1331,9 @@ pub(crate) fn mem_segment(state: &crate::store::HostState) -> Option<(String, u8
 /// `ctx used/window (%) · session tokens · gpu · skills · mcp · ? help`
 /// — in the LEFT slot, the workspace path + session id in the MIDDLE and
 /// the theme selector on the RIGHT (operator layout 2026-10-28; an
-/// abstracttui 1260 `StatusBar`). The three are widgets: a click, or Tab
-/// to the bar then ←/→ and Enter/Space, opens the authorised workspaces
-/// (`/workspace`), the Sessions modal and the theme dropdown. The key legend moved behind `?`
+/// abstracttui 1260 `StatusBar`). Instruments, help, workspace, session and
+/// theme are widgets: click, or Tab then ←/→ and Enter/Space, to open their
+/// existing command panels. The key legend moved behind `?`
 /// (and /help): the Python predecessor's law, written after its own
 /// adversary review, is "the footer is the only always-visible surface"
 /// — it must carry NUMBERS, not a legend that is useful once and then
@@ -1361,7 +1381,7 @@ pub fn status_bar(
                 .height(Dimension::Cells(1)),
         )
         .role(abstracttui::ui::Role::Region)
-        .access_label("status bar: workspace, session, theme")
+        .access_label("status bar: instruments, help, workspace, session, theme")
         .focusable()
         .focus_signal(focus.bar)
         .on_action({
@@ -1440,7 +1460,12 @@ pub fn status_bar_model(
             1 => t.warn,
             _ => t.text_muted,
         };
-        bar = bar.left(BarItem::new().run(seg, ink).priority(bar_priority::CTX));
+        bar = bar.left(
+            BarItem::new()
+                .run(seg, ink)
+                .priority(bar_priority::CTX)
+                .action(ACT_CACHE),
+        );
     }
     // Session tokens: the in/out split when the provider reports one;
     // splitless providers show the honest total (never fabricated zeros).
@@ -1457,22 +1482,34 @@ pub fn status_bar_model(
         None
     };
     if let Some(s) = tokens {
-        bar = bar.left(BarItem::text(s).priority(bar_priority::TOKENS));
+        bar = bar.left(
+            BarItem::text(s)
+                .priority(bar_priority::TOKENS)
+                .action(ACT_CACHE),
+        );
     }
     // The /gpu meter (OBS-6 seam). Off/Unsupported = omitted.
     match store.gpu.get() {
         crate::store::GpuMeter::Ready(s) => {
-            bar = bar
-                .left(BarItem::text(format!("gpu {:.0}%", s.util_pct)).priority(bar_priority::GPU));
+            bar = bar.left(
+                BarItem::text(format!("gpu {:.0}%", s.util_pct))
+                    .priority(bar_priority::GPU)
+                    .action(ACT_RESOURCES),
+            );
         }
         crate::store::GpuMeter::Pending => {
-            bar = bar.left(BarItem::text("gpu …").priority(bar_priority::GPU));
+            bar = bar.left(
+                BarItem::text("gpu …")
+                    .priority(bar_priority::GPU)
+                    .action(ACT_RESOURCES),
+            );
         }
         crate::store::GpuMeter::Error(_) => {
             bar = bar.left(
                 BarItem::new()
                     .run("gpu err", t.warn)
-                    .priority(bar_priority::GPU),
+                    .priority(bar_priority::GPU)
+                    .action(ACT_RESOURCES),
             );
         }
         crate::store::GpuMeter::Off | crate::store::GpuMeter::Unsupported(_) => {}
@@ -1480,22 +1517,36 @@ pub fn status_bar_model(
     // Host RAM from the LAST /resources fetch (see `mem_segment`).
     if let Some((seg, sev)) = mem_segment(&store.host_state.get()) {
         let ink = if sev == 0 { t.text_muted } else { t.warn };
-        bar = bar.left(BarItem::new().run(seg, ink).priority(bar_priority::MEM));
+        bar = bar.left(
+            BarItem::new()
+                .run(seg, ink)
+                .priority(bar_priority::MEM)
+                .action(ACT_RESOURCES),
+        );
     }
     let skills = store.selected_skills.with(|s| s.len());
     if skills > 0 {
-        bar = bar.left(BarItem::text(format!("skills {skills}")).priority(bar_priority::SKILLS));
+        bar = bar.left(
+            BarItem::text(format!("skills {skills}"))
+                .priority(bar_priority::SKILLS)
+                .action(ACT_SKILLS),
+        );
     }
     let mcp = store.mcp_servers.with(|m| m.len());
     if mcp > 0 {
-        bar = bar.left(BarItem::text(format!("mcp {mcp}")).priority(bar_priority::MCP));
+        bar = bar.left(
+            BarItem::text(format!("mcp {mcp}"))
+                .priority(bar_priority::MCP)
+                .action(ACT_MCP),
+        );
     }
     // The keys pointer — the whole legend lives behind it; first to yield.
     bar = bar.left(
         BarItem::new()
             .run("?", t.accent)
             .run(" keys + commands", t.text_muted)
-            .priority(bar_priority::KEYS),
+            .priority(bar_priority::KEYS)
+            .action(ACT_HELP),
     );
     // CENTER — where you work and which session this is. The path keeps
     // its TAIL (the basename names it); the session id keeps its tail too
@@ -1738,22 +1789,22 @@ mod tests {
         assert_eq!(
             header_facts("workspace_or_allowed", 2, 1, true, 128_000),
             vec![
-                "workspace_or_allowed".to_string(),
-                "skills 2".to_string(),
-                "mcp 1".to_string(),
-                "128k tk".to_string(),
+                ("workspace_or_allowed".to_string(), ACT_WORKSPACE),
+                ("skills 2".to_string(), ACT_SKILLS),
+                ("mcp 1".to_string(), ACT_MCP),
+                ("128k tk".to_string(), ACT_CACHE),
             ]
         );
         // Empty mode reads server-managed; zero counts are OMITTED (not
         // "skills 0" noise); tokens only at rest and only when nonzero.
         assert_eq!(
             header_facts("", 0, 0, true, 0),
-            vec!["server-managed".to_string()]
+            vec![("server-managed".to_string(), ACT_WORKSPACE)]
         );
         // During a run the strip owns live numbers — no token fact.
         assert_eq!(
             header_facts("", 0, 0, false, 999_999),
-            vec!["server-managed".to_string()]
+            vec![("server-managed".to_string(), ACT_WORKSPACE)]
         );
     }
 

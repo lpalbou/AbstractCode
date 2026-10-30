@@ -20,8 +20,20 @@ transcript.
   `tool_body_rows` (`│ ` gutter, verbatim wrap) — the flat text in the screenshot.
 - `json_view` is this app's own pretty-printer/tokenizer; abstracttui's `CodeView` already colours JSON
   (`JsonLexer`), so the app keeps a second JSON renderer.
-- The composer draws its prompt without an inset inside the input; the header (`chrome.rs` ~l.120–150: workflow,
-  provider/model, session id) is custom-drawn with no click targets.
+- The composer draws text immediately beside its input side stroke. AbstractTUI 0186 is still proposed;
+  0.7.0 has no `.inset(left, right)` builder.
+- The 0.12.0 checkout already tags workflow/model/gateway and workspace/session/theme/attention controls.
+  Header workspace mode, skills/MCP counts and footer instruments/help remain plain text. The operator's
+  2026-10-30 screenshot uses the locally installed 0.6.0 binary, which predates all these controls.
+
+## Operator scope — 2026-10-30
+
+Finish converting the existing navbar/footer labels into controls through semantic action IDs, reusing the
+existing command panels: workspace mode → Workspace, skills → Skills, MCP → MCP registry, context/session
+tokens → Cache metrics, GPU/memory → Resources, help pointer → keys and commands. Preserve the existing
+workflow/model/gateway/session/theme controls, keyboard navigation, clipping and focus return. Build and
+replace the local terminal binary so the implementation is the command the operator actually launches.
+JSON rendering remains outside this pass; the input inset depends on the pending AbstractTUI 0186 capability.
 
 ## What we want
 1. Tool results: detect a JSON payload inside the envelope (a leading sentence, then JSON; a JSON string holding
@@ -71,3 +83,19 @@ Evidence (`cargo test --workspace`, clippy `-D warnings`):
   cleared the bar → cut to 40 columns, priority below the workspace path
   (`a_gateway_down_reason_never_clears_the_status_bar`); the workflow test now requires the picker to open
   (catalog seeded), not just a catalog request; `/help` describes the widgets.
+
+### Remaining chrome instruments — delivered locally, 2026-10-30
+
+- Header workspace mode and skills/MCP/token counts have semantic action spans. Footer context, tokens,
+  GPU/memory, skills/MCP and the help pointer are actionable `BarItem`s. No coordinate-based app hit testing.
+- Cache and Resources gestures share the command-opening functions, including capability gating and
+  fetch-at-open behavior. No policy change or new inference path; ADR impact: none.
+- The local `~/.cargo/bin/abstractcode` installation was 0.6.0 and is replaced by this checkout's 0.12.0.
+  Existing processes keep their loaded executable; a fresh launch uses the installed implementation.
+- Validation: workspace tests, Clippy with warnings denied, and eight chrome tests covering both bars,
+  keyboard focus, width degradation and focus return. Removing the footer skills action makes its click
+  test fail; restoring it passes. A real PTY with isolated settings against Gateway opened footer MCP,
+  header Skills and footer Help using the installed binary, then exited successfully without inference.
+- Local receipts: framework `untracked/code-chrome-20261030/` (PTY text/SVG captures, smoke receipt and
+  mutation log); workspace test log `untracked/code-chrome-workspace-tests.log`.
+- Items 1–2 remain proposed: JSON rendering and the engine input inset are unchanged by this delivery.

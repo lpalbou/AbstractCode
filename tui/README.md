@@ -137,7 +137,10 @@ Status: **0.12.0**, pre-alpha. Release history is in
   directory, workspace mode, and capability counts; the footer is a
   persistent instrument row (context meter, session tokens, `/gpu` and
   host `mem` meters, skills/MCP counts — the key legend lives behind
-  `?`); the activity
+  `?`). Click a skills/MCP count to open its panel, context/tokens for
+  `/cache`, GPU/memory for `/resources`, or `?` for help. The workspace
+  mode opens `/workspace`. These controls also work with Tab, arrows
+  and Enter/Space; closing a panel returns typing to the composer. The activity
   strip shows live context size (`ctx`), cache hits, and the in-flight
   model call with its last-call tok/s; `/cache` is the detail panel:
   prompt-cache posture for the effective route (auto = on when available)

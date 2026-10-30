@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Navbar and footer instruments open their tools.** Workspace mode opens Workspace; skills and MCP
+  counts refresh their panels; context and token counts open cache/usage metrics; GPU and memory meters
+  open Resources; the keys pointer opens Help. Mouse and keyboard activation reuse the same panels as
+  the slash commands, preserve narrow-width layout and return keyboard focus to the composer.
+
 - `assets/automation_controls.json` is the kit's file again, byte-identical. AbstractUIC 0067 adds the attention
   badge's glyph and words, which this crate does not draw yet. The `.sha256` pin is updated.
 

@@ -585,6 +585,12 @@ recovers it.
 | click on the gateway / connection light | header | Connection status modal (as `/status`) |
 | click on the workspace path (`⌂ …`) | status bar, middle | The conversation's authorised workspaces (as `/workspace`) |
 | click on the session id | status bar, middle | Sessions modal (as `/sessions`) |
+| click on the workspace mode | header | The conversation's authorised workspaces (as `/workspace`) |
+| click on `skills N` | header or status bar | Refresh and open the gateway skills picker (as `/skills`) |
+| click on `mcp N` | header or status bar | Refresh and open the gateway MCP registry (as `/mcp`) |
+| click on context or token counts | header or status bar | Prompt-cache and context metrics for the latest call, run and session (as `/cache`) |
+| click on GPU or memory meters | status bar | Gateway host resources (as `/resources`); opening the panel does not unload or change a model |
+| click on `? keys + commands` | status bar | Keys and commands reference (as `/help`) |
 | `Tab` to the header or the status bar, then `←`/`→`, `Enter`/`Space` | header, status bar | Moves between that bar's widgets and opens the one highlighted (reverse video) |
 | click / `Tab`+`→`+`Enter` on the theme name | status bar, right | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores |
 | `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |

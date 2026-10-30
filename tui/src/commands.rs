@@ -655,7 +655,7 @@ pub const HELP_EXTRA: &[(&str, &str)] = &[
     ),
     (
         "chrome",
-        "click the header's workflow (picker), provider/model (model picker) or gateway + light (/status); the status bar's ⌂ workspace (/workspace) or session id (/sessions) — or Tab to the header / status bar, ←→ between its widgets, Enter or Space opens",
+        "click workflow, model, gateway, workspace, session or theme; skills/MCP counts open their panels, context/tokens open /cache, GPU/memory open /resources, ? opens help — or Tab to a bar, ←→ between widgets, Enter or Space opens",
     ),
     (
         "Ctrl+P",
