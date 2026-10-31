@@ -1,6 +1,6 @@
 import {WorkflowChat, useWorkflowSession} from "../vendor/abstractchat/conversation.js";
 import "../vendor/abstractchat/conversation.css";
-import { sessionReadTarget } from "../vendor/abstractsessions/session_cards.js";
+import { sessionReadTarget, sessionOpeningReceipts } from "../vendor/abstractsessions/session_cards.js";
 import { createSessionReadClient, useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
 import { CodeDocsAssistant } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
@@ -1935,7 +1935,7 @@ export function CodeWorkspace() {
                   const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
                   if (!status) return null;
                   const target = sessionReadTarget(message.kind === "attachments" ? [...messages,message] : messages, message.runId || "", status);
-                  return target.message === message && readScope && !snapshot.loading && !snapshot.error ? <><span>{target.outcome}</span><SessionReadMarker ownerKey={readScope} receipt={{ sessionId: session.sessionId, revision: sessionContentRevision(message.runId || "", status), updatedAt: "" }} relatedReceipts={message.runId === session.runId ? catalog.sessionActivity[session.sessionId]?.content : undefined} enabled={!automationView && !sidebarOpen && identity === principalRef.current} onRead={sessionReads.markRead} /></> : null;
+                  return target.message === message && readScope && !snapshot.loading && !snapshot.error ? <><span>{target.outcome}</span><SessionReadMarker ownerKey={readScope} receipt={{ sessionId: session.sessionId, revision: sessionContentRevision(message.runId || "", status), updatedAt: "" }} relatedReceipts={sessionOpeningReceipts(messages, catalog.sessionActivity[session.sessionId]?.content, message.runId || "")} enabled={!automationView && !sidebarOpen && identity === principalRef.current} onRead={sessionReads.markRead} /></> : null;
                 },
                 ...(voice.tts_supported
                   ? {

@@ -305,12 +305,20 @@ function sessionNeedsAttention(run) {
   const wait = run.waiting && typeof run.waiting === "object" ? run.waiting : {};
   return run.status === "waiting" && (wait.reason === "user" || run.wait_reason === "user");
 }
+function isConversationTurn(row) {
+  const kind = row.session_kind ?? row.sessionKind;
+  if (kind && kind !== "chat" && kind !== "discussion")
+    return false;
+  if (row.role === "controller")
+    return false;
+  return row.role === "occurrence" || !String(row.parent_run_id ?? row.parentRunId ?? "").trim();
+}
 function sessionActivityFromRuns(body) {
   const root = body && typeof body === "object" ? body : {};
   const rows = Array.isArray(body) ? body : Array.isArray(root.items) ? root.items : Array.isArray(root.runs) ? root.runs : [];
   const groups = /* @__PURE__ */ new Map();
   for (const row of rows) {
-    if (!row || typeof row !== "object" || row.parent_run_id || typeof row.session_id !== "string" || typeof row.run_id !== "string")
+    if (!row || typeof row !== "object" || !isConversationTurn(row) || typeof row.session_id !== "string" || typeof row.run_id !== "string")
       continue;
     const list = groups.get(row.session_id) ?? [];
     list.push(row);
@@ -422,6 +430,11 @@ function sessionReadTarget(messages, runId, status) {
   const role = status === "completed" ? "assistant" : "user";
   const candidates = messages.filter((m) => m.runId === runId && !m.live && !m.toolActivity && m.role === role);
   return { message: candidates[candidates.length - 1], ...outcome ? { outcome } : {} };
+}
+function sessionOpeningReceipts(messages, content, displayedRunId) {
+  if (!content?.length || content[0].runId !== displayedRunId)
+    return [];
+  return content.filter((receipt) => Boolean(sessionReadTarget(messages, receipt.runId, receipt.status).message));
 }
 
 // dist/session_reads.js
@@ -730,9 +743,11 @@ export {
   automationCardNext,
   automationCardSchedule,
   createSessionReadClient,
+  isConversationTurn,
   sessionActivityFromRuns,
   sessionContentRevision,
   sessionNeedsAttention,
+  sessionOpeningReceipts,
   sessionReadEventReceipt,
   sessionReadIdentity,
   sessionReadScope,

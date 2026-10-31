@@ -401,3 +401,12 @@ describe("a turn carries only its own attachments (2026-10-01: a new conversatio
     expect(output.context).toEqual({ task: "look at this", attachments: [{ $artifact: "new-one" }] });
   });
 });
+
+it("includes chat wake turns but excludes descendants and automation controllers", () => {
+ const rows=normalizeSessionSummaries({items:[
+  {run_id:"wake",session_id:"chat",role:"occurrence",session_kind:"chat",parent_run_id:"caller",status:"completed"},
+  {run_id:"child",session_id:"chat",role:"descendant",session_kind:"chat",parent_run_id:"wake",status:"completed"},
+  {run_id:"auto",session_id:"auto",role:"controller",session_kind:"automation",status:"running"},
+ ]});
+ expect(rows).toHaveLength(1);expect(rows[0].latestRunId).toBe("wake");
+});
