@@ -14,13 +14,15 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 5 | 0001, 0002, 0003, 0008, 0030 |
+| Planned | 4 | 0001, 0002, 0003, 0008 |
 | Proposed | 8 | 0004, 0005, 0006, 0010, 0011, 0018, 0019, 0020 |
-| Completed | 17 | 0007, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029 |
+| Completed | 18 | 0007, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030 |
 | Deprecated | 0 |  |
 | Recurrent | 0 |  |
 
 ## Next Recommended Work
+
+- [0030](completed/0030_web_voice_docs_playback_and_sidebar_polish.md) completed 2026-10-31: compact app-scoped Voice, accurate automation labels, wider sidebar and shared Docs speaker; locally deployed across the apps. Registry release follow-up remains separate.
 
 - [0029](completed/0029_shared_avatar_catalog_and_rendering.md) completed 2026-10-30: six shared watch-inspired avatars, native/Wasm/React/Qt adapters, red X Error faces and two-second Ready cursor tracking; validated and installed locally. Shared identity migration stays in0018.
 
@@ -66,7 +68,6 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0008 | [Read aloud and export](planned/0008_adopt_panel_chat_read_aloud_export.md) | web | Shared panel-chat actions |
 
 
-| 0030 | [Voice, shared Docs playback and sidebar polish](planned/0030_web_voice_docs_playback_and_sidebar_polish.md) | web + ui-kit + panel-chat | Shared settings and authenticated Gateway TTS |
 
 ## Proposed
 
@@ -101,8 +102,8 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0025 | [Shape-only companion overlay](completed/0025_avatar_shape_overlay.md) — completed 2026-10-30; shape compositing, restoration, native install and independent review | tui + engine |
 | 0026 | [Canonical final answer visibility](completed/0026_canonical_final_answer_visibility.md) — completed 2026-10-30; canonical output recovery, real-run replay and adversarial ordering tests | tui |
 | 0028 | [Readable, scrollable Skills picker](completed/0028_readable_scrollable_skills_picker.md) — 1221 tests passed; locally installed and native mouse scrolling verified | tui |
-
 | 0029 | [Shared avatar catalog and rendering](completed/0029_shared_avatar_catalog_and_rendering.md) — six shared models, red X Error and Ready cursor tracking; full suites and native installation verified | tui + ui-kit + engine |
+| 0030 | [Web voice and shared Docs playback](completed/0030_web_voice_docs_playback_and_sidebar_polish.md) — 502 Code tests, shared/Assistant/islands checks, 8 browser tests and 7 live app checks pass; locally deployed | web + shared UI |
 
 ## Deprecated
 

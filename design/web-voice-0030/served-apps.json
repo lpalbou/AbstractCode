@@ -1,0 +1,62 @@
+[
+  {
+    "app": "observer",
+    "reachable": true,
+    "shared_docs_speech": true,
+    "assets": [
+      "./assets/index-Ckm1GmVY.js"
+    ]
+  },
+  {
+    "app": "continuum",
+    "reachable": true,
+    "shared_docs_speech": true,
+    "assets": [
+      "./assets/index-BfZgwLau.js"
+    ]
+  },
+  {
+    "app": "code",
+    "reachable": true,
+    "shared_docs_speech": true,
+    "assets": [
+      "./assets/index-BqwOWbwk.js"
+    ]
+  },
+  {
+    "app": "entity",
+    "reachable": true,
+    "shared_docs_speech": true,
+    "assets": [
+      "./assets/index-B1p-plbd.js"
+    ]
+  },
+  {
+    "app": "flow",
+    "reachable": true,
+    "shared_docs_speech": true,
+    "assets": [
+      "./assets/index-D4-RABdW.js"
+    ]
+  },
+  {
+    "app": "note",
+    "reachable": true,
+    "shared_docs_speech": true,
+    "assets": [
+      "./assets/index-CU-WOgZn.js"
+    ],
+    "installed_dist_updated": true,
+    "rollback": "/tmp/note-0030-rollback/dist"
+  },
+  {
+    "app": "gateway",
+    "reachable": true,
+    "shared_docs_speech": true
+  },
+  {
+    "app": "assistant",
+    "built": true,
+    "shared_docs_speech": true
+  }
+]

@@ -1,0 +1,16 @@
+
+> @abstractframework/code@0.13.3 test
+> vitest run
+
+
+ RUN  v5.0.5 /Users/albou/tmp/abstractframework/abstractcode/web
+
+
+ Test Files  62 passed (62)
+      Tests  502 passed (502)
+   Start at  01:42:03
+   Duration  4.97s (transform 49%, import 41%, tests 9%, worker 1%)
+
+    Isolate  62 workers spawned · ~182ms startup each (spawn + environment, per file)
+             at least ~482ms faster with isolate: false — reuses workers across files instead of one per file
+

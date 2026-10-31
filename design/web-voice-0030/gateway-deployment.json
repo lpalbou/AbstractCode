@@ -1,0 +1,6 @@
+{
+  "graceful_restart": true,
+  "executing_runs_before": 0,
+  "console_has_shared_speech": true,
+  "ready_after_seconds": 22.9
+}
