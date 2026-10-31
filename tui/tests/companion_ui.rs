@@ -235,11 +235,13 @@ fn companion_settings_are_reachable_and_change_only_ephemeral_preferences() {
     h.enter();
     assert!(h.turn().contains("Preview companion appearance"));
     h.click("Hover robot");
-    h.click("Use this");
+    h.click("Apply avatar");
     assert_eq!(
         h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
         "hover"
     );
+    assert!(!h.ctx.modal_open());
+    h.click("⚙");
     h.click("Offer comments");
     h.enter();
     assert_eq!(
@@ -394,7 +396,7 @@ fn preview_motion_can_be_paused_and_resumed_without_changing_reduced_motion_pref
     for label in [
         "Halo orb",
         "Hover robot",
-        "Use this",
+        "Apply avatar",
         "Cancel",
         "Auto cycle",
         "Pause motion",
@@ -790,7 +792,12 @@ fn every_new_design_can_be_previewed_and_saved_by_stable_id() {
         assert!(h
             .turn()
             .contains(&format!("Previewing {} · Not applied", style.label())));
-        h.click("Use this");
+        h.click("Apply avatar");
+        assert!(
+            !h.ctx.modal_open(),
+            "apply should show the chosen avatar immediately"
+        );
+        assert!(h.turn().contains("Talk / ask"));
         assert_eq!(
             h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
             style.id()
@@ -867,4 +874,174 @@ fn actual_mouse_motion_drives_gaze_without_typing_or_sending_a_task() {
         "pointer does not send input"
     );
     abstracttui::reactive::set_loop_clock(None);
+}
+
+fn failed_tool(h: &Harness, id: &str) {
+    h.store.fold.update(|f| {
+        f.apply(
+            "main-root",
+            &json!({"run_id":"main-root","step_id":id,"status":"completed",
+            "effect":{"type":"emit_event","payload":{"name":"abstract.tool_result","payload":[
+                {"tool":"run_command","call_id":id,"success":false,"error":"command not found"}
+            ]}}}),
+        );
+    });
+}
+
+#[test]
+fn a_fast_recoverable_tool_error_holds_for_one_second_even_during_speech() {
+    use abstractcode::{store::Phase, voice::Speaking};
+    use abstracttui::reactive::{batch, set_loop_clock};
+    use std::{
+        cell::Cell,
+        time::{Duration, Instant},
+    };
+    let mut h = harness(
+        220,
+        Some(json!({"enabled":true,"style":"hover","animate":false})),
+    );
+    let start = Instant::now();
+    let now = Rc::new(Cell::new(start));
+    let clock = now.clone();
+    h.driver.set_clock(move || clock.get());
+    h.turn();
+    set_loop_clock(Some(start));
+    batch(|| {
+        h.store.phase.set(Phase::Running);
+        failed_tool(&h, "fast-failure");
+        h.store.fold.update(|f| {
+            f.push_item(Item::Assistant {
+                text: "Recovered immediately".into(),
+                final_answer: true,
+            })
+        });
+        h.store.phase.set(Phase::Idle);
+        h.store.voice.speaking.set(Speaking::Playing);
+    });
+    assert!(
+        !h.store.fold.with(|f| f.failed),
+        "tool failure is not a failed run"
+    );
+    assert_eq!(h.store.fold.with(|f| f.stats.tool_failures), 1);
+    assert!(h.turn().contains("Error"));
+    for ms in [1, 500, 999] {
+        now.set(start + Duration::from_millis(ms));
+        h.store.voice.speak_levels.set(vec![0.8]);
+        assert!(h.turn().contains("Error"), "lost Error at {ms}ms");
+    }
+    now.set(start + Duration::from_millis(1000));
+    assert!(h.turn().contains("Speaking"));
+    assert!(!h.store.companion_error_active.get_untracked());
+    set_loop_clock(None);
+}
+
+#[test]
+fn each_new_failure_restarts_the_hold_but_replay_and_session_switches_do_not() {
+    use abstracttui::reactive::set_loop_clock;
+    use std::{
+        cell::Cell,
+        time::{Duration, Instant},
+    };
+    let mut h = harness(220, Some(json!({"enabled":true,"animate":false})));
+    let start = Instant::now();
+    let now = Rc::new(Cell::new(start));
+    let clock = now.clone();
+    h.driver.set_clock(move || clock.get());
+    h.turn();
+    set_loop_clock(Some(start));
+    h.store.restoring.set(true);
+    failed_tool(&h, "historical");
+    h.store.restoring.set(false);
+    assert!(h.turn().contains("Ready"), "history must not flash Error");
+    set_loop_clock(Some(start));
+    failed_tool(&h, "live-1");
+    assert!(h.turn().contains("Error"));
+    now.set(start + Duration::from_millis(600));
+    h.turn();
+    set_loop_clock(Some(now.get()));
+    failed_tool(&h, "live-2");
+    h.turn();
+    now.set(start + Duration::from_millis(1599));
+    assert!(h.turn().contains("Error"));
+    now.set(start + Duration::from_millis(1600));
+    assert!(h.turn().contains("Ready"));
+    set_loop_clock(Some(now.get()));
+    failed_tool(&h, "live-3");
+    h.turn();
+    assert!(h.store.companion_error_active.get_untracked());
+    h.store.session_id.set("different-session".into());
+    h.turn();
+    assert!(!h.store.companion_error_active.get_untracked());
+    now.set(start + Duration::from_secs(3));
+    assert!(h.turn().contains("Ready"));
+    set_loop_clock(None);
+}
+
+#[test]
+fn preview_focus_and_selected_marker_match_every_saved_design_and_reopen_after_apply() {
+    for style in AvatarStyle::ALL {
+        let mut h = harness(
+            220,
+            Some(json!({"enabled":true,"style":style.id(),"animate":false})),
+        );
+        h.turn();
+        h.click("⚙");
+        h.click("Appearance");
+        h.enter();
+        // Initial Enter must activate the saved choice, not accidentally select Halo.
+        h.enter();
+        let screen = h.turn();
+        assert!(
+            screen.contains(&format!("Previewing {} · In use", style.label())),
+            "{screen}"
+        );
+        assert!(
+            screen.contains(&format!("● {}", style.label()))
+                || screen.contains(&format!("●{}", style.label())),
+            "{screen}"
+        );
+        h.click("Vortex");
+        h.click("Apply avatar");
+        assert!(!h.ctx.modal_open());
+        assert_eq!(
+            h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
+            "vortex"
+        );
+        h.click("⚙");
+        h.click("Appearance");
+        h.enter();
+        h.enter();
+        assert!(h.turn().contains("Previewing Vortex · In use"));
+    }
+}
+
+#[test]
+fn a_new_run_can_fail_in_one_batch_and_disposal_cancels_the_hold() {
+    use abstracttui::reactive::{batch, next_timer_deadline, run_due_timers};
+    let mut h = harness(220, Some(json!({"enabled":true,"animate":false})));
+    h.turn();
+    batch(|| {
+        h.store.fold.update(|f| {
+            f.begin_run("fast-new-root");
+            f.apply("fast-new-root", &json!({"run_id":"fast-new-root","step_id":"fail","status":"completed",
+                "effect":{"type":"emit_event","payload":{"name":"abstract.tool_result","payload":[
+                    {"tool":"run_command","call_id":"fail","success":false,"error":"command not found"}
+                ]}}}));
+        });
+    });
+    assert!(h.turn().contains("Error"));
+    assert!(h.store.companion_error_active.get_untracked());
+    drop(h);
+    // Other host one-shots (focus/toast) may still be queued. Draining them must
+    // neither touch disposed signals nor re-arm the error indication.
+    for _ in 0..20 {
+        let Some(deadline) = next_timer_deadline() else {
+            break;
+        };
+        run_due_timers(deadline);
+    }
+    assert!(
+        next_timer_deadline().is_none(),
+        "disposed hold must not keep a repeating clock"
+    );
 }

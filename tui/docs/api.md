@@ -916,7 +916,10 @@ Ready eyes follow actual terminal cursor movement and center after two seconds o
 inactivity. Abstract orbs turn subtly; tracking samples at up to12fps. It stops
 outside Ready, in reduced motion and when hidden. Error is static with red X eyes
 for Hover/Rover, or one central X for Eye. A terminal failure stays in Error until
-a new run or higher-priority activity. Pointer movement never starts a task.
+a new run or higher-priority activity. New live tool/run failures hold Error for at
+least one second, including during speech or an immediate recovery; each new failure
+restarts that second. Replayed history never triggers the transient cue, and leaving
+the session or hiding the companion clears it. Pointer movement never starts a task.
 
 While speech is playing or paused, the bottom histogram and avatar action row
 include ‖ Pause / ▶ Resume for that current audio. They never select a different
@@ -927,7 +930,9 @@ Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cy
 advances phases about every 3.5 seconds. **Pause motion** freezes the demonstration.
 Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
 The preview labels the saved appearance **In use** and another choice **Not applied**.
-Only **Use this** persists the style; Cancel/Esc discards it. Preview playback can be
+The saved design is initially focused and a ● marks the selected design even when
+keyboard focus moves. **Apply avatar** saves and closes the preview to show the new
+avatar immediately; Cancel/Esc discards it. Preview playback can be
 started explicitly with reduced motion enabled, without changing that preference.
 The preview has no inference, recording or speech side effects.
 

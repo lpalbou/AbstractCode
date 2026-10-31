@@ -105,7 +105,8 @@ replace that cell's glyph. It does not narrow the transcript. Account → Compan
 with the avatar disabled. Ready breathes at2fps, Waiting pulses at6fps, active
 phases animate at up to12fps; reduced motion stops clocks.
 Appearance opens a silent, large preview: select any of the six styles, hold any of seven
-phases, Auto cycle or Pause motion. Only Use this saves appearance; Cancel/Esc
+phases, Auto cycle or Pause motion. The active design opens selected/focused. Apply avatar
+saves appearance and closes the preview; Cancel/Esc
 discards preview changes. No inference or microphone access occurs in this preview.
 Comments require new visible conversation content, allow one in-flight request and
 at least 60 seconds between attempts in this TUI. They have no tool/steering/approval
@@ -124,3 +125,7 @@ Ready eyes can follow active terminal cursor movement; they center after2s idle.
 Other phases/reduced motion ignore tracking. Error faces show red X eyes. Shared
 geometry/catalog belongs to AbstractTUI's independent `abstract-avatar` crate;
 web hosts use AbstractUIC `ActivityAvatar` instead of copying geometry.
+
+Live tool/run failures hold the avatar Error cue for at least1s even if the run
+recovers or begins speaking. Repeated failures restart the hold; history replay
+does not flash Error, and session changes/hiding cancel the transient cue.

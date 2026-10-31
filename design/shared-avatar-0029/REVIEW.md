@@ -69,3 +69,28 @@ AbstractUIC's avatars guide and the generic core README.
 
 The local binary was installed without restarting user processes. Reopen the TUI
 to load it. There was no publication, remote push or change to shared identity.
+
+## 2026-10-31 refinement — live error visibility and applying a design
+
+The prior renderer correctly drew red crosses for Error, but Code's observed pose
+only recognized terminal run failure; recoverable failed tools did not enter it.
+The host now observes its existing per-run tool-failure counter and terminal
+failure flag, holds each new live indication for1s ahead of activity/speech, and
+returns to observed activity. Further failures extend the hold. One cancellable
+UI-thread timer is independent of animation and avatar remounts. Historical replay,
+session/run switches, disable/hide and disposal avoid stale cues or queued clocks.
+No run verdict or audio playback is changed by the cue.
+
+The preview previously autofocus-selected its first button even when another design
+was rendered. It now autofocuses the saved design and adds a persistent selected
+marker. The explicit Apply avatar button saves then closes to show the artwork;
+Cancel/Escape still discard changes.
+
+All1228 Code tests pass (23 existing ignored), including22 companion checks.
+Clippy with warnings denied and formatting pass. Fake-clock checks cover999ms
+still Error/1000ms recovery and repeated failures extending the deadline. Native
+installed PTY checks prove Hover initial selection, applying Vortex, saving to
+private preferences, immediate modal closure and Vortex selection on reopening;
+zero run creation and clean exit. Receipt: [error-hold-validation.json](error-hold-validation.json).
+Native screens: [Hover](native-preview-hover.txt), [saved Vortex](native-preview-vortex.txt).
+Verdict: Approved for local installation; no unresolved finding for this scope.

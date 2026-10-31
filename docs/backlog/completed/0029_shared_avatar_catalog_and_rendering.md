@@ -54,3 +54,13 @@ zero execution requests. No running session restart, release or push.
 
 [Review, screenshots and machine-readable receipt](../../../design/shared-avatar-0029/REVIEW.md).
 Shared appearance/voice authority and broad client migration remain in0018.
+
+## Operator refinements — 2026-10-31
+
+Fixed live recoverable tool failures never reaching Error. New live tool/run
+failures now hold the error pose for at least1s through immediate recovery/speech;
+new failures restart that hold. Replay and leaving the context avoid stale cues.
+Fixed preview initial focus to match the saved design and mark the selected one;
+Apply avatar saves and closes so the new choice appears immediately. All1228 Code
+tests, Clippy, formatting and installed native preview/persistence checks pass.
+Details and evidence are appended to the linked review. Rendering core unchanged.

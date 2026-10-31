@@ -928,6 +928,8 @@ pub struct Store {
     pub advice_chat: Signal<crate::docs_chat::DocsChat>,
     pub advice_draft: Signal<String>,
     pub companion_tick: Signal<u64>,
+    /// UI-only live error indication; never a run verdict or persisted setting.
+    pub companion_error_active: Signal<bool>,
     pub companion_advice: Signal<Option<(String, String)>>,
     pub docs_open: Signal<bool>,
     pub docs_draft: Signal<String>,
@@ -1323,6 +1325,7 @@ impl Store {
             advice_chat: cx.signal(Default::default()),
             advice_draft: cx.signal(String::new()),
             companion_tick: cx.signal(0),
+            companion_error_active: cx.signal(false),
             companion_advice: cx.signal(None),
             docs_open: cx.signal(false),
             docs_draft: cx.signal(String::new()),

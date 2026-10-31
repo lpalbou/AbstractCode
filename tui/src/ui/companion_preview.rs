@@ -1,4 +1,4 @@
-//! Silent, local appearance preview. Only “Use this” persists a choice.
+//! Silent, local appearance preview. Only “Apply avatar” persists a choice.
 use super::{companion_view, modals, UiCtx};
 use crate::store::Store;
 use abstracttui::prelude::*;
@@ -136,12 +136,34 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
                     .gap(2),
             );
             for &choice in choices {
+                let button = Button::new(choice.label())
+                    .on_click(move || {
+                        style.set_if_changed(choice);
+                    })
+                    .element(mcx, &tokens)
+                    .access_value(move || {
+                        if style.get() == choice {
+                            "Selected".into()
+                        } else {
+                            "Not selected".into()
+                        }
+                    });
+                let button = if choice == saved_style {
+                    button.autofocus()
+                } else {
+                    button
+                };
                 styles = styles.child(
-                    Button::new(choice.label())
-                        .on_click(move || {
-                            style.set_if_changed(choice);
-                        })
-                        .view(mcx),
+                    Element::new()
+                        .style(LayoutStyle::row().gap(0))
+                        .child(dyn_view(
+                            LayoutStyle::default()
+                                .width(Dimension::Cells(1))
+                                .height(Dimension::Cells(1)),
+                            move || text(if style.get() == choice { "●" } else { " " }),
+                        ))
+                        .child(button.build())
+                        .build(),
                 );
             }
             root = root.child(styles.build());
@@ -234,11 +256,11 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
                     .gap(2),
             )
             .child(
-                Button::new("Use this")
+                Button::new("Apply avatar")
                     .on_click(move || {
                         let choice = style.get_untracked().id();
                         companion_view::save(store, &apply, |p| p.style = choice.into());
-                        companion_view::settings(cx, store, &apply);
+                        apply.close_modal();
                     })
                     .view(mcx),
             )
@@ -269,7 +291,8 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
         root.child(controls)
             .child(modals::hint_row(
                 &tokens,
-                "Silent preview · 1–7 / ←→ hold phase · c cycles/holds · Esc cancels".into(),
+                "Select a design, then Apply avatar · 1–7 phases · c cycles/holds · Esc cancels"
+                    .into(),
             ))
             .build()
     });

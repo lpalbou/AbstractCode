@@ -137,6 +137,9 @@ fn visible(store: Store, ctx: &UiCtx) -> bool {
         && matches!(store.focus.get(), crate::convo::Focus::Agent)
 }
 pub fn observed_pose(store: Store) -> AvatarPose {
+    if store.companion_error_active.get() {
+        return AvatarPose::Error;
+    }
     if !matches!(store.voice.dictation.get(), Dictation::Idle) {
         return AvatarPose::Listening;
     }
@@ -347,7 +350,67 @@ pub fn wrap(root: Scope, cx: Scope, store: Store, ctx: &UiCtx, pane: View) -> Vi
         .build()
 }
 
+/// Notice live failures once, independently of the avatar's mounted/animated view.
+/// Recoverable tool errors are not terminal run failures, so observe the fold's
+/// existing counter. A single cancellable timer holds each new indication for1s.
+fn wire_error_indication(cx: Scope, store: Store, ctx: &UiCtx) {
+    let failures = cx.memo(move || {
+        store.fold.with(|f| {
+            (
+                store.session_id.get(),
+                f.root_run_id().to_owned(),
+                f.stats.tool_failures,
+                f.failed,
+            )
+        })
+    });
+    let previous = Rc::new(RefCell::new((failures.get_untracked(), false)));
+    let pulse = cx.signal(0u64);
+    let context = ctx.clone();
+    cx.effect(move || {
+        let now = failures.get();
+        let replaying =
+            store.restoring.get() || store.history_loading.get() || store.fold.with(|f| f.replay);
+        let _ = store.companion_tick.get();
+        let _ = context.modal_epoch.get();
+        let eligible = prefs(&context).enabled && visible(store, &context);
+        let (old, was_replaying) = previous.replace((now.clone(), replaying));
+        let same_run = old.1 == now.1;
+        if old.0 != now.0 || replaying || !eligible {
+            pulse.set_if_changed(0);
+        } else {
+            if !same_run {
+                pulse.set_if_changed(0);
+            }
+            // A very fast new run can begin and fail in the same UI batch.
+            let new_error = if same_run {
+                now.2 > old.2 || (now.3 && !old.3)
+            } else {
+                now.2 > 0 || now.3
+            };
+            if !was_replaying && new_error {
+                pulse.update(|n| *n = n.wrapping_add(1).max(1));
+            }
+        }
+    });
+    cx.effect(move || {
+        let active = pulse.get() != 0;
+        store.companion_error_active.set_if_changed(active);
+        if !active {
+            return;
+        }
+        let clock = cx.child();
+        abstracttui::reactive::interval(clock, Duration::from_secs(1), move || {
+            pulse.set_if_changed(0);
+        });
+        abstracttui::reactive::on_cleanup(move || {
+            clock.dispose();
+        });
+    });
+}
+
 pub fn wire(cx: Scope, store: Store, ctx: &UiCtx) {
+    wire_error_indication(cx, store, ctx);
     if let Some(pointer) = cx.use_context::<AvatarPointer>() {
         let context = ctx.clone();
         cx.effect(move || {
