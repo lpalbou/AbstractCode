@@ -14,7 +14,7 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 4 | 0001, 0002, 0003, 0008 |
+| Planned | 5 | 0001, 0002, 0003, 0008, 0030 |
 | Proposed | 8 | 0004, 0005, 0006, 0010, 0011, 0018, 0019, 0020 |
 | Completed | 17 | 0007, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029 |
 | Deprecated | 0 |  |
@@ -65,6 +65,8 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0003 | [Mermaid diagrams in the TUI transcript](planned/0003_mermaid_diagrams_in_the_transcript.md) | tui + abstracttui | an abstracttui release adding a `Feed` fence hook (+ `abstracttui-mermaid` multi-diagram cache); operator to lift the read-only rule on abstracttui |
 | 0008 | [Read aloud and export](planned/0008_adopt_panel_chat_read_aloud_export.md) | web | Shared panel-chat actions |
 
+
+| 0030 | [Voice, shared Docs playback and sidebar polish](planned/0030_web_voice_docs_playback_and_sidebar_polish.md) | web + ui-kit + panel-chat | Shared settings and authenticated Gateway TTS |
 
 ## Proposed
 
