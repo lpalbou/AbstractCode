@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-31",
+  "change": "Stop speech at shared session reset",
+  "paths": [
+    "/new",
+    "/clear",
+    "/sessions another-session"
+  ],
+  "states": [
+    "Preparing",
+    "Playing",
+    "Paused"
+  ],
+  "matrix_cases": 9,
+  "tests": {
+    "voice_passed": 45,
+    "voice_ignored": 6,
+    "session_screen_passed": 6
+  },
+  "checks": [
+    "host Stop reaches audio owner",
+    "queued narration discarded",
+    "late chunks cannot restart speech",
+    "all-target Clippy with warnings denied",
+    "formatting and diff checks"
+  ],
+  "installed_binary_sha256": "90fd433bf546d56464e46496dadab18530ddf993c2aa18bb4f330f6183f6bf48",
+  "scope": "Local installation; no user process restarted, no release/push; fake host/gateway audio checks"
+}

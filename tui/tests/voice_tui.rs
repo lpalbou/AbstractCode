@@ -2839,3 +2839,72 @@ fn submitting_interrupts_paused_or_preparing_speech_without_stale_completion_ove
         h.escape();
     }
 }
+
+#[test]
+fn session_boundaries_stop_current_and_queued_speech_in_all_playback_states() {
+    let _g = serial();
+    for command in ["/new", "/clear", "/sessions another-session"] {
+        for state in ["preparing", "playing", "paused"] {
+            let gw = serve(GatewayScript {
+                segment_delay: Duration::from_millis(100),
+                segments: vec![1, 2, 3, 4],
+                ..Default::default()
+            });
+            let (_host, log, _) = fake_host(false);
+            let mut h = harness(&gw.url);
+            h.with_reply("Old session reply");
+            let old_session = h.store.session_id.get_untracked();
+            ui::voice_view::narrate(h.store, &h.ctx, "Old session speech".into());
+            ui::voice_view::narrate(h.store, &h.ctx, "Obsolete queued speech".into());
+            match state {
+                "playing" | "paused" => {
+                    h.until("old session speaking", |s| s.contains("♪ Speaking…"));
+                    if state == "paused" {
+                        h.term.push_input(&[0x10]);
+                        h.until("paused", |s| s.contains("‖ Paused"));
+                    }
+                }
+                _ => assert_eq!(
+                    h.store.voice.speaking.get_untracked(),
+                    voice::Speaking::Preparing
+                ),
+            }
+            h.type_text(&format!("{command}\r"));
+            h.turn();
+            assert_ne!(
+                h.store.session_id.get_untracked(),
+                old_session,
+                "{command} {state}"
+            );
+            assert_eq!(
+                h.store.voice.speaking.get_untracked(),
+                voice::Speaking::Idle,
+                "{command} {state}"
+            );
+            assert!(h.store.voice.speaking_text.get_untracked().is_none());
+            assert!(
+                ops(&log).contains(&"stop".into()),
+                "host must stop at the session boundary"
+            );
+            let stopped_plays = played(&log).len();
+            let deadline = Instant::now() + Duration::from_millis(250);
+            while Instant::now() < deadline {
+                h.turn();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(
+                played(&log).len(),
+                stopped_plays,
+                "late audio after {command} {state}"
+            );
+            assert!(
+                gw.requests("/voice/tts/stream").len() <= 1,
+                "old queue must not start another speech request"
+            );
+            assert_eq!(
+                h.store.voice.speaking.get_untracked(),
+                voice::Speaking::Idle
+            );
+        }
+    }
+}

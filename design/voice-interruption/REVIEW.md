@@ -38,3 +38,15 @@ Solo review across correctness, ownership and user/operations. No independent
 review claim or unresolved finding in this scope. Verdict: Approved for local
 installation. No release, push or running session restart; concurrent web changes
 were preserved.
+
+## Session-boundary follow-up
+
+The shared session reset omitted the existing speaker stop, so `/new`/`/clear`
+and session switching left current speech alive. The shared reset now stops the
+host and clears queued narration before clearing the old session state. Existing
+speech generations reject late chunks/completions. Nine regression cases cover
+all three entry paths while Preparing/Playing/Paused, immediate idle/identity
+reset, host Stop and no later playback or queued TTS request.45 voice checks and6
+session-screen checks pass;6 existing audio/live tests remain ignored. Clippy
+with warnings denied and formatting pass. Rebuilt and installed locally; no user
+process restarted. [Receipt](new-session-validation.json). Approved for this scope.

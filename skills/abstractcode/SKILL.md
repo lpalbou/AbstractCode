@@ -135,3 +135,6 @@ A new submitted coding message interrupts current/preparing/paused speech and
 discards old queued narration, including when guiding an active/starting run.
 Typing alone does not stop speech. Current-audio Pause/Resume sits immediately
 beside the bottom realtime histogram as well as in the companion action row.
+
+Session boundaries (`/new`, `/clear`, switching conversations) stop the current
+speech and discard queued narration; late chunks cannot resume in the new session.

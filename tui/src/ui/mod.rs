@@ -1913,6 +1913,9 @@ pub(crate) fn new_session(store: Store, ctx: &UiCtx) {
 /// bounded artifact-image cache (keyed by artifact id; a wiped fold
 /// references none of it).
 fn reset_session_state(store: Store, ctx: &UiCtx, old_sid: &str, new_sid: &str, note: String) {
+    // Session-owned speech cannot follow the user into another conversation.
+    // Stop the host, discard queued narration and fence late audio callbacks.
+    voice_view::stop_speaking(store);
     store.fold.update(|f| {
         // Catalog state SURVIVES the wipe (adversary P2-7): the agent-
         // workflow declarations came from the catalog load, not from the

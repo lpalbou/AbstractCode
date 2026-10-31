@@ -75,3 +75,8 @@ All1231 Code tests pass (23 existing ignored), including44 voice tests (6 ignore
 Clippy and formatting pass; captures inspected at40/220 columns and control
 geometry verified at40/80/220. Installed locally without restarting user sessions.
 [Review and receipt](../../../design/voice-interruption/REVIEW.md).
+
+Session-boundary follow-up: shared reset now stops speech for `/new`, `/clear`
+and session switching. Nine entry-path/playback-state cases,45 voice checks and6
+session-screen checks pass; Clippy and formatting pass. Installed locally; the
+linked review includes `new-session-validation.json`.

@@ -2540,7 +2540,7 @@ abstractcode --help | --version
 | Command | Effect |
 | --- | --- |
 | `/help` | Command + key reference modal |
-| `/new` | Fresh session (new durable id, cleared view) |
+| `/new` | Fresh session (new durable id, cleared view); stops current and queued speech (`/clear` too) |
 | `/voice [read-aloud on\|off \| auto-send on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `auto-send off` reviews held voice in the prompt; `auto-send on` sends it on release (default); `space on\|off` turns hold-Space-to-talk on or off (on by default) |
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
@@ -2789,6 +2789,7 @@ computer.
 - **Interrupting speech.** Submitting a new message stops current speech and clears
   queued narration before starting the next run or buffering guidance. This includes
   paused/preparing speech; late chunks/completions cannot resume the old reply.
+  `/new`, `/clear` and switching conversations also stop current/queued speech.
   Typing alone and opening settings do not interrupt it.
 - **Speaking a reply** (`Ctrl+P`, `/speak`, the `▶` at the top right of
   any message, or **Read aloud**): `POST
@@ -5871,3 +5872,6 @@ A new submitted coding message interrupts current/preparing/paused speech and
 discards old queued narration, including when guiding an active/starting run.
 Typing alone does not stop speech. Current-audio Pause/Resume sits immediately
 beside the bottom realtime histogram as well as in the companion action row.
+
+Session boundaries (`/new`, `/clear`, switching conversations) stop the current
+speech and discard queued narration; late chunks cannot resume in the new session.
