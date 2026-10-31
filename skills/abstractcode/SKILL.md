@@ -130,3 +130,8 @@ web hosts use AbstractUIC `ActivityAvatar` instead of copying geometry.
 Live tool/run failures hold the avatar Error cue for at least1s even if the run
 recovers or begins speaking. Repeated failures restart the hold; history replay
 does not flash Error, and session changes/hiding cancel the transient cue.
+
+A new submitted coding message interrupts current/preparing/paused speech and
+discards old queued narration, including when guiding an active/starting run.
+Typing alone does not stop speech. Current-audio Pause/Resume sits immediately
+beside the bottom realtime histogram as well as in the companion action row.

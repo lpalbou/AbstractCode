@@ -72,6 +72,7 @@ pub(crate) fn steer_or_buffer(store: Store, ctx: &UiCtx, text: &str) {
         store.notify("no active run to steer");
         return;
     }
+    super::voice_view::stop_speaking(store);
     match store.fold.with_untracked(|f| f.cycling_target()) {
         Some(target) => send_steer_to(store, ctx, &target, text),
         None => {

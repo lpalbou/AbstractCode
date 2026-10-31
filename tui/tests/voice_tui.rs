@@ -2598,6 +2598,17 @@ fn current_speech_controls_pause_resume_the_selected_companion_audio_without_rep
         pause.w > 0 && pause.x >= 0 && pause.right() <= 80,
         "button bounds {pause:?}\n{screen}"
     );
+    let last_bar = row
+        .chars()
+        .enumerate()
+        .filter(|(_, c)| "▂▃▄▅▆▇█".contains(*c))
+        .map(|(x, _)| x as i32)
+        .max()
+        .unwrap();
+    assert!(
+        (1..=4).contains(&(pause.x - last_bar)),
+        "pause must be beside the spectrum, not at the far right: {pause:?} {row}"
+    );
     // A changing spectrum and elapsed tick must not unmount a pressed button.
     let x = pause.x + pause.w / 2 + 1;
     let y = pause.y + 1;
@@ -2627,10 +2638,43 @@ fn current_speech_controls_pause_resume_the_selected_companion_audio_without_rep
         body["text"],
         "This selected companion speech stays selected."
     );
+    for width in [40, 220] {
+        h.term.push_resize(Size::new(width, 34));
+        h.turn();
+        let screen = h.driver.screenshot().to_text();
+        let row = screen
+            .lines()
+            .find(|line| line.contains("♪ Speaking…"))
+            .unwrap();
+        let control = current_speech_button_bounds(&mut h, "Pause current speech").unwrap();
+        let last_bar = row
+            .chars()
+            .enumerate()
+            .filter(|(_, c)| "▂▃▄▅▆▇█".contains(*c))
+            .map(|(x, _)| x as i32)
+            .max()
+            .unwrap();
+        assert!(
+            (1..=4).contains(&(control.x - last_bar)),
+            "width {width}: {control:?} {row}"
+        );
+        assert!(control.right() <= width);
+        if let Ok(dir) = std::env::var("ABSTRACTCODE_VOICE_CAPTURE_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            h.driver
+                .screenshot()
+                .write_png(std::path::Path::new(&dir).join(format!("speech-meter-{width}.png")))
+                .unwrap();
+        }
+    }
+
     h.escape();
-    h.until("speech stopped", |s| {
-        !s.contains("♪ Speaking…") && !s.contains("‖ Paused")
+    let store = h.store;
+    h.until("speech stopped", move |_| {
+        store.voice.speaking.get_untracked() == voice::Speaking::Idle
     });
+    let screen = h.driver.screenshot().to_text();
+    assert!(!screen.contains("♪ Speaking…") && !screen.contains("‖ Paused"));
     assert!(current_speech_button_bounds(&mut h, "Pause current speech").is_none());
     assert!(current_speech_button_bounds(&mut h, "Resume current speech").is_none());
     click_current_speech_button(&mut h, resume);
@@ -2671,4 +2715,127 @@ fn current_speech_controls_are_absent_when_idle_preparing_or_recording() {
     assert!(!ops(&log)
         .iter()
         .any(|op| op == "pause" || op == "resume" || op == "play"));
+}
+
+#[test]
+fn submitting_a_message_cancels_old_speech_and_queued_narration_in_every_run_phase() {
+    let _g = serial();
+    for phase in [
+        abstractcode::store::Phase::Idle,
+        abstractcode::store::Phase::Starting,
+        abstractcode::store::Phase::Running,
+    ] {
+        let gw = serve(GatewayScript {
+            segment_delay: Duration::from_millis(100),
+            segments: vec![1, 2, 3, 4, 5, 6],
+            ..Default::default()
+        });
+        let (_host, log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("The old answer.");
+        h.store.workflow.set(abstractcode::store::Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "basic".into(),
+            name: "Basic agent".into(),
+            ..Default::default()
+        });
+        h.store.phase.set(phase);
+        ui::voice_view::narrate(h.store, &h.ctx, "Old speech being read.".into());
+        ui::voice_view::narrate(h.store, &h.ctx, "Obsolete queued narration.".into());
+        h.until("old speech playing", |s| s.contains("♪ Speaking…"));
+        // Typing alone must not interrupt; submitting is the ownership boundary.
+        h.type_text("My new question");
+        h.turn();
+        assert_ne!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle
+        );
+        h.type_text("\r");
+        h.turn();
+        let before = played(&log).len();
+        assert_eq!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle,
+            "{phase:?}"
+        );
+        assert!(h.store.voice.speaking_text.get_untracked().is_none());
+        assert!(
+            ops(&log).contains(&"stop".into()),
+            "host must be stopped immediately"
+        );
+        if phase == abstractcode::store::Phase::Idle {
+            assert!(
+                h._rx
+                    .try_iter()
+                    .any(|cmd| matches!(cmd,Cmd::Start{prompt,..} if prompt=="My new question")),
+                "speech must not delay the new run"
+            );
+        }
+        let deadline = Instant::now() + Duration::from_millis(350);
+        while Instant::now() < deadline {
+            h.turn();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            played(&log).len(),
+            before,
+            "late old chunks cannot restart audio: {phase:?}"
+        );
+        assert_eq!(
+            gw.requests("/voice/tts/stream").len(),
+            1,
+            "old queued narration must be discarded"
+        );
+        assert_eq!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle
+        );
+    }
+}
+
+#[test]
+fn submitting_interrupts_paused_or_preparing_speech_without_stale_completion_overwriting_new_audio()
+{
+    let _g = serial();
+    for paused in [false, true] {
+        let gw = serve(GatewayScript {
+            segment_delay: Duration::from_millis(150),
+            segments: vec![1, 2, 3],
+            ..Default::default()
+        });
+        let (_host, log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("Old answer");
+        h.store.workflow.set(abstractcode::store::Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "basic".into(),
+            ..Default::default()
+        });
+        ui::voice_view::narrate(h.store, &h.ctx, "Previous speech".into());
+        if paused {
+            h.until("playing", |s| s.contains("♪ Speaking…"));
+            h.term.push_input(&[0x10]);
+            h.until("paused", |s| s.contains("‖ Paused"));
+        } else {
+            assert_eq!(
+                h.store.voice.speaking.get_untracked(),
+                voice::Speaking::Preparing
+            );
+        }
+        h.type_text("Next question\r");
+        h.turn();
+        assert_eq!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle
+        );
+        let new_text = "New answer to the next question";
+        ui::voice_view::narrate(h.store, &h.ctx, new_text.into());
+        h.until("new speech", |s| s.contains("♪ Speaking…"));
+        assert_eq!(
+            h.store.voice.speaking_text.get_untracked(),
+            Some(voice::text_key(new_text))
+        );
+        assert!(ops(&log).contains(&"stop".into()));
+        h.escape();
+    }
 }

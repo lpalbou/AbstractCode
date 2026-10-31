@@ -311,6 +311,10 @@ computer.
   could not be asked ("The gateway's default voice routes could not be
   read. Requests still use them."). `Enter` on a row offers Gateway default
   or an override for this app from `GET /voice/voices?compact=true`.
+- **Interrupting speech.** Submitting a new message stops current speech and clears
+  queued narration before starting the next run or buffering guidance. This includes
+  paused/preparing speech; late chunks/completions cannot resume the old reply.
+  Typing alone and opening settings do not interrupt it.
 - **Speaking a reply** (`Ctrl+P`, `/speak`, the `▶` at the top right of
   any message, or **Read aloud**): `POST
   /api/gateway/runs/{run_id}/voice/tts/stream` (before the first run, the
@@ -922,7 +926,8 @@ restarts that second. Replayed history never triggers the transient cue, and lea
 the session or hiding the companion clears it. Pointer movement never starts a task.
 
 While speech is playing or paused, the bottom histogram and avatar action row
-include ‖ Pause / ▶ Resume for that current audio. They never select a different
+include ‖ Pause / ▶ Resume for that current audio. The bottom control sits directly
+beside the live histogram at narrow and wide terminal sizes. They never select a different
 message or start a reply. Message-level play/pause controls remain available.
 
 Appearance opens a silent preview with all six styles and Ready, Listening, Thinking,

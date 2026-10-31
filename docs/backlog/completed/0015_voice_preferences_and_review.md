@@ -61,3 +61,17 @@ aggregates updated. No release/push. ADR impact remains none. Original path:
 `planned/0015_voice_preferences_and_review.md`; final:
 `completed/0015_voice_preferences_and_review.md`. Related avatar exploration is
 proposed0016; no background inference or microphone was enabled.
+
+## Speech interruption and meter controls — 2026-10-31
+
+New submitted messages now stop current/preparing/paused speech and discard the
+old narration queue before starting or guiding a run. Queue/goal starts and explicit
+steering share the same cancellation path. Typing and navigation do not interrupt.
+Late chunks/completions remain fenced by existing speech generations. The bottom
+Pause/Resume button now sits directly beside the bounded histogram instead of at
+the far edge, retaining stable pointer/focus state while levels update.
+
+All1231 Code tests pass (23 existing ignored), including44 voice tests (6 ignored),
+Clippy and formatting pass; captures inspected at40/220 columns and control
+geometry verified at40/80/220. Installed locally without restarting user sessions.
+[Review and receipt](../../../design/voice-interruption/REVIEW.md).

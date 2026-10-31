@@ -976,7 +976,8 @@ fn meter_row(
             x += canvas.print(Point::new(x, rect.y), glyph, glyph_ink, Rgba::TRANSPARENT);
             x += canvas.print(Point::new(x, rect.y), rest, label_ink, Rgba::TRANSPARENT);
             x += 2;
-            let room = (rect.right() - 1 - x - 2 - 12).max(0) as usize;
+            let hint_floor = if hint.is_empty() { 0 } else { 2 + 12 };
+            let room = (rect.right() - 1 - x - hint_floor).max(0) as usize;
             let n = METER_CELLS.min(room);
             for (i, w) in voice::meter_cells(&levels, n).into_iter().enumerate() {
                 canvas.put(
@@ -1007,6 +1008,12 @@ pub(super) fn current_speech_button(cx: Scope, store: Store, tokens: &TokenSet) 
         Speaking::Idle | Speaking::Preparing => return None,
     };
     let button = Button::new(glyph)
+        .layout(
+            LayoutStyle::default()
+                .width(Dimension::Cells(3))
+                .height(Dimension::Cells(1))
+                .shrink(0.0),
+        )
         .on_click(move || {
             if pause {
                 pause_speaking(store);
@@ -1053,19 +1060,20 @@ pub fn status_row(store: Store) -> View {
         if let Some((label, hint)) = speaking_parts(store) {
             // Only the meter subscribes to level reports. A spectrum update must
             // not dispose a pressed/focused playback button between mouse down/up.
+            let label_width = text::width(&label);
             let meter = dyn_view(
                 LayoutStyle::default()
                     .height(Dimension::Cells(1))
-                    .grow(1.0)
-                    .basis(Dimension::Cells(0))
-                    .min_w(0),
+                    .width(Dimension::Cells(label_width + METER_CELLS as i32 + 4))
+                    .min_w(label_width + 4)
+                    .shrink(1.0),
                 move || {
                     meter_row(
                         &t,
                         label.clone(),
                         t.accent,
                         store.voice.speak_levels.get(),
-                        hint,
+                        "",
                     )
                 },
             );
@@ -1075,12 +1083,34 @@ pub fn status_row(store: Store) -> View {
                         .width(Dimension::Percent(1.0))
                         .height(Dimension::Cells(1))
                         .min_w(0)
+                        .gap(1)
                         .shrink(0.0),
                 )
                 .child(meter);
             if let Some(button) = current_speech_button(cx, store, &t) {
                 row = row.child(button);
             }
+            // Keep the control directly beside the bounded histogram. Only
+            // the trailing hint grows into spare terminal width.
+            row = row.child(
+                Element::new()
+                    .style(
+                        LayoutStyle::line(1)
+                            .grow(1.0)
+                            .basis(Dimension::Cells(0))
+                            .min_w(0),
+                    )
+                    .draw(move |canvas, rect| {
+                        let fitted = text::truncate_ellipsis(hint, rect.w);
+                        canvas.print(
+                            Point::new(rect.x, rect.y),
+                            &fitted,
+                            t.text_faint,
+                            Rgba::TRANSPARENT,
+                        );
+                    })
+                    .build(),
+            );
             return row.build();
         }
         let _ = store.voice.tick.get();

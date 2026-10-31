@@ -970,6 +970,9 @@ fn submit(
     }
     match commands::parse(&text) {
         None => {
+            // A newly submitted message takes the speaker lane immediately,
+            // including while the next run is starting or guidance is buffered.
+            voice_view::stop_speaking(store);
             // Commands parsed first (global); then @name routing (leading-@
             // only — a mid-prompt @ is plain text); then the focused
             // conversation decides.
@@ -1251,6 +1254,9 @@ pub(crate) fn send_start(
     opts: StartOpts,
     attachments: Vec<crate::store::PendingAttachment>,
 ) {
+    // Queue/goal/programmatic starts also supersede the previous narration.
+    // Idempotent after a composer submission: no extra host I/O when stopped.
+    voice_view::stop_speaking(store);
     let session_id = store.session_id.get_untracked();
     store.fold.update(|f| {
         f.push_item(Item::User {
