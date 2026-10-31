@@ -15,6 +15,8 @@ import { createPortal } from "react-dom";
 import { LoadingStatus } from "./loading_status";
 import { ArchivedFooter, ArchivedRow, PanelHeader, panelIds } from "./sidebar_panels";
 import { AutomationCard } from "./sidebar_cards";
+// Canonical consumption-aware panel; the installed UI-kit peer predates visibility receipts.
+import { AutomationPanel } from "../vendor/abstractsessions/automation_panel.js";
 import { AutomationHeaderBar } from "./automation_header";
 import { copy_text } from "../lib/clipboard";
 import { DetailDisclosure, detailPanelIds, useDetailPanels, useTimelineSlot, type DetailPanelsState } from "./detail_panels";
@@ -29,7 +31,7 @@ import {
   type AutomationSummary,
   type DiscussResponse,
 } from "@abstractframework/ui-kit";
-import { AutomationPanelWithMarkdown, WorkspaceBrowser, type AutomationPanelWithMarkdownProps } from "@abstractframework/panel-chat";
+import { automationRenderers, renderAutomationTurn, openGatewayResource, WorkspaceBrowser, type AutomationPanelWithMarkdownProps } from "@abstractframework/panel-chat";
 
 import {
   AUTOMATIONS_POLL_MS,
@@ -380,13 +382,13 @@ export function AutomationMain(props: {
             }}
             onCopyPath={copy_text}
           />
-          {p ? <AutomationPanelWithMarkdown {...p} hideHeader prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} fetchGateway={proxyGatewayFetch} messageProps={{
+          {p ? <AutomationPanel key={d.automationId} {...p} {...automationRenderers} onOpenResource={(r) => openGatewayResource(proxyGatewayFetch, r.url, { name: r.name })} hideHeader prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} renderTurn={(turn) => renderAutomationTurn(turn, {
             ...(voice.tts_supported ? { onSpeakToggle: (message) => {
               void voice.toggle_tts(String(message.id || message.content), message.content);
             } } : {}),
             getSpeakState: (message) => voice.tts_playback.key === String(message.id || message.content)
               ? voice.tts_playback.status : "idle",
-          }} /> : null}
+          })} /> : null}
           {timelineSlot
             ? createPortal(
                 <DetailDisclosure
