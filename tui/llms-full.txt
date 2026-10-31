@@ -139,7 +139,7 @@ Status: **0.12.0**, pre-alpha. Release history is in
 - **Capability control**: the header's **Tools** menu groups Tools, Skills and
   MCP servers. `/tools` selects Off/Ask/Auto per tool or category, `/skills` attaches gateway skills, and `/mcp`
   shows the gateway's MCP server registry. Direct commands remain available.
-- **Top-right controls**: **Docs** opens an assistant drawer with Docs and This run conversations,
+- **Top-right controls**: **Docs** opens Documentation; the avatar or account menu opens Companion.
   **Theme** previews appearance choices, **About** shows versions and framework
   links, and the account/status menu shows your gateway identity, connection
   details and a confirmed option to disconnect this terminal. Narrow terminals
@@ -244,7 +244,8 @@ Inside the app:
 - `@name` talks with a summoned entity when the gateway hosts them
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
-  top right of any message reads that one; streamed sentence by sentence from
+  top right of any message reads that one; bottom-meter and avatar ‖/▶ controls
+  pause/resume the current audio; streamed sentence by sentence from
   the gateway's voice route; `Esc` stops); on an empty prompt, HOLD
   `Space`, speak and release to send what you said (choose **Voice messages →
   Review before sending** in `/voice` to edit it first); `Ctrl+R` dictates into
@@ -350,16 +351,34 @@ MIT. See [LICENSE](LICENSE).
 
 ## Session companion
 
-Open **Companion settings** from the account menu, or use the assistant drawer's
-⚙ button. Enable the companion to show a Halo orb or Hover robot beside the
-conversation. Clicking it opens **This run**. Small terminals use a compact
+Open **Companion settings** from the account menu, or use the Companion drawer's
+⚙ button. Enable the companion to show your chosen activity avatar floating beneath
+the top-right header controls, over a bounded part of the transcript. It preserves
+the transcript's full width, and empty cells around the artwork leave text visible.
+**Position** chooses Top right or Bottom right, above
+the composer and audio controls. Clicking it opens **Companion**, a separate side
+conversation from **Documentation**. The account menu also opens Companion when
+the avatar is disabled. Small terminals use a compact
 control; **Animate activity** can be turned off for reduced motion.
+
+Choose **Appearance** to open a large, silent preview of all 44 catalog designs.
+Try **Watch Halo**, **Watch Wave**, **Watch Hover**, **Watch Rings** or **Watch Eye**
+for the new material detail; the original shaded Halo/Hover designs remain separate.
+Watch the activity phases cycle, or choose a phase to hold it. **Auto cycle**
+resumes the demonstration and **Pause motion** freezes it. **Apply avatar** saves the
+appearance; **Cancel** or Esc returns without changing it. Previewing needs no
+inference, microphone or speech playback.
+
+Hover leans toward you while listening, waits in a lower, quiet posture, and
+bobs with brighter thrusters and sparks while working. Ready breathes gently;
+Waiting pulses with sequential indicators. Halo listening rings move inward and
+speaking rings move outward. Error and paused speech remain still.
 
 **Offer comments** is off by default. When enabled, meaningful conversation
 changes can trigger a short observation through the existing Gateway pool, with
 one request at a time and at least 60 seconds between attempts in this TUI process.
 Restored history and unchanged/tool-only updates do not trigger comments. Comments
-appear in This run and cannot execute tools, steer the coding task or approve it.
+appear in Companion and cannot execute tools, steer the coding task or approve it.
 
 The side conversation's ● microphone records a question into its own editable
 draft; press again to transcribe, then ↑ to send. It never submits a coding task.
@@ -367,6 +386,21 @@ draft; press again to transcribe, then ↑ to send. It never submits a coding ta
 an independent speaking preset (default: main assistant voice). Speech shares the
 existing narration queue and device settings. Companion choices are local to this
 terminal; entity-owned appearance and voice remain managed by Gateway.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+show ‖ Pause or ▶ Resume for the current audio. Message-level playback controls
+remain available. These two shared controls never select or start another reply.
+
+## Work with a selected passage
+
+Available in the unreleased source checkout.
+
+Click assistant text, a table cell or code, then choose **Explain**, **Use as context**
+or **Change** above the composer. The selection is quoted into your existing draft;
+review it before using the normal send action. Dragging spans wrapped text, and
+sentence/paragraph controls refine the selection. Narrow terminals offer **Actions**.
+Esc or **Cancel** keeps your draft. Custom user/tool/JSON cards retain ordinary
+screen-copy selection. See [selected content](docs/api.md#selected-content).
 
 ========================================================================
 FILE: docs/getting-started.md
@@ -718,12 +752,17 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
   new run flips every previous flag; posted closures additionally re-check
   that their records belong to the fold's current run tree
   (`Fold::is_following`), so a stale stream can never contaminate a new run.
+- Terminal observations drain the final ledger tail before concluding. A completed
+  run snapshot's own output goes through the same final-output parser/source guard
+  as ledger records; status alone cannot discard a readable answer. A late canonical
+  completion can repair this turn's provisional missing-answer conclusion without
+  promoting a reasoning cycle or resurrecting cancelled/failed/previous turns.
 
 ## Assistant conversations
 
 The reusable engine ChatPanel owns message layout, scrolling and the composer.
 The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
-the Code corpus; This run captures an explicitly labelled snapshot of the loaded
+the Code corpus; Companion captures an explicitly labelled snapshot of the loaded
 conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
 a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded; bounded history is labelled. A separate worker
 follows that run, keeping coding commands and approval responses responsive.
@@ -930,7 +969,7 @@ flowchart LR
   Host --> Avatar["AbstractTUI Avatar: drawing only"]
   Host --> Gate["Change + cooldown gate"]
   Gate --> QA["Existing Gateway grounded QA / resource pool"]
-  QA --> Side["Isolated advice state / This run notice"]
+  QA --> Side["Isolated advice state / Companion notice"]
   Side --> Queue["Existing ordered narration queue"]
 ```
 
@@ -1015,7 +1054,7 @@ abstractcode --help | --version
 | Command | Effect |
 | --- | --- |
 | `/help` | Command + key reference modal |
-| `/new` | Fresh session (new durable id, cleared view) |
+| `/new` | Fresh session (new durable id, cleared view); stops current and queued speech (`/clear` too) |
 | `/voice [read-aloud on\|off \| auto-send on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `auto-send off` reviews held voice in the prompt; `auto-send on` sends it on release (default); `space on\|off` turns hold-Space-to-talk on or off (on by default) |
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
@@ -1261,6 +1300,11 @@ computer.
   could not be asked ("The gateway's default voice routes could not be
   read. Requests still use them."). `Enter` on a row offers Gateway default
   or an override for this app from `GET /voice/voices?compact=true`.
+- **Interrupting speech.** Submitting a new message stops current speech and clears
+  queued narration before starting the next run or buffering guidance. This includes
+  paused/preparing speech; late chunks/completions cannot resume the old reply.
+  `/new`, `/clear` and switching conversations also stop current/queued speech.
+  Typing alone and opening settings do not interrupt it.
 - **Speaking a reply** (`Ctrl+P`, `/speak`, the `▶` at the top right of
   any message, or **Read aloud**): `POST
   /api/gateway/runs/{run_id}/voice/tts/stream` (before the first run, the
@@ -1591,6 +1635,37 @@ recovers it.
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
 
+## Selected content
+
+These controls describe the unreleased source checkout.
+
+Click a mapped assistant passage to highlight a word, then choose **Explain**,
+**Use as context** or **Change** in the action row above the composer. The action
+adds quoted content to the existing draft; review it and press the normal Send
+key when ready. Sending uses the same new-run or active-run steering behavior as
+other coding prompts. Selection itself never sends, executes tools or approves work.
+
+A second click selects a sentence and a third selects its paragraph. Dragging
+selects a source span across wraps. Table cells include their header, row and
+column in the quoted context; code includes language and source lines. Local
+context excerpts surround the selected passage and label omitted earlier/later
+text. **Word**, **Sentence** and **Paragraph**, **Cell** or **Code block** change
+units. Narrow windows use **More** or **Actions** for the same choices.
+
+The controls reuse the existing one-row spacer, so selecting does not move the
+transcript under the pointer. Tab reaches the action host; Left/Right choose a
+visible action, Enter or Space activates it, and overflow menus use Up/Down and
+Enter. Esc cancels selection and any active voice capture/playback while preserving
+the coding draft. **Cancel** also preserves the draft. Finish or clear a slash-command
+draft before adding selected context; the app refuses to append context to a command.
+
+Mapped selection covers assistant Markdown prose, tables, code, plain/rich Feed
+blocks and streamed replies. User cards, custom tool previews and custom JSON
+blocks retain screen-copy selection until their producers supply source geometry;
+these regions do not offer semantic context actions. Links, scrollbars, disclosure
+controls and playback buttons keep their normal behavior. Source replacement or a
+session/conversation change clears stale selection.
+
 ## Transcript vocabulary
 
 The transcript reads as TURNS. Your message opens each one as a tinted
@@ -1801,9 +1876,10 @@ in an automation's Edit panel marks the row being saved with `…` next to
 
 Open **Docs** (under **Menu** on narrow terminals) or run `/docs`. The drawer
 uses message bubbles with a separate composer, Markdown answers and scrolling.
-**Docs** answers questions about AbstractCode documentation and the main conversation. **This run** answers
-questions about the conversation and run state currently loaded in this client.
-A dot marks the selected scope. Each scope has its own conversation and draft.
+**Documentation** answers questions about AbstractCode documentation and the main
+conversation. **Companion**, opened by the avatar or account menu, answers questions
+about the conversation and run state currently loaded in this client. These have
+separate titles, conversations and drafts; there are no scope tabs.
 Closing the drawer preserves them and your coding draft.
 
 Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
@@ -1838,19 +1914,59 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Setting | Default | Effect |
 |---|---|---|
 | Enable companion | Off | Show the activity avatar and enable companion interaction preferences |
-| Appearance | Halo orb | Halo / Hover robot; portable cell rendering |
+| Appearance | Halo orb | Preview all 44 catalog designs and activity phases before saving |
 | Animate activity | On | Activity motion; off gives reduced motion |
 | Offer comments | Off | Short change-driven observations through Gateway |
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
 | Speaking voice | Main assistant voice | Independent Gateway catalog voice; main device and volume settings remain in force |
+| Position | Top right | Top right or Bottom right within the transcript, clear of composer and audio rows |
+
+The avatar floats below the right header controls or at the bottom right, with its caption and action
+row centred together. Empty artwork cells leave the transcript visible; only
+the shape, caption and controls paint above it. Occupied terminal cells replace
+the underlying glyph, including soft edges and glow. It does not reserve a sidebar
+or reduce transcript width. Controls elsewhere
+continue to use the normal keyboard/mouse focus path.
 
 The avatar reflects observed activity: ready, thinking, executing tools, waiting,
 recording, speaking or error. Paused speech is static. Below 120 columns or 22 rows
 it becomes a compact control. The full avatar yields to drawers, modals and entity
 focus. It does not load a model or initiate microphone capture.
+Hover visibly leans with a raised hand while listening, rests lower with a dimmed
+downward gaze and sequential pulsing indicators while waiting, and bobs with
+thruster sparks while working. Ready breathes at2fps, Waiting uses6fps and active
+phases use up to12fps; Error stays still. Halo intake/emission rings distinguish
+Listening and Speaking even at a fixed audio level. Reduced motion stops clocks.
+Ready eyes follow actual terminal pointer movement or clicks and center after two seconds of
+inactivity. Abstract orbs turn subtly; tracking samples at up to12fps. It stops
+outside Ready, in reduced motion and when hidden. Error is static with red X eyes
+for Hover/Rover, or one central X for Eye. A terminal failure stays in Error until
+a new run or higher-priority activity. New live tool/run failures hold Error for at
+least one second, including during speech or an immediate recovery; each new failure
+restarts that second. Replayed history never triggers the transient cue, and leaving
+the session or hiding the companion clears it. Pointer movement never starts a task.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+include ‖ Pause / ▶ Resume for that current audio. The bottom control sits directly
+beside the live histogram at narrow and wide terminal sizes. They never select a different
+message or start a reply. Message-level play/pause controls remain available.
+
+Appearance opens a silent preview with all 44 catalog styles and Ready, Listening, Thinking,
+Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
+advances phases about every 3.5 seconds. **Pause motion** freezes the demonstration.
+Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
+The preview labels the saved appearance **In use** and another choice **Not applied**.
+The saved design is initially focused and a ● marks the selected design even when
+keyboard focus moves. **Enter** on a focused design applies it and closes the
+preview. Clicking a design only previews it; **Apply avatar** also saves and closes
+the preview to show the new avatar immediately; Cancel/Esc discards it. Preview playback can be
+started explicitly with reduced motion enabled, without changing that preference.
+The preview has no inference, recording or speech side effects. Choose **Watch Halo**,
+**Watch Wave**, **Watch Hover**, **Watch Rings** or **Watch Eye** for the enhanced
+reference procedures; similarly named original shaded styles retain their identities.
 
 Automatic comments use a dedicated grounded-QA conversation, separate from manual
-Docs/This run history and coding commands. They require a new meaningful visible
+Documentation/Companion history and coding commands. They require a new meaningful visible
 conversation revision, allow one request at a time and enforce at least 60 seconds
 between attempts, including failures. Restoring/loading earlier history establishes
 a baseline; tool payload/hidden-reasoning changes do not trigger a request. Changes
@@ -1867,6 +1983,15 @@ Queued automatic side speech respects current opt-out settings, source session a
 side-conversation identity, waits behind active speech/recording, and shares Stop.
 Side speech failures notify without modifying the coding transcript.
 
+
+## Final-answer recovery
+
+A completed answer is displayed as the normal assistant response, outside collapsed
+reasoning cycles. Reconnect terminal checks drain the last ledger page and reconcile
+readable canonical run output before declaring an answer missing. Late canonical
+completion can replace the current provisional missing-answer notice and summary;
+helper outputs, arbitrary cycle text and failed/cancelled/previous turns cannot.
+The existing message playback and historical read-aloud suppression remain in force.
 
 ## Session-list discovery
 
@@ -2719,6 +2844,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+
+- Select assistant prose, table cells or code and stage Explain, Use as context or
+  Change in the existing draft. Unicode word/sentence/paragraph units and wrapped
+  drags retain source provenance. The action row keeps transcript height stable;
+  keyboard navigation and narrow-window menus expose the same choices. Selection
+  never sends automatically; Esc/Cancel preserves drafts and voice stop remains available.
+
+- Companion floats beneath the right header controls without narrowing the
+  transcript. Art and actions align together; Listening, Waiting and Working
+  have distinct poses, with working thruster particles.
+
+- Companion artwork uses larger shaded Halo/Hover visuals. Appearance opens a
+  silent live phase preview with automatic cycling, manual hold and explicit save.
 
 - Add optional Halo/Hover session companion, observed activity poses, reduced
   motion, change-driven comments and independent side speech preferences. Side

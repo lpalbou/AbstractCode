@@ -46,7 +46,6 @@ DOCUMENTS = [
     "SECURITY.md",
     "CODE_OF_CONDUCT.md",
     "ACKNOWLEDGEMENTS.md",
-    "skills/abstractcode/SKILL.md",
 ]
 
 HEADER = """# AbstractCode — full documentation snapshot

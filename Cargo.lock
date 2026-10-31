@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "abstract-avatar"
+name = "abstractavatar"
 version = "0.1.0"
 
 [[package]]
@@ -20,7 +20,7 @@ dependencies = [
 name = "abstracttui"
 version = "0.7.1"
 dependencies = [
- "abstract-avatar",
+ "abstractavatar",
  "libc",
  "miniz_oxide 0.9.1",
  "unicode-segmentation",

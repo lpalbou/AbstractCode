@@ -341,7 +341,7 @@ MIT. See [LICENSE](LICENSE).
 ## Session companion
 
 Open **Companion settings** from the account menu, or use the Companion drawer's
-⚙ button. Enable the companion to show a Halo orb or Hover robot floating beneath
+⚙ button. Enable the companion to show your chosen activity avatar floating beneath
 the top-right header controls, over a bounded part of the transcript. It preserves
 the transcript's full width, and empty cells around the artwork leave text visible.
 **Position** chooses Top right or Bottom right, above
@@ -350,9 +350,11 @@ conversation from **Documentation**. The account menu also opens Companion when
 the avatar is disabled. Small terminals use a compact
 control; **Animate activity** can be turned off for reduced motion.
 
-Choose **Appearance** to open a large, silent preview. Switch between Halo and
-Hover, watch the activity phases cycle, or choose a phase to hold it. **Auto cycle**
-resumes the demonstration and **Pause motion** freezes it. **Use this** saves the
+Choose **Appearance** to open a large, silent preview of all 44 catalog designs.
+Try **Watch Halo**, **Watch Wave**, **Watch Hover**, **Watch Rings** or **Watch Eye**
+for the new material detail; the original shaded Halo/Hover designs remain separate.
+Watch the activity phases cycle, or choose a phase to hold it. **Auto cycle**
+resumes the demonstration and **Pause motion** freezes it. **Apply avatar** saves the
 appearance; **Cancel** or Esc returns without changing it. Previewing needs no
 inference, microphone or speech playback.
 
@@ -377,6 +379,17 @@ terminal; entity-owned appearance and voice remain managed by Gateway.
 While speech is playing or paused, the bottom histogram and avatar action row
 show ‖ Pause or ▶ Resume for the current audio. Message-level playback controls
 remain available. These two shared controls never select or start another reply.
+
+## Work with a selected passage
+
+Available in the unreleased source checkout.
+
+Click assistant text, a table cell or code, then choose **Explain**, **Use as context**
+or **Change** above the composer. The selection is quoted into your existing draft;
+review it before using the normal send action. Dragging spans wrapped text, and
+sentence/paragraph controls refine the selection. Narrow terminals offer **Actions**.
+Esc or **Cancel** keeps your draft. Custom user/tool/JSON cards retain ordinary
+screen-copy selection. See [selected content](docs/api.md#selected-content).
 
 Explicit files attached to an assistant answer are listed beside that answer, including
 file-only results. Tool output containing a serialized JSON object/array is formatted in

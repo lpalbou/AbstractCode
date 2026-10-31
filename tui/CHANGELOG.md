@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Select assistant prose, table cells or code and stage Explain, Use as context or
+  Change in the existing draft. Unicode word/sentence/paragraph units and wrapped
+  drags retain source provenance. The action row keeps transcript height stable;
+  keyboard navigation and narrow-window menus expose the same choices. Selection
+  never sends automatically; Esc/Cancel preserves drafts and voice stop remains available.
+
 - Companion floats beneath the right header controls without narrowing the
   transcript. Art and actions align together; Listening, Waiting and Working
   have distinct poses, with working thruster particles.

@@ -31,6 +31,10 @@ Ground rules for reading this repository:
 
 Open **Model** directly from the right-hand icon rail to change the selected conversation or automation’s model. **Agent** groups workflow, tools and skills; **Workspace** controls folders. **Voice** configures this app’s speech and devices. Automation Model panels show **Limits**; conversation panels show **Limits & streaming**. The Docs assistant’s speaker reads a reply aloud when speech is configured.
 
+The terminal client supports source-aware assistant text/table/code selection.
+Explain, Use as context and Change stage quoted content into an existing draft;
+sending remains explicit. See [terminal selection](tui/docs/api.md#selected-content).
+
 ## Project documentation
 
 - [README](README.md): what AbstractCode is, the two clients, and a quick start

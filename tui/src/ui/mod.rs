@@ -11,6 +11,7 @@ pub mod chrome;
 mod companion_preview;
 pub mod companion_view;
 pub mod companion_voice;
+mod content_selection;
 pub mod conversations_view;
 pub mod docs_assistant;
 pub mod entity_actions;
@@ -353,6 +354,18 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // Durable composer state (draft, caret, input history): lives in root
     // scope so theme rebuilds of the TextArea keep everything.
     let composer = abstracttui::widgets::TextAreaState::new(cx);
+    let content_selection = abstracttui::widgets::ContentSelection::new(cx);
+    cx.provide_context(content_selection.clone());
+    let selection_focus = cx.signal(false);
+    cx.provide_context(content_selection::SelectionFocus(selection_focus));
+    {
+        let selection = content_selection.clone();
+        cx.effect(move || {
+            store.session_id.get();
+            store.focus.get();
+            selection.clear();
+        });
+    }
     // Where the composer currently lives in the tree — the root's
     // type-to-focus handler needs it (see `chrome::ComposerAnchor`).
     let composer_anchor = chrome::ComposerAnchor::default();
@@ -572,9 +585,38 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
             let context = ctx.clone();
             move |_, event| {
                 if let abstracttui::ui::UiEvent::Mouse(mouse) = event {
-                    if matches!(mouse.kind, abstracttui::ui::MouseKind::Move) {
-                        companion_view::record_pointer(store, &context, avatar_pointer, mouse.pos);
+                    if matches!(
+                        mouse.kind,
+                        abstracttui::ui::MouseKind::Move | abstracttui::ui::MouseKind::Down(_)
+                    ) {
+                        companion_view::record_pointer(
+                            store,
+                            &context,
+                            avatar_pointer,
+                            mouse.pos,
+                            matches!(mouse.kind, abstracttui::ui::MouseKind::Down(_)),
+                        );
                     }
+                }
+            }
+        })
+        .on(abstracttui::ui::Phase::Capture, {
+            let selection = content_selection.clone();
+            let anchor = composer_anchor.clone();
+            move |ectx, event| {
+                if matches!(event, abstracttui::ui::UiEvent::Key(key) if key.key == Key::Escape)
+                    && selection.value().get_untracked().is_some()
+                {
+                    selection.clear();
+                    // Selection cancellation must preserve the urgent voice stop.
+                    // A reviewed draft and run-cancel arm remain untouched.
+                    voice_view::escape(store);
+                    store.last_esc.set(None);
+                    if let Some(id) = anchor.get() {
+                        ectx.request_focus(id);
+                    }
+                    ectx.release_pointer();
+                    ectx.stop_propagation();
                 }
             }
         })
@@ -636,7 +678,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                 // widget under the keyboard cursor: the header's
                 // workflow/model/gateway, the bar's workspace/session/
                 // theme); any other character still goes to the prompt.
-                if chrome_focus.any()
+                if (chrome_focus.any() || selection_focus.get_untracked())
                     && matches!(ev, abstracttui::ui::UiEvent::Key(k) if k.key == Key::Char(' '))
                 {
                     return;
@@ -853,11 +895,13 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                     // where the engine believes the visible window ends.
                     // Counted in CHROME_ROWS (5) so the pane-height
                     // estimates stay honest.
-                    .child(
-                        Element::new()
-                            .style(LayoutStyle::line(1).shrink(0.0))
-                            .build(),
-                    )
+                    .child(content_selection::toolbar(
+                        scx,
+                        store,
+                        composer.clone(),
+                        composer_anchor.clone(),
+                        &ctx.overlays,
+                    ))
                     // Pending attachment chips (only while staged — no
                     // reserved blank; CHROME_ROWS estimates deliberately
                     // exclude this sometimes-present row).

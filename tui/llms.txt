@@ -27,6 +27,10 @@
 > with gateway-hosted summoned entities (`@name`). One crate, three
 > dependencies (abstracttui, ureq, serde_json). MIT licensed.
 
+Selected assistant prose, tables and code can be quoted into the coding draft
+through Explain, Use as context or Change; review and send explicitly. See the
+[selection guide](docs/api.md#selected-content) for keyboard use and custom-card limits.
+
 ## Core docs
 
 - [README](README.md): The pitch, a rendered-screen sketch, install,

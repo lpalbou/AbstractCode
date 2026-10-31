@@ -174,10 +174,20 @@ pub fn observed_pose(store: Store) -> AvatarPose {
         }
     })
 }
-pub(super) fn record_pointer(store: Store, ctx: &UiCtx, pointer: AvatarPointer, point: Point) {
+pub(super) fn record_pointer(
+    store: Store,
+    ctx: &UiCtx,
+    pointer: AvatarPointer,
+    point: Point,
+    pressed: bool,
+) {
     let p = prefs(ctx);
     if p.enabled && p.animate && visible(store, ctx) && observed_pose(store) == AvatarPose::Ready {
-        pointer.moved(point);
+        if pressed {
+            pointer.pressed(point);
+        } else {
+            pointer.moved(point);
+        }
     } else {
         pointer.clear();
     }

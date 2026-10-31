@@ -91,8 +91,8 @@ loading more history. Terminal graphics depend on capabilities; voice requires
 an installed host audio backend and configured Gateway routes. Windows end-to-end
 support is not verified in the terminal reference. Companion visuals and automatic comments are opt-in and off by default.
 
-References: [terminal API](../../tui/docs/api.md), [setup](../../docs/getting-started.md),
-[architecture](../../docs/architecture.md), [troubleshooting](../../tui/docs/troubleshooting.md).
+References: [terminal API](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/tui/docs/api.md), [setup](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/docs/getting-started.md),
+[architecture](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/docs/architecture.md), [troubleshooting](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/tui/docs/troubleshooting.md).
 
 ## Optional companion
 
@@ -122,9 +122,9 @@ Preferences are local; entity voice/appearance remains Gateway-owned.
 During current speech, bottom-meter and avatar ‖/▶ buttons pause/resume that audio
 without starting another reply. Per-message playback controls remain available.
 
-Ready eyes can follow active terminal cursor movement; they center after2s idle.
+Ready eyes follow terminal cursor movement and presses; they center after two seconds idle.
 Other phases/reduced motion ignore tracking. Error faces show red X eyes. Shared
-geometry/catalog belongs to AbstractTUI's independent `abstract-avatar` crate;
+geometry/catalog belongs to the independent AbstractAvatar (`abstractavatar`) generator;
 web hosts use AbstractUIC `ActivityAvatar` instead of copying geometry.
 
 Live tool/run failures hold the avatar Error cue for at least1s even if the run
@@ -138,3 +138,15 @@ beside the bottom realtime histogram as well as in the companion action row.
 
 Session boundaries (`/new`, `/clear`, switching conversations) stop the current
 speech and discard queued narration; late chunks cannot resume in the new session.
+
+## Selected content in the terminal
+
+Click mapped assistant text, a table cell or code, then choose Explain, Use as
+context or Change. Review the quoted content in the existing coding draft before
+sending normally; selection and staging grant no send, tool or approval authority.
+Use unit actions to switch word/sentence/paragraph/cell/code scope, or drag a span.
+Table context retains headers and code context retains language/lines. Finish a
+slash-command draft before adding context. Esc/Cancel preserves the coding draft;
+Esc also stops current voice work. Custom user/tool/JSON cards use screen-copy
+fallback and do not provide semantic actions. See
+[terminal selection](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/tui/docs/api.md#selected-content).

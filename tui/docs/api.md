@@ -646,6 +646,37 @@ recovers it.
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
 
+## Selected content
+
+These controls describe the unreleased source checkout.
+
+Click a mapped assistant passage to highlight a word, then choose **Explain**,
+**Use as context** or **Change** in the action row above the composer. The action
+adds quoted content to the existing draft; review it and press the normal Send
+key when ready. Sending uses the same new-run or active-run steering behavior as
+other coding prompts. Selection itself never sends, executes tools or approves work.
+
+A second click selects a sentence and a third selects its paragraph. Dragging
+selects a source span across wraps. Table cells include their header, row and
+column in the quoted context; code includes language and source lines. Local
+context excerpts surround the selected passage and label omitted earlier/later
+text. **Word**, **Sentence** and **Paragraph**, **Cell** or **Code block** change
+units. Narrow windows use **More** or **Actions** for the same choices.
+
+The controls reuse the existing one-row spacer, so selecting does not move the
+transcript under the pointer. Tab reaches the action host; Left/Right choose a
+visible action, Enter or Space activates it, and overflow menus use Up/Down and
+Enter. Esc cancels selection and any active voice capture/playback while preserving
+the coding draft. **Cancel** also preserves the draft. Finish or clear a slash-command
+draft before adding selected context; the app refuses to append context to a command.
+
+Mapped selection covers assistant Markdown prose, tables, code, plain/rich Feed
+blocks and streamed replies. User cards, custom tool previews and custom JSON
+blocks retain screen-copy selection until their producers supply source geometry;
+these regions do not offer semantic context actions. Links, scrollbars, disclosure
+controls and playback buttons keep their normal behavior. Source replacement or a
+session/conversation change clears stale selection.
+
 ## Transcript vocabulary
 
 The transcript reads as TURNS. Your message opens each one as a tinted
@@ -894,7 +925,7 @@ Open Companion settings from the account menu or drawer gear. It offers:
 | Setting | Default | Effect |
 |---|---|---|
 | Enable companion | Off | Show the activity avatar and enable companion interaction preferences |
-| Appearance | Halo orb | Preview Halo, Hover, Vortex, Eclipse, Eye, Rover and activity phases before saving |
+| Appearance | Halo orb | Preview all 44 catalog designs and activity phases before saving |
 | Animate activity | On | Activity motion; off gives reduced motion |
 | Offer comments | Off | Short change-driven observations through Gateway |
 | Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
@@ -917,7 +948,7 @@ downward gaze and sequential pulsing indicators while waiting, and bobs with
 thruster sparks while working. Ready breathes at2fps, Waiting uses6fps and active
 phases use up to12fps; Error stays still. Halo intake/emission rings distinguish
 Listening and Speaking even at a fixed audio level. Reduced motion stops clocks.
-Ready eyes follow actual terminal cursor movement and center after two seconds of
+Ready eyes follow actual terminal pointer movement or clicks and center after two seconds of
 inactivity. Abstract orbs turn subtly; tracking samples at up to12fps. It stops
 outside Ready, in reduced motion and when hidden. Error is static with red X eyes
 for Hover/Rover, or one central X for Eye. A terminal failure stays in Error until
@@ -931,7 +962,7 @@ include ‖ Pause / ▶ Resume for that current audio. The bottom control sits d
 beside the live histogram at narrow and wide terminal sizes. They never select a different
 message or start a reply. Message-level play/pause controls remain available.
 
-Appearance opens a silent preview with all six styles and Ready, Listening, Thinking,
+Appearance opens a silent preview with all 44 catalog styles and Ready, Listening, Thinking,
 Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
 advances phases about every 3.5 seconds. **Pause motion** freezes the demonstration.
 Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
@@ -941,7 +972,9 @@ keyboard focus moves. **Enter** on a focused design applies it and closes the
 preview. Clicking a design only previews it; **Apply avatar** also saves and closes
 the preview to show the new avatar immediately; Cancel/Esc discards it. Preview playback can be
 started explicitly with reduced motion enabled, without changing that preference.
-The preview has no inference, recording or speech side effects.
+The preview has no inference, recording or speech side effects. Choose **Watch Halo**,
+**Watch Wave**, **Watch Hover**, **Watch Rings** or **Watch Eye** for the enhanced
+reference procedures; similarly named original shaded styles retain their identities.
 
 Automatic comments use a dedicated grounded-QA conversation, separate from manual
 Documentation/Companion history and coding commands. They require a new meaningful visible
