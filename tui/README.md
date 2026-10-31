@@ -377,3 +377,7 @@ terminal; entity-owned appearance and voice remain managed by Gateway.
 While speech is playing or paused, the bottom histogram and avatar action row
 show ‖ Pause or ▶ Resume for the current audio. Message-level playback controls
 remain available. These two shared controls never select or start another reply.
+
+Explicit files attached to an assistant answer are listed beside that answer, including
+file-only results. Tool output containing a serialized JSON object/array is formatted in
+details; URL and path links use terminal OSC-8 support.

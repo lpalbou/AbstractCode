@@ -1,3 +1,5 @@
+import {WorkflowChat} from "../vendor/abstractchat/conversation.js";
+import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget } from "../vendor/abstractsessions/session_cards.js";
 import { useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
 import { CodeDocsAssistant } from "./app_assistant";
@@ -52,7 +54,6 @@ import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useAr
 import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
 import { ConversationCard } from "./sidebar_cards";
 import {
-  WorkflowChat,
   WorkspaceBrowser,
   uploadRefusal,
   useAttachmentUploads,
@@ -1916,6 +1917,9 @@ export function CodeWorkspace() {
               />
             ) : null}
             <WorkflowChat
+                artifactFetch={proxyGatewayFetch}
+                attachmentScope={JSON.stringify([identity,session.sessionId])}
+                attachmentRun={{runId:session.runId,output:snapshot.run?.output}}
               streamReplies={streamReplies}
               messages={
                 interaction?.kind === "tool-approval"
@@ -1933,7 +1937,7 @@ export function CodeWorkspace() {
                 renderFooter: (message) => {
                   const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
                   if (!status) return null;
-                  const target = sessionReadTarget(messages, message.runId || "", status);
+                  const target = sessionReadTarget(message.kind === "attachments" ? [...messages,message] : messages, message.runId || "", status);
                   return target.message === message && readScope && !snapshot.loading && !snapshot.error ? <><span>{target.outcome}</span><SessionReadMarker ownerKey={readScope} receipt={{ sessionId: session.sessionId, revision: sessionContentRevision(message.runId || "", status), updatedAt: "" }} enabled={!automationView && !sidebarOpen && identity === principalRef.current} onRead={sessionReads.markRead} /></> : null;
                 },
                 ...(voice.tts_supported

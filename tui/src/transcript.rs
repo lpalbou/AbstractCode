@@ -599,10 +599,70 @@ fn envelope_rest(v: Option<&Value>) -> String {
 fn value_block(v: Option<&Value>) -> String {
     match v {
         None => String::new(),
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
+            Ok(value @ (Value::Object(_) | Value::Array(_))) => {
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| s.clone())
+            }
+            _ => s.clone(),
+        },
         Some(Value::Null) => String::new(),
         Some(other) => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
     }
+}
+
+/// Named files explicitly attached to an answer, excluding internal scratchpad refs.
+fn attached_output_names(meta: &Value) -> Vec<String> {
+    fn collect(value: &Value, names: &mut Vec<String>, seen: &mut HashSet<String>, depth: usize) {
+        if depth > 8 {
+            return;
+        }
+        if let Some(items) = value.as_array() {
+            for item in items {
+                collect(item, names, seen, depth + 1);
+            }
+        } else if let Some(object) = value.as_object() {
+            if let Some(id) = object
+                .get("$artifact")
+                .or_else(|| object.get("artifact_id"))
+                .and_then(Value::as_str)
+            {
+                if seen.insert(id.to_string()) {
+                    names.push(
+                        object
+                            .get("filename")
+                            .or_else(|| object.get("name"))
+                            .and_then(Value::as_str)
+                            .unwrap_or(id)
+                            .to_string(),
+                    );
+                }
+            } else {
+                for child in object.values() {
+                    collect(child, names, seen, depth + 1);
+                }
+            }
+        }
+    }
+    let mut names = Vec::new();
+    let mut seen = HashSet::new();
+    for key in [
+        "attachments",
+        "files",
+        "artifacts",
+        "video_artifact",
+        "audio_artifact",
+        "music_artifact",
+    ] {
+        if let Some(value) = meta.get(key) {
+            collect(value, &mut names, &mut seen, 0);
+        }
+    }
+    if meta.get("image_artifact").is_none() {
+        if let Some(value) = meta.get("artifact") {
+            collect(value, &mut names, &mut seen, 0);
+        }
+    }
+    names
 }
 
 /// The turn's verdict AS THE SERVER WORDED IT (`output.stop_reason`).
@@ -1661,6 +1721,7 @@ impl Fold {
                     ]
                     .iter()
                     .any(|k| m.get(*k).is_some())
+                        || !attached_output_names(m).is_empty()
                 })
                 .unwrap_or(false);
             let usable = out
@@ -1725,6 +1786,12 @@ impl Fold {
                     });
                 }
                 if let Some(meta) = &out.meta {
+                    let files = attached_output_names(meta);
+                    if !files.is_empty() {
+                        self.push_item(Item::Info {
+                            text: format!("📎 {}", files.join(" · ")),
+                        });
+                    }
                     if let Some(artifact) = meta.get("image_artifact") {
                         let aid = artifact
                             .get("$artifact")
@@ -2701,6 +2768,30 @@ impl Fold {
 /// `finish_tool` covers id-less providers.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn attached_output_files_and_json_strings_remain_readable() {
+        let files = serde_json::json!({"attachments":[{"$artifact":"file","filename":"report.pdf"}],"scratchpad":{"$artifact":"internal"}});
+        assert_eq!(super::attached_output_names(&files), vec!["report.pdf"]);
+        let mut fold = super::Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &serde_json::json!({"run_id":"root","status":"completed","result":{"completed":true,"output":files}}));
+        assert!(fold.finished, "a file-only answer concludes");
+        assert!(
+            fold.items
+                .iter()
+                .any(|item| matches!(item,super::Item::Info{text} if text.contains("report.pdf"))),
+            "file appears beside answer"
+        );
+
+        let raw = serde_json::json!("{\"results\":[{\"url\":\"https://example.org\"}]}");
+        let formatted = super::value_block(Some(&raw));
+        assert!(formatted.contains('\n'));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&formatted).unwrap()["results"][0]["url"],
+            "https://example.org"
+        );
+    }
+
     use super::*;
 
     /// Two distinct calls must never collapse onto one card.
