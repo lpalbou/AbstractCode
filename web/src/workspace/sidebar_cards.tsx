@@ -1,27 +1,23 @@
-import { SessionCard, type SessionActivity } from "../vendor/abstractsessions/session_cards.js";
+import { SessionCard, AutomationCard as SharedAutomationCard, type SessionActivity } from "../vendor/abstractsessions/session_cards.js";
 import "../vendor/abstractsessions/session_cards.css";
 // The sidebar cards (round 4, DESIGN §3): full drawer width, no leading icon, an 8/12 px rhythm.
 //
 // - Active conversations use AbstractUIC SessionCard. Archived restore rows keep a date/count summary. The tool
 //   figure is the gateway's (`tool_calls` per turn, totalled over its sub-runs; catalog.ts adds the
 //   listed turns); without it the card shows no tool figure rather than a guess.
-// - Automation (round 5): the name on its own row (+ the "waiting for you" badge while an approval
-//   is pending), then two quiet lines from the kit's `automationTiming` (deterministic):
-//   `↻ every 24 h · last 3 h ago`, then `next in 20 h` with the Active switch right-aligned on that
-//   same line. The card body selects; the switch is a sibling control. A third line only while the
-//   gateway's last "Email result" failed: its served sentence verbatim (last_notification.tsx).
-import React from "react";
+// - Automations use the same shared card shell, with Watch run/schedule/next facts.
+import React, { useState } from "react";
 import {
   AfSwitch,
-  Icon,
+  AfModal,
   automationControls,
-  automationTiming,
   controlHint,
   type AutomationSummary,
 } from "@abstractframework/ui-kit";
 
 import type { SessionSummary } from "./catalog";
 import { LastNotificationLine } from "./last_notification";
+import { toApiError } from "./automations";
 
 // Retained for the archived-conversation restore list.
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -113,48 +109,38 @@ export function AutomationActiveSwitch(props: {
   );
 }
 
-/** The card's two timing lines: `every 24 h · last 3 h ago` and `next in 20 h` ("" when nothing is scheduled). */
-export function automationCardLines(s: AutomationSummary, nowMs: number): { first: string; second: string; scheduled: boolean } {
-  const t = automationTiming(s, nowMs);
-  return { first: [t.cadence, t.last].filter(Boolean).join(" · "), second: t.next || "", scheduled: s.trigger.source_id === "schedule" };
-}
-
+/** Automation transport and confirmation stay in the host; presentation is shared. */
 export function AutomationCard(props: {
   summary: AutomationSummary;
   selected: boolean;
   busy: boolean;
   nowMs: number;
   onSelect(): void;
-  onToggleActive(): void;
+  onArchive?(): Promise<unknown>;
 }): React.ReactElement {
   const s = props.summary;
-  const lines = automationCardLines(s, props.nowMs);
-  const waiting = automationIsWaiting(s);
-  return (
-    <div
-      className={`code-card code-auto-card${props.selected ? " is-selected" : ""}`}
-      data-automation-id={s.automation_id}
-      data-status={s.status}
-    >
-      <button
-        type="button"
-        className="code-card-main"
-        aria-current={props.selected ? "page" : undefined}
-        title={`${s.title}\n${[lines.first, lines.second].filter(Boolean).join(" · ")}`}
-        onClick={props.onSelect}
-      >
-        <strong className="code-card-title">{s.title}</strong>
-        {waiting ? <WaitingBadge /> : null}
-        <small className="code-card-meta" data-field="timing">
-          {lines.scheduled ? <Icon name="refresh" size={12} className="code-card-cadence-icon" /> : null}
-          <span className="code-card-part">{lines.first}</span>
-        </small>
-      </button>
-      <div className="code-card-line2">
-        <small className="code-card-meta" data-field="next">{lines.second}</small>
-        <AutomationActiveSwitch className="code-card-switch" iconOnly summary={s} busy={props.busy} onToggle={props.onToggleActive} />
-      </div>
-      <LastNotificationLine summary={s} nowMs={props.nowMs} className="code-card-notif" />
-    </div>
-  );
+  const [confirm, setConfirm] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [error, setError] = useState("");
+  const archive = automationControls(s, [], props.busy || archiving).archive;
+  return <div className="code-automation-item" data-automation-id={s.automation_id} data-status={s.status}>
+    <SharedAutomationCard summary={s} selected={props.selected} nowMs={props.nowMs} onOpen={props.onSelect}
+      onArchive={props.onArchive ? () => { setError(""); setConfirm(true); } : undefined}
+      archiveDisabled={!archive.enabled} archiveTitle={archive.reason || "Archive automation"} />
+    <LastNotificationLine summary={s} nowMs={props.nowMs} className="code-card-notif" />
+    <AfModal open={confirm} onClose={() => { if (!archiving) setConfirm(false); }} title="Archive automation?" size="narrow"
+      footer={<>
+        <button className="code-subtle-button" disabled={archiving} onClick={() => setConfirm(false)}>Cancel</button>
+        <button className="code-subtle-button" disabled={!archive.enabled} onClick={async () => {
+          if (archiving || !archive.enabled) return;
+          setArchiving(true);
+          try { await props.onArchive?.(); setConfirm(false); }
+          catch (e) { setError(toApiError(e).message); }
+          finally { setArchiving(false); }
+        }}>{archiving ? "Archiving…" : "Archive"}</button>
+      </>}>
+      <p>Archive “{s.title}”? Scheduled runs will stop. Its history is kept and you can restore it from Archived.</p>
+      {error && <p role="alert" className="code-inline-error">{error}</p>}
+    </AfModal>
+  </div>;
 }

@@ -145,9 +145,14 @@ schedules), **Email result** and **Recipients**, each change one revision.
 | Archive | `a`, then `y` | Asks first, inline: "Archive “title”? It will not run again; its history stays readable." The automation stops and leaves the list; its history stays readable under the quiet **Archived · N** line at the end of the list, each with **Unarchive** (`Enter` on the line opens it, `Enter` or `u` on a row unarchives; it comes back paused). Archiving never deletes anything. |
 
 In the browser the switch and the buttons **Run now**, **Stop**, **Edit** and
-**Archive** sit in the automation's header, next to its timing line
-(`every 24 h · last 3 h ago · next in 14 h`); each sidebar card carries the
-**Active** switch too. Hovering a control shows what it does (Run now's tooltip adds the next scheduled time). The
+**Archive** live in the selected automation's header, beside its full timing line
+(`every 24 h · last 3 h ago · next in 14 h`). Sidebar cards use the same compact
+AbstractUIC presentation as conversations: a regular two-line title, run count,
+compact cadence and the time until the next run. Paused automations say Paused.
+An amber outline and count badge mark unseen results; “Needs you” marks a human
+wait, a spinner marks a current run, and a red dot marks the last failed run.
+Archive appears on hover or keyboard focus (always on touch), with confirmation.
+Opening the card does not acknowledge results; reading them does. Hovering a control shows what it does (Run now's tooltip adds the next scheduled time). The
 terminal shows Run now's effect in one line under the key hints: "g run now:
 Run it once now, without waiting for the schedule; the next scheduled run keeps
 its time." Every AbstractFramework client uses the same wording and the same

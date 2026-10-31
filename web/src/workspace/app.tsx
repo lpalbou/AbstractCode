@@ -339,7 +339,7 @@ export function CodeWorkspace() {
     const timer = setTimeout(() => void catalog.refreshSessions(), 500);
     return () => clearTimeout(timer);
   }, [meEvents.fold.cursor, catalog.refreshSessions]);
-  const { ctl: automations, state: automationsState } = useAutomations(
+  const { ctl: automations, state: automationsState, nowMs: automationNowMs } = useAutomations(
     identity,
     connection.connected && automationsAvailable.available,
     { following: eventsFollowing, epoch: meEvents.fold.automationEpoch },
@@ -1645,6 +1645,7 @@ export function CodeWorkspace() {
         </div>
         <SidebarLists panels={panels}>
         <AutomationsSection
+          nowMs={automationNowMs}
           state={automationsState}
           attention={eventsFollowing ? { needsYou: needsYou(meEvents.fold), newResults: newResults(meEvents.fold) } : null}
           available={automationsAvailable}
@@ -1661,7 +1662,7 @@ export function CodeWorkspace() {
           archivedOpen={archivedOpen.automations}
           onToggleArchived={() => toggleArchivedOpen("automations")}
           onUnarchive={(s) => void automations.unarchive(s.automation_id).catch(() => undefined)}
-          onToggleActive={(s) => void automations.toggleActive(s).catch(() => undefined)}
+          onArchive={(s) => automations.command(s.automation_id, "automation.archive")}
           open={panels.automations}
           onToggle={() => togglePanelOpen("automations")}
         />
