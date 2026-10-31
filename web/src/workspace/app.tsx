@@ -1,5 +1,5 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, useAvatarConversationPreferences, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
-import { ActivityAvatar, AfVoiceMicButton, voiceCaptureMode } from "@abstractframework/ui-kit";
+import { ActivityAvatar, AfVoiceMicButton, voiceCaptureMode, useVoiceLevel } from "@abstractframework/ui-kit";
 import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget, sessionOpeningReceipts } from "../vendor/abstractsessions/session_cards.js";
 import { createSessionReadClient, useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
@@ -165,6 +165,11 @@ function writeRoute(sessionId: string, runId = "") {
   const params = new URLSearchParams({ session: sessionId });
   if (runId) params.set("run", runId);
   window.history.replaceState(null, "", `#${params}`);
+}
+
+function ConversationAvatar({ voice, active, pending, failed, paused }: { voice: ReturnType<typeof useWorkspaceVoice>; active: boolean; pending: boolean; failed: boolean; paused: boolean }) {
+  const microphone = useVoiceLevel(voice.voice_ptt_recording ? voice : null);
+  return <ActivityAvatar design="halo" size={320} pose={voice.voice_ptt_recording ? "listening" : voice.tts_playback.status === "playing" ? "speaking" : paused || pending ? "waiting" : active ? "thinking" : failed ? "error" : "ready"} level={voice.voice_ptt_recording ? microphone : 0} label="Your assistant" />;
 }
 
 export function CodeWorkspace() {
@@ -1089,7 +1094,7 @@ export function CodeWorkspace() {
     const sid = session.sessionId;
     const rid = session.runId;
     const epoch = authEpoch.current;
-    const answer = (await controller.sendCommand("inject_guidance", { guidance: avatarMode ? conversationReply(text, avatarReplyContext, session.runId) : text, ...(avatarMode ? { display_text: text } : {}) })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
+    const answer = (await controller.sendCommand("inject_guidance", { guidance: avatarMode ? conversationReply(text, avatarReplyContext, session.runId, snapshot.view?.root_run_id === session.runId ? snapshot.view.runs.map((run) => run.run_id) : []) : text, ...(avatarMode ? { display_text: text } : {}) })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
     if (sessionRef.current.sessionId !== sid || sessionRef.current.runId !== rid || authEpoch.current !== epoch) throw staleSendAbort();
     if (avatarMode && answer?.accepted !== false) setAvatarReplyContext(null);
     return {
@@ -1932,7 +1937,7 @@ export function CodeWorkspace() {
             <WorkflowChat
               avatarConversation={avatarMode ? {
                 sessionKey: `${identity}:${session.sessionId}`,
-                avatar: <ActivityAvatar design="halo" size={320} pose={voice.voice_ptt_recording ? "listening" : voice.tts_playback.status === "playing" ? "speaking" : pendingInteraction ? "waiting" : active ? "thinking" : snapshot.status === "failed" ? "error" : "ready"} label="Your assistant" />,
+                avatar: <ConversationAvatar voice={voice} active={active} pending={Boolean(pendingInteraction)} failed={snapshot.status === "failed"} paused={paused && !terminal(snapshot.status)} />,
                 ...conversationSnapshot(snapshot),
                 listening: voice.voice_ptt_recording,
                 speaking: voice.tts_playback.status === "playing",
