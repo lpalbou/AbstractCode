@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Web conversation read markers use durable Gateway receipts shared across clients; sidebar cards have more space and attachment previews fit their media.
+
+
 - Terminal avatar overlays preserve transcript text outside the procedural shape.
   Reconnect completion handling drains final ledger records and reconciles canonical
   output, so a completed answer is not left hidden inside a reasoning cycle.

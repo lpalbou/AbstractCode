@@ -60,7 +60,7 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 
 ### Navigation panels
 
-The sidebar holds two stacking drawers, **Conversations** above **Automations**, both full width. Each header has a fold control, **+** and refresh; the Conversations **+** starts a new conversation (also ⇧⌘N). Both headers always stay visible:
+The sidebar holds two stacking drawers, **Conversations** above **Automations**, both full width. Cards have 8 px gaps and 12 px side insets. Conversation unread marks use the Gateway's account-wide read ledger: consuming loaded content clears the same revision in other clients, while a later answer remains unread. Failed acknowledgments retain the mark. Each header has a fold control, **+** and refresh; the Conversations **+** starts a new conversation (also ⇧⌘N). Both headers always stay visible:
 
 | Automations | Conversations | Layout |
 |---|---|---|

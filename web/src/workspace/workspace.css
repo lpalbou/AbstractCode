@@ -2742,7 +2742,7 @@ select option {
 .code-session.code-card > .code-status-dot {
   margin-top: 6px;
 }
-.code-automation-item { margin-bottom: 4px; min-width: 0; }
+.code-automation-item { margin-bottom: 8px; min-width: 0; }
 .code-switch-icon-only .af-switch__text {
   display: none;
 }
@@ -2885,8 +2885,8 @@ select option {
    (the kit's AfMenu), always through one inline confirm. The card "⋯" sits top-right over the
    card (shown on hover/focus/selection with a mouse, always on touch); the title leaves it room.
    =========================================================================== */
-.code-session-placeholder { margin-bottom: 4px; }
-.code-session-item { position: relative; margin-bottom: 4px; }
+.code-session-placeholder { margin-bottom: 8px; }
+.code-session-item { position: relative; margin-bottom: 8px; }
 .code-session-item > .code-session.code-card { margin-bottom: 0; padding-right: 44px; }
 .code-card-menu { position: absolute; top: 6px; right: 6px; } /* never a transform here: it would re-anchor the kit list (position: fixed) */
 .code-card-menu .af-menu__button,
@@ -3012,7 +3012,7 @@ select option {
 
 /* Let the sidebar's cards use the drawer width; keep text padding in one place. */
 .code-sidebar .code-panel-header { margin-inline: 0; border-inline: 0; border-radius: 0; }
-.code-sidebar .code-panel > nav, .code-sidebar .code-panel > [role="region"] { padding-inline: 0; }
+.code-sidebar .code-panel > nav, .code-sidebar .code-panel > [role="region"] { padding: 10px 12px; }
 .code-sidebar .code-card { border-radius: 0; }
 .code-sidebar .code-session.code-card { padding-inline: 10px; }
 .code-settings-revision { display: inline-flex; align-items: center; }

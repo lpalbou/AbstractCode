@@ -1,7 +1,7 @@
 import {WorkflowChat, useWorkflowSession} from "../vendor/abstractchat/conversation.js";
 import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget } from "../vendor/abstractsessions/session_cards.js";
-import { useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
+import { createSessionReadClient, useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
 import { CodeDocsAssistant } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
 import {
@@ -72,7 +72,7 @@ import {
   fetchWorkflowSchema,
   useWorkspaceCatalog,
 } from "./use_workspace_catalog";
-import { gateway, gatewayRequest, formatError, newId } from "./transport";
+import { gateway, gatewayRequest, formatError, newId, csrfHeaders } from "./transport";
 import { createWorkflowTransport } from "./session_transport";
 import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
 import { AccountWorkflowDefault } from "./account_workflow_default";
@@ -181,7 +181,8 @@ export function CodeWorkspace() {
   const catalog = useWorkspaceCatalog(identity, onAuthError);
   const readScope = sessionReadScope(connection.status);
   const observedReceipts = useMemo(() => Object.values(catalog.sessionActivity || {}).flatMap((a) => a.content), [catalog.sessionActivity]);
-  const sessionReads = useSessionReads(readScope, observedReceipts);
+  const readClient = useMemo(() => createSessionReadClient((path, init) => fetch(path, { ...init, credentials: "same-origin", headers: { ...init?.headers, ...csrfHeaders() } })), [identity]);
+  const sessionReads = useSessionReads(readScope, observedReceipts, readClient);
   const [appearance, setAppearance] = useAppearanceSettings("abstractcode", {
     defaults: { theme: "observer-night" },
   });
@@ -336,9 +337,9 @@ export function CodeWorkspace() {
   const eventsFollowing = meEvents.state === "following";
   useEffect(() => {
     if (!meEvents.fold.cursor) return;
-    const timer = setTimeout(() => void catalog.refreshSessions(), 500);
+    const timer = setTimeout(() => { void catalog.refreshSessions(); void sessionReads.refresh(); }, 500);
     return () => clearTimeout(timer);
-  }, [meEvents.fold.cursor, catalog.refreshSessions]);
+  }, [meEvents.fold.cursor, catalog.refreshSessions, sessionReads.refresh]);
   const { ctl: automations, state: automationsState, nowMs: automationNowMs } = useAutomations(
     identity,
     connection.connected && automationsAvailable.available,
