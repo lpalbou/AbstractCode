@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Opening a conversation clears its existing unread history even when the latest answer was already read and older turns load later.
+
+
 - Web conversation read markers use durable Gateway receipts shared across clients; sidebar cards have more space and attachment previews fit their media.
 
 
