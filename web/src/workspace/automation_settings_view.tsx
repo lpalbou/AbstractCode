@@ -10,6 +10,7 @@
 // Workflow panel keeps the kit's Edit form for title / task / schedule /
 // workflow / context / tool approval / email result (one Save for that form).
 import React, { useEffect, useRef, useState } from "react";
+import { SettingsHelp } from "./settings_help";
 import {
   AutomationReviseForm,
   apiErrorText,
@@ -160,11 +161,9 @@ export function AutomationBinding(p: { summary: AutomationSummary; settings: Aut
     <>
       <p className="code-settings-binding">
         <span>Automation</span> <strong title={p.summary.title}>{p.summary.title}</strong>
-        <span className="code-settings-revision" data-testid="automation-revision">Revision {p.settings.revision}</span>
+        <span className="code-settings-revision" data-testid="automation-revision">Revision {p.settings.revision} <SettingsHelp label="About automation changes">Changes are saved as a new revision and apply from the next run.</SettingsHelp></span>
       </p>
-      <p className={`code-settings-save is-${p.settings.save.status}`} role="status" aria-live="polite">
-        {saveStateText(p.settings.save) || "Changes are saved as a new revision and apply from the next run."}
-      </p>
+      {p.settings.save.status !== "idle" ? <p className={`code-settings-save is-${p.settings.save.status}`} role="status" aria-live="polite">{saveStateText(p.settings.save)}</p> : null}
     </>
   );
 }

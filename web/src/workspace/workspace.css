@@ -3099,3 +3099,11 @@ select option {
 /* A shared docs chat owns the whole body; its composer stays at the bottom. */
 .code-rail .pc-docs-assistant-panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; height: 100%; }
 .code-rail .pc-docs-assistant-panel > .pc-docs-assistant { flex: 1 1 auto; min-height: 0; }
+
+/* Let the sidebar's cards use the drawer width; keep text padding in one place. */
+.code-sidebar .code-panel-header { margin-inline: 0; border-inline: 0; border-radius: 0; }
+.code-sidebar .code-panel > nav, .code-sidebar .code-panel > [role="region"] { padding-inline: 0; }
+.code-sidebar .code-card, .code-sidebar .code-auto-card { border-radius: 0; }
+.code-sidebar .code-auto-card > .code-card-main, .code-sidebar .code-session.code-card { padding-inline: 10px; }
+.code-sidebar .code-auto-card > .code-card-line2 { padding-left: 10px; }
+.code-settings-revision { display: inline-flex; align-items: center; }

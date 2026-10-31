@@ -141,7 +141,8 @@ describe("the panel as Code shows it", () => {
       <SettingsContent tab="workspace" value={DEFAULT_PREFERENCES} onChange={() => {}} tools={[]} disabled={false} connected automationFolders workspaceRootFixed="/srv/gw/workspaces/automation-1" />,
     );
     expect(automation).toContain('id="code-workspace-automation"');
-    expect(automation).toContain("automation-1");
+    expect(automation).toContain("This automation");
+    expect(automation).not.toContain("automation-1");
     expect(automation).not.toContain('id="code-workspace-session"');
   });
 

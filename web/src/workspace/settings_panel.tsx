@@ -146,7 +146,7 @@ export function SettingsContent({
               />
             </section>
             <details className="code-settings-advanced">
-              <summary>Limits & streaming <SettingsHelp label="About model limits">Leave these unchanged to use the workflow and Gateway defaults. Context limits control how much conversation the model can use.</SettingsHelp></summary>
+              <summary>{hideStreamReplies ? "Limits" : "Limits & streaming"} <SettingsHelp label="About model limits">Leave these unchanged to use the workflow and Gateway defaults. Context limits control how much conversation the model can use.</SettingsHelp></summary>
               <section className="code-settings-section">
                 <label className="code-field">
                   Context token limit
@@ -203,7 +203,7 @@ export function SettingsContent({
           <section className="code-settings-section">
             {workspaceRootFixed ? (
               <p className="code-field-help" data-setting="workspace-root-fixed">
-                Runs work in the automation workspace <code title={workspaceRootFixed}>{workspaceRootFixed.split(/[\\/]/).filter(Boolean).pop() || workspaceRootFixed}</code>.
+                Run folder <strong>This automation</strong> <SettingsHelp label="About the automation folder">Each run uses this automation’s private folder. Folder access below controls which additional folders it can use.</SettingsHelp>
               </p>
             ) : null}
             <CodeWorkspaceFolders

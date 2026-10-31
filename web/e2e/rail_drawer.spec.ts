@@ -154,7 +154,7 @@ for (const [name, width, height] of [["desktop", 1440, 960], ["tablet", 834, 111
       const settings = await openWorkspaceSection(page, "Voice");
       await expect(settings).not.toContainText("close the drawer and choose Edit");
       // D7: the Assistant's Voice layout, compact.
-      const voice = settings.locator("#code-settings-voice");
+      const voice = settings.locator(".af-voice-section--compact");
       for (const label of ["Text → speech", "Speech → text", "Output device", "Voice latency"]) await expect(voice.getByText(label, { exact: true })).toBeVisible();
       await expect(voice.getByRole("switch", { name: /Read aloud/ })).toBeVisible();
       await expect(voice.locator('[data-setting="tts"] .af-override__summary')).toContainText("Gateway default");
@@ -304,6 +304,9 @@ test("automation selected: every settings panel edits its definition and saves a
   const settings = await openWorkspaceSection(page, "Model");
   await expect(settings.locator(".code-settings-binding")).toContainText("Automation");
   await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0}`);
+  await expect(settings.locator(".code-settings-advanced > summary")).toContainText("Limits");
+  await expect(settings).not.toContainText("Limits & streaming");
+  await expect(settings.getByLabel("Stream replies")).toHaveCount(0);
   // Gateway default until overridden.
   await expect(settings.getByLabel("Context token limit")).toHaveValue("");
   const agent = await openWorkspaceSection(page, "Agent");
@@ -322,6 +325,13 @@ test("automation selected: every settings panel edits its definition and saves a
   await expect(agent.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 2}`, { timeout: 15_000 });
   const reset = await api(`automations/${encodeURIComponent(id)}`);
   expect(reset.definition.target.input_data._limits?.max_iterations).toBeUndefined();
+  const workspace = await openWorkspaceSection(page, "Workspace");
+  await expect(workspace).toContainText("This automation");
+  await expect(workspace.locator("[data-setting=workspace-root-fixed]")).not.toContainText("session-automation-");
+  const voice = await openWorkspaceSection(page, "Voice");
+  await expect(voice.locator(".code-settings-binding")).toHaveCount(0);
+  await expect(voice.getByTestId("automation-revision")).toHaveCount(0);
+  await expect(voice.locator(".af-voice-section--compact")).toBeVisible();
   // Activity: one group per occurrence (none yet).
   await railTab(page, "Activity").click();
   await expect(page.locator("#code-rail-panel-activity")).toContainText("No runs yet.");

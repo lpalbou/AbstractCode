@@ -1521,7 +1521,7 @@ export function CodeWorkspace() {
       behavior={behavior} skillCount={skillCount} workflowDescription={automationView ? undefined : workflow?.description} />
   );
   const agentPanel = settingsPanel("agent", () => agentContents(renderSettings("behavior")), (value, onChange, root) => agentContents(renderSettings("behavior", value, onChange, root), value.skills.length));
-  const voicePanel = settingsPanel("voice", () => voiceSection, () => voiceSection);
+  const voicePanel = voiceSection;
   // Settings follow the selection: a newly selected conversation or automation starts at the top of the open panel.
   const settingsBinding = automationView ? `automation:${automationsState.selectedId}` : `conversation:${session.sessionId}`;
   const settingsScrolledFor = useRef<Record<string, string>>({});
@@ -2051,7 +2051,7 @@ export function CodeWorkspace() {
           </main>
           )}
           {railElement}
-          <CodeDocsAssistant key={identity || "signed-out"} connected={connection.connected} open={docsOpen} onClose={() => setDocsOpen(false)} />
+          <CodeDocsAssistant key={identity || "signed-out"} connected={connection.connected} open={docsOpen} onClose={() => setDocsOpen(false)} voicePreferences={voicePreferences} />
         </div>
         <footer className="code-statusbar">
           <span>
