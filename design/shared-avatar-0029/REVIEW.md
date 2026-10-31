@@ -94,3 +94,15 @@ private preferences, immediate modal closure and Vortex selection on reopening;
 zero run creation and clean exit. Receipt: [error-hold-validation.json](error-hold-validation.json).
 Native screens: [Hover](native-preview-hover.txt), [saved Vortex](native-preview-vortex.txt).
 Verdict: Approved for local installation; no unresolved finding for this scope.
+
+## Enter confirms a focused avatar design
+
+Operator clarified that Enter on a highlighted design must confirm it. Design
+rows now capture plain Enter ahead of Button's generic preview activation and
+reuse the Apply avatar save/close path. Mouse clicks keep previewing; phase,
+Cancel and motion controls retain their own Enter behavior. The hint names these
+actions. All23 companion tests, all-target Clippy and formatting pass. Installed
+native PTY validation clicks Vortex then presses Enter, confirms persistence and
+closure, reopens on Vortex and confirms initial-focus Enter also applies. Receipt:
+[enter-apply-validation.json](enter-apply-validation.json). Approved; no rendering
+or protocol change. Unrelated concurrent web edits were preserved.

@@ -106,7 +106,8 @@ with the avatar disabled. Ready breathes at2fps, Waiting pulses at6fps, active
 phases animate at up to12fps; reduced motion stops clocks.
 Appearance opens a silent, large preview: select any of the six styles, hold any of seven
 phases, Auto cycle or Pause motion. The active design opens selected/focused. Apply avatar
-saves appearance and closes the preview; Cancel/Esc
+saves appearance and closes the preview; Enter on a focused design does the same,
+while clicking a design previews it. Cancel/Esc
 discards preview changes. No inference or microphone access occurs in this preview.
 Comments require new visible conversation content, allow one in-flight request and
 at least 60 seconds between attempts in this TUI. They have no tool/steering/approval

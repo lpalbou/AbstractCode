@@ -988,8 +988,6 @@ fn preview_focus_and_selected_marker_match_every_saved_design_and_reopen_after_a
         h.click("⚙");
         h.click("Appearance");
         h.enter();
-        // Initial Enter must activate the saved choice, not accidentally select Halo.
-        h.enter();
         let screen = h.turn();
         assert!(
             screen.contains(&format!("Previewing {} · In use", style.label())),
@@ -1010,8 +1008,16 @@ fn preview_focus_and_selected_marker_match_every_saved_design_and_reopen_after_a
         h.click("⚙");
         h.click("Appearance");
         h.enter();
-        h.enter();
         assert!(h.turn().contains("Previewing Vortex · In use"));
+        h.enter();
+        assert!(
+            !h.ctx.modal_open(),
+            "Enter on the focused saved design applies it"
+        );
+        assert_eq!(
+            h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
+            "vortex"
+        );
     }
 }
 
@@ -1044,4 +1050,40 @@ fn a_new_run_can_fail_in_one_batch_and_disposal_cancels_the_hold() {
         next_timer_deadline().is_none(),
         "disposed hold must not keep a repeating clock"
     );
+}
+
+#[test]
+fn enter_applies_the_focused_design_while_phase_enter_only_previews() {
+    for style in AvatarStyle::ALL {
+        let mut h = harness(
+            220,
+            Some(json!({"enabled":true,"style":"hover","animate":false})),
+        );
+        h.turn();
+        h.click("⚙");
+        h.click("Appearance");
+        h.enter();
+        h.click("Speaking");
+        h.enter();
+        assert!(
+            h.ctx.modal_open(),
+            "Enter on a phase must not apply appearance"
+        );
+        assert_eq!(
+            h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
+            "hover"
+        );
+        h.click(style.label());
+        assert!(
+            h.ctx.modal_open(),
+            "mouse click should only preview the design"
+        );
+        h.enter();
+        assert!(!h.ctx.modal_open(), "Enter must apply {style:?}");
+        assert_eq!(
+            h.ctx.prefs.borrow().companion.as_ref().unwrap()["style"],
+            style.id()
+        );
+        assert!(h.turn().contains("Talk / ask"));
+    }
 }

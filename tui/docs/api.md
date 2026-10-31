@@ -931,8 +931,9 @@ advances phases about every 3.5 seconds. **Pause motion** freezes the demonstrat
 Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
 The preview labels the saved appearance **In use** and another choice **Not applied**.
 The saved design is initially focused and a ● marks the selected design even when
-keyboard focus moves. **Apply avatar** saves and closes the preview to show the new
-avatar immediately; Cancel/Esc discards it. Preview playback can be
+keyboard focus moves. **Enter** on a focused design applies it and closes the
+preview. Clicking a design only previews it; **Apply avatar** also saves and closes
+the preview to show the new avatar immediately; Cancel/Esc discards it. Preview playback can be
 started explicitly with reduced motion enabled, without changing that preference.
 The preview has no inference, recording or speech side effects.
 

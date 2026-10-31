@@ -64,3 +64,8 @@ Fixed preview initial focus to match the saved design and mark the selected one;
 Apply avatar saves and closes so the new choice appears immediately. All1228 Code
 tests, Clippy, formatting and installed native preview/persistence checks pass.
 Details and evidence are appended to the linked review. Rendering core unchanged.
+
+Further interaction clarification: Enter on a focused design now applies/saves
+it and closes the preview. Mouse clicks preview it; phase/Cancel/motion controls
+retain their Enter actions. All23 companion tests, Clippy, formatting and native
+installed click-Vortex-then-Enter persistence/reopen checks pass.

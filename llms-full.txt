@@ -3404,8 +3404,9 @@ advances phases about every 3.5 seconds. **Pause motion** freezes the demonstrat
 Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
 The preview labels the saved appearance **In use** and another choice **Not applied**.
 The saved design is initially focused and a ● marks the selected design even when
-keyboard focus moves. **Apply avatar** saves and closes the preview to show the new
-avatar immediately; Cancel/Esc discards it. Preview playback can be
+keyboard focus moves. **Enter** on a focused design applies it and closes the
+preview. Clicking a design only previews it; **Apply avatar** also saves and closes
+the preview to show the new avatar immediately; Cancel/Esc discards it. Preview playback can be
 started explicitly with reduced motion enabled, without changing that preference.
 The preview has no inference, recording or speech side effects.
 
@@ -5834,7 +5835,8 @@ with the avatar disabled. Ready breathes at2fps, Waiting pulses at6fps, active
 phases animate at up to12fps; reduced motion stops clocks.
 Appearance opens a silent, large preview: select any of the six styles, hold any of seven
 phases, Auto cycle or Pause motion. The active design opens selected/focused. Apply avatar
-saves appearance and closes the preview; Cancel/Esc
+saves appearance and closes the preview; Enter on a focused design does the same,
+while clicking a design previews it. Cancel/Esc
 discards preview changes. No inference or microphone access occurs in this preview.
 Comments require new visible conversation content, allow one in-flight request and
 at least 60 seconds between attempts in this TUI. They have no tool/steering/approval

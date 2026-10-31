@@ -1,4 +1,4 @@
-//! Silent, local appearance preview. Only “Apply avatar” persists a choice.
+//! Silent, local appearance preview. Enter on a design or “Apply avatar” persists a choice.
 use super::{companion_view, modals, UiCtx};
 use crate::store::Store;
 use abstracttui::prelude::*;
@@ -25,6 +25,11 @@ fn synthetic_level(elapsed_ms: u64) -> f32 {
     let envelope = (phrase / 0.25).min(1.0) * ((2.6 - phrase) / 0.35).min(1.0);
     let syllable = (t * std::f32::consts::TAU * 4.4).sin().max(0.0).powf(0.7);
     (envelope * syllable * (0.65 + 0.35 * (t * 1.7).sin())).clamp(0.0, 1.0)
+}
+
+fn apply_style(store: Store, ctx: &UiCtx, style: AvatarStyle) {
+    companion_view::save(store, ctx, |p| p.style = style.id().into());
+    ctx.close_modal();
 }
 
 pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
@@ -136,6 +141,7 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
                     .gap(2),
             );
             for &choice in choices {
+                let confirm = context.clone();
                 let button = Button::new(choice.label())
                     .on_click(move || {
                         style.set_if_changed(choice);
@@ -155,6 +161,17 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
                 };
                 styles = styles.child(
                     Element::new()
+                        // Capture ahead of Button's generic Enter/Space preview activation.
+                        // Scoped to this design, so phase and Cancel keys retain their meaning.
+                        .on(abstracttui::ui::Phase::Capture, move |event_ctx, event| {
+                            if let abstracttui::ui::UiEvent::Key(key) = event {
+                                if key.key == Key::Enter && key.mods == abstracttui::ui::Mods::NONE
+                                {
+                                    event_ctx.stop_propagation();
+                                    apply_style(store, &confirm, choice);
+                                }
+                            }
+                        })
                         .style(LayoutStyle::row().gap(0))
                         .child(dyn_view(
                             LayoutStyle::default()
@@ -258,9 +275,7 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
             .child(
                 Button::new("Apply avatar")
                     .on_click(move || {
-                        let choice = style.get_untracked().id();
-                        companion_view::save(store, &apply, |p| p.style = choice.into());
-                        apply.close_modal();
+                        apply_style(store, &apply, style.get_untracked());
                     })
                     .view(mcx),
             )
@@ -291,7 +306,7 @@ pub(super) fn open(cx: Scope, store: Store, ctx: &UiCtx) {
         root.child(controls)
             .child(modals::hint_row(
                 &tokens,
-                "Select a design, then Apply avatar · 1–7 phases · c cycles/holds · Esc cancels"
+                "Enter applies design · click previews · 1–7 phases · c cycles/holds · Esc cancels"
                     .into(),
             ))
             .build()
