@@ -1,3 +1,5 @@
+import { sessionReadTarget } from "../vendor/abstractsessions/session_cards.js";
+import { useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
 import { CodeDocsAssistant } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
 import {
@@ -177,6 +179,9 @@ export function CodeWorkspace() {
     void connection.refresh();
   }, [connection.refresh]);
   const catalog = useWorkspaceCatalog(identity, onAuthError);
+  const readScope = sessionReadScope(connection.status);
+  const observedReceipts = useMemo(() => Object.values(catalog.sessionActivity || {}).flatMap((a) => a.content), [catalog.sessionActivity]);
+  const sessionReads = useSessionReads(readScope, observedReceipts);
   const [appearance, setAppearance] = useAppearanceSettings("abstractcode", {
     defaults: { theme: "observer-night" },
   });
@@ -329,6 +334,11 @@ export function CodeWorkspace() {
   // The person's event stream (backlog 1047): the badge and the list refresh follow it.
   const meEvents = useMeEvents(identity, connection.connected);
   const eventsFollowing = meEvents.state === "following";
+  useEffect(() => {
+    if (!meEvents.fold.cursor) return;
+    const timer = setTimeout(() => void catalog.refreshSessions(), 500);
+    return () => clearTimeout(timer);
+  }, [meEvents.fold.cursor, catalog.refreshSessions]);
   const { ctl: automations, state: automationsState } = useAutomations(
     identity,
     connection.connected && automationsAvailable.available,
@@ -1696,6 +1706,9 @@ export function CodeWorkspace() {
             <ConversationCard
               key={item.sessionId}
               item={item}
+              activity={catalog.sessionActivity[item.sessionId]}
+              unread={Boolean(catalog.sessionActivity[item.sessionId] && catalog.sessionActivity[item.sessionId].content.some(sessionReads.isUnread))}
+              needsAttention={Boolean(catalog.sessionActivity[item.sessionId]?.needsAttention || Object.values(meEvents.fold.waits).includes(item.sessionId))}
               selected={item.sessionId === session.sessionId}
               onClick={() =>
                 openConversation(item.sessionId, item.latestRunId)
@@ -1711,6 +1724,7 @@ export function CodeWorkspace() {
                 : "Your conversations will live here. Pick up where you left off, on any device."}
             </p>
           ) : null}
+          {sessionReads.error && <p className="code-inline-error" role="status">{sessionReads.error}</p>}
           {catalog.loading && !catalog.sessionsLoaded ? (
             <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}
@@ -1916,6 +1930,12 @@ export function CodeWorkspace() {
                   : messages
               }
               messageProps={{
+                renderFooter: (message) => {
+                  const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
+                  if (!status) return null;
+                  const target = sessionReadTarget(messages, message.runId || "", status);
+                  return target.message === message && readScope && !snapshot.loading && !snapshot.error ? <><span>{target.outcome}</span><SessionReadMarker ownerKey={readScope} receipt={{ sessionId: session.sessionId, revision: sessionContentRevision(message.runId || "", status), updatedAt: "" }} enabled={!automationView && !sidebarOpen && identity === principalRef.current} onRead={sessionReads.markRead} /></> : null;
+                },
                 ...(voice.tts_supported
                   ? {
                       onSpeakToggle: (message) => {

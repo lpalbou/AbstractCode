@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { AutomationSummary } from "@abstractframework/ui-kit";
 
 import { normalizeSessionSummaries } from "./catalog";
-import { ConversationCard, conversationMetaLine } from "./sidebar_cards";
+import { ConversationCard } from "./sidebar_cards";
 import { AutomationHeaderBar, HEADER_BUTTONS } from "./automation_header";
 
 const run = (session: string, id: string, at: string, tools: unknown) => ({
@@ -17,51 +17,30 @@ const run = (session: string, id: string, at: string, tools: unknown) => ({
   ...(tools === undefined ? {} : { tool_calls: tools }),
 });
 
-describe("conversation card", () => {
-  it("sums the gateway's per-turn tool_calls into the conversation's total", () => {
-    const [s] = normalizeSessionSummaries({
-      items: [run("s1", "r2", "2026-10-02T10:05:00Z", 4), run("s1", "r1", "2026-10-02T10:00:00Z", 3)],
-    });
-    expect(s.turnCount).toBe(2);
-    expect(s.toolCalls).toBe(7);
-    expect(conversationMetaLine(s, { locale: "en-US", timeZone: "UTC" })).toBe("Oct 2 · 2 turns · 7 tools");
+describe("shared conversation card", () => {
+  const card = (item: ReturnType<typeof normalizeSessionSummaries>[number]) => renderToStaticMarkup(<ConversationCard item={item} selected onClick={() => {}} />);
+  it("presents known Gateway totals and hides unknown tool counts", () => {
+    const [known] = normalizeSessionSummaries({ items: [run("s1", "r2", "2026-10-02T10:05:00Z", 4), run("s1", "r1", "2026-10-02T10:00:00Z", 3)] });
+    expect(known.toolCalls).toBe(7);
+    expect(card(known)).toContain('aria-label="7 tool calls"');
+    const [unknown] = normalizeSessionSummaries({ items: [run("s1", "r2", "2026-10-02T10:05:00Z", 4), run("s1", "r1", "2026-10-02T10:00:00Z", null)] });
+    expect(unknown.toolCalls).toBeUndefined();
+    expect(card(unknown)).not.toContain('tool calls');
   });
-
-  it("shows no tool figure when a listed turn lacks the count (an older gateway), never a partial sum", () => {
-    const [s] = normalizeSessionSummaries({
-      items: [run("s1", "r2", "2026-10-02T10:05:00Z", 4), run("s1", "r1", "2026-10-02T10:00:00Z", null)],
-    });
-    expect(s.toolCalls).toBeUndefined();
-    expect(conversationMetaLine(s, { locale: "en-US", timeZone: "UTC" })).toBe("Oct 2 · 2 turns");
-    const [none] = normalizeSessionSummaries({ items: [run("s2", "r9", "2026-10-02T10:00:00Z", undefined)] });
-    expect(none.toolCalls).toBeUndefined();
+  it("uses the shared selected state and compact statistics", () => {
+    const [s] = normalizeSessionSummaries({items:[run("s1","r1","2026-10-02T10:00:00Z",7)]});
+    const html=card(s);
+    expect(html).toContain('class="af-session-card" data-selected="true"');
+    expect(html).toContain('class="af-session-card__title"');
+    expect(html).toContain('class="af-session-card__meta"');
+    expect(html).toContain('data-session-id="s1"');
   });
-
-  it("singular words, no figure for zero tools, and no year", () => {
-    expect(conversationMetaLine({ updatedAt: "2025-01-31T12:00:00Z", turnCount: 1, toolCalls: 1 }, { locale: "en-US", timeZone: "UTC" })).toBe("Jan 31 · 1 turn · 1 tool");
-    expect(conversationMetaLine({ updatedAt: "2026-10-02T12:00:00Z", turnCount: 3, toolCalls: 0 }, { locale: "en-US", timeZone: "UTC" })).toBe("Oct 2 · 3 turns");
-    expect(conversationMetaLine({ turnCount: 2, toolCalls: 5 })).toBe("Saved conversation · 2 turns · 5 tools");
-  });
-
-  it("renders the title on one line then the meta line, full width (no leading icon)", () => {
-    const html = renderToStaticMarkup(
-      <ConversationCard
-        item={{ sessionId: "sess_1234567890", state: "done", updatedAt: "2026-10-02T10:00:00Z", firstRunId: "r1", latestRunId: "r2", runIds: ["r2", "r1"], turnCount: 2, toolCalls: 7, prompt: "Fix the build", truncated: false }}
-        selected
-        onClick={() => {}}
-      />,
-    );
-    // Round 6: the card is wrapped with its sibling "⋯" (absent here: no onAskArchive).
-    expect(html).toMatch(/^<div class="code-session-item" data-item-id="sess_1234567890"><button type="button" class="code-session code-card is-selected" aria-current="page" data-session-id="sess_1234567890" title="Fix the build"><span><strong class="code-card-title">Fix the build<\/strong><small class="code-card-meta" data-field="meta">[^<]+ · 2 turns · 7 tools<\/small><\/span><\/button><\/div>$/);
-    expect(html).not.toContain("<svg");
-  });
-
-  it("the title is one ellipsised line; the touch rule keeps card text at 14 px or more", () => {
-    const css = readFileSync(new URL("./workspace.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.code-card \.code-card-title \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
-    const touchBlocks = css.split("@media (pointer: coarse)").slice(1);
-    const touch = touchBlocks.find((block) => block.includes(".code-card .code-card-title,")) ?? "";
-    expect(touch).toMatch(/\.code-card \.code-card-title,\n\s*\.code-card \.code-card-meta,[\s\S]*?font-size: max\(14px/);
+  it("keeps attention independent of both unread and selection", () => {
+    const [s] = normalizeSessionSummaries({items:[run("s1","r1","2026-10-02T10:00:00Z",0)]});
+    const html=renderToStaticMarkup(<ConversationCard item={s} selected unread needsAttention onClick={() => {}} />);
+    expect(html).toContain('data-unread="true" data-attention="true"');
+    expect(html).toContain('Needs you');
+    expect(html).not.toContain('0 tool');
   });
 });
 

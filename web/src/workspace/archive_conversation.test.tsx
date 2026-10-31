@@ -14,14 +14,12 @@ const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
 const item = (sessionId: string, prompt = `Prompt ${sessionId}`) =>
   ({ sessionId, prompt, latestRunId: `run-${sessionId}`, firstRunId: `run-${sessionId}`, turnCount: 1, updatedAt: "2026-10-04T01:00:00Z", state: "completed" }) as unknown as SessionSummary;
 
-describe("conversation card ⋯", () => {
-  it("offers Archive in the kit menu, named after the conversation", () => {
+describe("conversation archive control", () => {
+  it("offers a shared Archive icon as a sibling of the open button", () => {
     const html = renderToStaticMarkup(<ConversationCard item={item("s1", "Fix the parser")} selected={false} onClick={() => {}} onAskArchive={() => {}} />);
-    expect(html).toContain('class="af-menu code-card-menu"');
-    expect(html).toContain('aria-label="More actions for Fix the parser"');
-    expect(html).toMatch(/role="menuitem"[^>]*data-menu-id="archive"[^>]*>Archive<\/button>/);
-    // The card body still opens the conversation (its own button, the menu is a sibling).
-    expect(html).toMatch(/<button type="button" class="code-session code-card"[^>]*data-session-id="s1"/);
+    expect(html).toContain('class="af-session-card__archive" aria-label="Archive Fix the parser"');
+    expect(html).toMatch(/<button type="button" class="af-session-card__open"[^>]*data-session-id="s1"/);
+    expect((html.match(/<button/g) || []).length).toBe(2);
   });
   it("shows the inline confirm under the card only while asked", () => {
     const confirm = <ArchiveConfirm busy={false} onConfirm={() => {}} onCancel={() => {}} />;

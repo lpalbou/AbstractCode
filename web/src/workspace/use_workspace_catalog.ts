@@ -1,3 +1,4 @@
+import { sessionActivityFromRuns, type SessionActivity } from "../vendor/abstractsessions/session_cards.js";
 import { sessionToolPolicyCapability, normalizeToolCatalog as kitToolCatalog, toolCatalogWarnings, type SessionToolPolicyCapability, type ToolCatalogItem } from "@abstractframework/ui-kit";
 import {
   executableWorkflowsPath,
@@ -45,6 +46,7 @@ type CatalogState = {
   policy: WorkspacePolicy | null;
   tools: ToolSpec[];
   sessions: SessionSummary[];
+  sessionActivity: Record<string, SessionActivity>;
   capabilities: Record<string, any>;
   capabilitiesLoading: boolean;
   /**
@@ -79,6 +81,7 @@ const empty: CatalogState = {
   policy: null,
   tools: [],
   sessions: [],
+  sessionActivity: {},
   capabilities: {},
   capabilitiesLoading: true,
   sessionToolPolicy: null,
@@ -176,6 +179,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         ...s,
         loading: false,
         sessions: page.sessions,
+        sessionActivity: sessionActivityFromRuns(runs),
         sessionsLoaded: true,
         hasMore: page.hasMore,
         archivedSessions: archivedSessionCount(runs),
@@ -262,6 +266,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       policy: value(1) ? normalizeWorkspacePolicy(value(1)) : null,
       tools: normalizeToolCatalog(value(2)),
       sessions: listCurrent && value(3) ? page.sessions : previous.sessions,
+      sessionActivity: listCurrent && value(3) ? sessionActivityFromRuns(value(3)) : previous.sessionActivity,
       sessionsLoaded: previous.sessionsLoaded || Boolean(listCurrent && value(3)),
       capabilities: capabilityContracts(value(4)),
       capabilitiesLoading: false,
@@ -309,7 +314,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     }));
     void loadConversations();
   }, [loadConversations]);
-  return { ...state, refresh, loadMore, forgetSession };
+  return { ...state, refresh, refreshSessions: loadConversations, loadMore, forgetSession };
 }
 
 export async function fetchWorkflowSchema(

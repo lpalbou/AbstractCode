@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {mkdirSync} from 'node:fs';
+import {chromium} from '@playwright/test';
+import {createCodeServer} from '../bin/server.js';
+const server=createCodeServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
+const rows=[],base=`http://127.0.0.1:${server.address().port}/`,at=()=>new Date().toISOString();
+try{browser=await chromium.launch({channel:"chrome"});const context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[];
+page.on('pageerror',e=>errors.push(e.message));
+await context.route('**/api/**',async route=>{const u=new URL(route.request().url()),path=u.pathname.replace(/^\/api\//,'');let body={items:[],has_more:false};
+if(path==='connection/gateway')body={ok:true,has_session:true,gateway_url:'http://fake',gateway:{ok:true,principal:{user_id:'demo'}}};
+else if(path==='gateway/me')body={ok:true,principal:{user_id:'demo'}};
+else if(path==='gateway/runs')body={items:rows,has_more:false};
+else if(path==='gateway/me/events')body={events:[],head:0,next_after:0,more:false};
+else if(path==='gateway/accounts/me/preferences')body={preferences:{}};
+else if(path==='gateway/bundles')body={items:[],default_agent_workflows:{},default_agent_workflows_unavailable:{}};
+else if(path==='gateway/discovery/capabilities')body={capabilities:{}};
+else if(path.endsWith('/input_data'))body={input_data:{prompt:'A compact Code conversation'}};
+else if(path.endsWith('/stream'))return route.fulfill({status:200,contentType:'text/event-stream',body:''});
+await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});});
+await page.goto(base);await page.locator('.code-sidebar').waitFor();await page.waitForTimeout(400);
+rows.push({run_id:'card-a',session_id:'unread-code',session_kind:'chat',status:'completed',created_at:at(),updated_at:at(),tool_calls:115});
+rows.push({run_id:'card-b',session_id:'attention-code',session_kind:'chat',status:'waiting',waiting:{reason:'user'},created_at:at(),updated_at:at(),tool_calls:2});
+rows.push({run_id:'card-c',session_id:'working-code',session_kind:'chat',status:'running',created_at:at(),updated_at:at(),tool_calls:0});
+await page.reload();await page.locator('[data-session-id="unread-code"]').waitFor();
+const card=id=>page.locator('.af-session-card').filter({has:page.locator(`[data-session-id="${id}"]`)});
+assert.equal(await card('unread-code').getAttribute('data-unread'),'true');
+assert.equal(await card('attention-code').getAttribute('data-attention'),'true');
+assert.equal(await card('working-code').getAttribute('data-working'),'true');
+assert.equal(await card('unread-code').getByLabel('115 tool calls',{exact:true}).count(),1);
+assert.equal(await card('unread-code').locator('.af-session-card__archive').count(),1);
+const dir=process.argv[2];if(dir){mkdirSync(dir,{recursive:true});await page.screenshot({path:`${dir}/code-session-cards.png`});}
+assert.deepEqual(errors,[]);console.log('Code session cards: unread, human attention, working, metadata, sibling archive passed');
+}finally{await browser?.close();server.close();}

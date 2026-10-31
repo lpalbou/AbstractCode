@@ -85,3 +85,13 @@ it from anywhere, behind your own access control. Behind a reverse proxy every
 peer is the proxy, so loopback carries no meaning there — set
 `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` to refuse browser-supplied changes
 regardless of peer, and add the env var above if you still want to permit them.
+
+### Compact conversation cards
+
+Conversation rows use AbstractUIC's shared Watch-style `SessionCard`: cyan marks unread
+content, orange marks a pending human question or approval, and a small ring marks work.
+Reading clears unread only when loaded content is visible in the focused page. It never
+answers or dismisses a pending approval. Read receipts are local to this browser and account;
+Code and Assistant share them when served on the same origin. Existing history is baselined
+on first use. Regenerate the canonical compatibility snapshot with `npm run sync:sessions`;
+the normal build verifies its provenance. Other devices keep independent read state.

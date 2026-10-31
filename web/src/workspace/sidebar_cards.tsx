@@ -1,6 +1,8 @@
+import { SessionCard, type SessionActivity } from "../vendor/abstractsessions/session_cards.js";
+import "../vendor/abstractsessions/session_cards.css";
 // The sidebar cards (round 4, DESIGN §3): full drawer width, no leading icon, an 8/12 px rhythm.
 //
-// - Conversation: the title on one line (ellipsis), then `Oct 2 · 2 turns · 7 tools`. The tool
+// - Active conversations use AbstractUIC SessionCard. Archived restore rows keep a date/count summary. The tool
 //   figure is the gateway's (`tool_calls` per turn, totalled over its sub-runs; catalog.ts adds the
 //   listed turns); without it the card shows no tool figure rather than a guess.
 // - Automation (round 5): the name on its own row (+ the "waiting for you" badge while an approval
@@ -10,7 +12,6 @@
 //   gateway's last "Email result" failed: its served sentence verbatim (last_notification.tsx).
 import React from "react";
 import {
-  AfMenu,
   AfSwitch,
   Icon,
   automationControls,
@@ -22,6 +23,7 @@ import {
 import type { SessionSummary } from "./catalog";
 import { LastNotificationLine } from "./last_notification";
 
+// Retained for the archived-conversation restore list.
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** "Oct 2 · 2 turns · 7 tools" (the date in the viewer's locale, month + day, never the year). */
@@ -44,16 +46,15 @@ export function conversationTitle(item: Pick<SessionSummary, "prompt" | "session
   return item.prompt || `Conversation ${item.sessionId.slice(0, 8)}`;
 }
 
-/**
- * A conversation card (round 6): the card body opens the conversation; a sibling "⋯" (the kit's
- * AfMenu) offers Archive, which asks the host to show the inline confirm (`confirm`, rendered
- * under the card while it is this card's turn). Nothing is ever deleted: archive hides.
- */
+/** Shared compact session presentation; the host owns archive confirmation. */
 export function ConversationCard(props: {
   item: SessionSummary;
+  activity?: SessionActivity;
+  unread?: boolean;
+  needsAttention?: boolean;
   selected: boolean;
   onClick(): void;
-  /** Archive was chosen in the card's "⋯": the host shows its inline confirm. */
+  /** Archive icon activation asks the host to show its inline confirm. */
   onAskArchive?(): void;
   /** The inline confirm, while this card's archive is being asked. */
   confirm?: React.ReactNode;
@@ -62,30 +63,10 @@ export function ConversationCard(props: {
   const title = conversationTitle(item);
   return (
     <div className={`code-session-item${props.confirm ? " is-confirming" : ""}`} data-item-id={item.sessionId}>
-      <button
-        type="button"
-        className={`code-session code-card${props.selected ? " is-selected" : ""}`}
-        aria-current={props.selected ? "page" : undefined}
-        data-session-id={item.sessionId}
-        onClick={props.onClick}
-        title={title}
-      >
-        <span>
-          <strong className="code-card-title">{title}</strong>
-          <small className="code-card-meta" data-field="meta">{conversationMetaLine(item)}</small>
-        </span>
-        {item.state === "running" || item.state === "waiting" ? (
-          <span className={`code-status-dot ${item.state === "running" ? "is-working" : "is-waiting"}`} title={item.state} />
-        ) : null}
-      </button>
-      {props.onAskArchive ? (
-        <AfMenu
-          className="code-card-menu"
-          label={`More actions for ${title}`}
-          title="More actions"
-          items={[{ id: "archive", label: "Archive", danger: true, onSelect: props.onAskArchive }]}
-        />
-      ) : null}
+      <SessionCard sessionId={item.sessionId} title={title} selected={props.selected} unread={props.unread}
+        needsAttention={props.needsAttention ?? props.activity?.needsAttention} working={props.activity?.working ?? item.state === "running"}
+        turnCount={item.turnCount} toolCount={item.toolCalls} countsPartial={item.truncated} updatedAt={item.updatedAt} nowMs={Date.now()}
+        onOpen={props.onClick} onArchive={props.onAskArchive} archiveDisabled={item.state === "running" || item.state === "waiting"} />
       {props.confirm}
     </div>
   );
