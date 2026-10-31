@@ -1,4 +1,4 @@
-import {WorkflowChat} from "../vendor/abstractchat/conversation.js";
+import {WorkflowChat, useWorkflowSession} from "../vendor/abstractchat/conversation.js";
 import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget } from "../vendor/abstractsessions/session_cards.js";
 import { useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
@@ -59,7 +59,6 @@ import {
   useAttachmentUploads,
   type ComposerAttachment,
   presentInteraction,
-  useWorkflowSession,
   workflowPendingInteraction,
   type ChatMessage,
 } from "@abstractframework/panel-chat";
