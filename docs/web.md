@@ -60,14 +60,14 @@ AbstractCode Web works on phones, tablets, laptop windows and wide screens, and 
 
 ### Navigation panels
 
-The sidebar holds two stacking drawers, **Automations** above **Conversations**, both full width. Each header has a fold control, **+** and refresh; the Conversations **+** starts a new conversation (also ⇧⌘N). Both headers always stay visible:
+The sidebar holds two stacking drawers, **Conversations** above **Automations**, both full width. Each header has a fold control, **+** and refresh; the Conversations **+** starts a new conversation (also ⇧⌘N). Both headers always stay visible:
 
 | Automations | Conversations | Layout |
 |---|---|---|
 | closed | closed | The two header rows at the top. |
-| open | closed | Automations fills the space above the Conversations header, which sits mid-height. |
-| closed | open | Conversations fills everything below its header. |
-| open | open | An even split; the Conversations header stays mid-height. |
+| open | closed | Automations fills the remaining space below the collapsed Conversations header. |
+| closed | open | Conversations fills the space above the Automations header, which sits mid-height. |
+| open | open | An even split; the Automations header stays mid-height. |
 
 The Automations header's badge counts what waits for you. On a gateway with your event stream
 (`/api/gateway/me/events`, read through this app's proxy) it is the approvals and questions waiting

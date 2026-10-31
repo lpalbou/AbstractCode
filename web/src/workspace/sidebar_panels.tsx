@@ -1,12 +1,12 @@
-// The sidebar's two stacking drawers (round 4, DESIGN §3), Automations above Conversations, both
+// The sidebar's two stacking drawers (round 4, DESIGN §3), Conversations above Automations, both
 // full width, docked sidebar and phone/tablet drawer alike. Each header is a full-width 44 px row
 // on the raised surface (ui-surface-2): the disclosure toggle (chevron + label) on the left, the
 // section's "+" / refresh actions on the right as sibling buttons that never toggle. Both headers
 // are always visible; the layout follows the two open states (CSS on `.code-sidebar-lists`):
 //   - both closed: the two header rows at the top;
-//   - Automations open: it takes the space above the Conversations header, which sits mid-height;
-//   - Conversations open (Automations closed): it takes the rest below its header;
-//   - both open: an even split, the Conversations header pinned mid-height.
+//   - Conversations open: it takes the space above the Automations header, which sits mid-height;
+//   - Automations open (Conversations closed): it takes the rest below its header;
+//   - both open: an even split, the Automations header pinned mid-height.
 // Each list scrolls inside its own drawer (never clipped under the other header); the bottom
 // block stays pinned. The two open states persist per viewer (localStorage).
 import React, { useCallback, useEffect, useRef, useState } from "react";

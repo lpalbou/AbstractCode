@@ -150,9 +150,9 @@ button {
 }
 /* The two stacking drawers (sidebar_panels.tsx, round 4, DESIGN §3). Both headers always show;
    the frame's data attributes set the split:
-   - Automations open: the two drawers share the height evenly, so the Conversations header sits
-     mid-height (pinned there whether or not Conversations is open);
-   - only Conversations open: it takes everything below its header;
+   - Conversations open: the two drawers share the height evenly, so the Automations header sits
+     mid-height (pinned there whether or not Automations is open);
+   - only Automations open: it takes everything below its header;
    - both closed: the two header rows at the top.
    Each list scrolls inside its own drawer: nothing is clipped under the other header, and the
    bottom block stays pinned. */
@@ -172,8 +172,8 @@ button {
   flex-direction: column;
   min-height: 0;
 }
-.code-sidebar-lists[data-automations="open"] > .code-panel,
-.code-sidebar-lists[data-automations="closed"][data-conversations="open"] > .code-conversations {
+.code-sidebar-lists[data-conversations="open"] > .code-panel,
+.code-sidebar-lists[data-conversations="closed"][data-automations="open"] > .code-automations {
   flex: 1 1 0;
 }
 /* The header: a full-width 44 px row on the raised surface (ui-surface-2 background,
@@ -2885,6 +2885,7 @@ select option {
    (the kit's AfMenu), always through one inline confirm. The card "⋯" sits top-right over the
    card (shown on hover/focus/selection with a mouse, always on touch); the title leaves it room.
    =========================================================================== */
+.code-session-placeholder { margin-bottom: 4px; }
 .code-session-item { position: relative; margin-bottom: 4px; }
 .code-session-item > .code-session.code-card { margin-bottom: 0; padding-right: 44px; }
 .code-card-menu { position: absolute; top: 6px; right: 6px; } /* never a transform here: it would re-anchor the kit list (position: fixed) */

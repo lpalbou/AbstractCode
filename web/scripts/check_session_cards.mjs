@@ -58,6 +58,16 @@ for(const theme of ['dark','light']){await page.evaluate(t=>document.documentEle
 await page.locator('.code-sidebar').evaluate(el=>el.removeAttribute('style'));
 await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await auto('auto-4').locator('.is-working').evaluate(el=>getComputedStyle(el).animationName),'none');
 await page.emulateMedia({reducedMotion:'no-preference'});await page.evaluate(()=>document.documentElement.className='theme-dark');
+const order=await page.locator('.code-sidebar-lists > .code-panel').evaluateAll(es=>es.map(e=>e.classList.contains('code-conversations')?'conversations':'automations'));assert.deepEqual(order,['conversations','automations']);
+const themes=[...new Set(['dark',...readFileSync(new URL('../node_modules/@abstractframework/ui-kit/src/theme.css',import.meta.url),'utf8').matchAll(/:root\.theme-([a-z0-9-]+)/g)].map(x=>typeof x==='string'?x:x[1]))];
+for(const theme of themes){await page.evaluate(t=>document.documentElement.className='theme-'+t,theme);const checks=await page.evaluate(()=>{
+const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const ctx=canvas.getContext('2d');
+const rgb=color=>{ctx.clearRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data].slice(0,3);};
+const lum=rgb=>rgb.map(c=>{c/=255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4}).reduce((n,c,i)=>n+c*[.2126,.7152,.0722][i],0);
+const paint=el=>{ctx.clearRect(0,0,1,1);const nodes=[];for(let p=el;p;p=p.parentElement)nodes.unshift(p);for(const p of nodes){ctx.fillStyle=getComputedStyle(p).backgroundColor;ctx.fillRect(0,0,1,1);}return [...ctx.getImageData(0,0,1,1).data].slice(0,3);};
+return [...document.querySelectorAll('.code-sidebar .af-session-card')].map(card=>{const header=card.closest('.code-panel').querySelector('.code-panel-header');const bg=lum(paint(card)),head=lum(paint(header));return {darker:bg<head,bg,head,contrast:[...card.querySelectorAll('.af-session-card__title,.af-session-card__meta')].map(el=>{const fg=lum(rgb(getComputedStyle(el).color));return (Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05);})};});});
+for(const c of checks){assert.ok(c.darker,`${theme}: card ${c.bg} must be darker than header ${c.head}`);assert.ok(c.contrast.every(x=>x>=4.5),`${theme}: title/metadata contrast ${c.contrast}`);}}
+await page.evaluate(()=>document.documentElement.className='theme-dark');
 const dir=process.argv[2];if(dir){mkdirSync(dir,{recursive:true});await page.screenshot({path:`${dir}/code-session-cards.png`});}
-assert.deepEqual(errors,[]);console.log('Code session cards: unread, human attention, working, metadata, sibling archive; Watch automation facts, regular typography, hover, archive cancel/refusal/retry, narrow themes and reduced motion passed');
+assert.deepEqual(errors,[]);console.log('Code session cards: unread, human attention, working, metadata, sibling archive; Watch automation facts, regular typography, hover, archive cancel/refusal/retry, narrow themes, reduced motion, conversation-first order and all-theme card depth/contrast passed');
 }finally{await browser?.close();server.close();}

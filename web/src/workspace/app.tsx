@@ -1644,28 +1644,6 @@ export function CodeWorkspace() {
           <kbd>⌘K</kbd>
         </div>
         <SidebarLists panels={panels}>
-        <AutomationsSection
-          nowMs={automationNowMs}
-          state={automationsState}
-          attention={eventsFollowing ? { needsYou: needsYou(meEvents.fold), newResults: newResults(meEvents.fold) } : null}
-          available={automationsAvailable}
-          discovering={catalog.capabilitiesLoading}
-          createDisabled={schemaLoading || !!schemaError || !workflow}
-          selectedId={automationView ? automationsState.selectedId : ""}
-          onSelect={(id) => {
-            setAutomationView(true);
-            setSidebarOpen(false);
-            void automations.select(id);
-          }}
-          onNew={() => setNewAutomationOpen(true)}
-          onRefresh={() => void automations.refresh()}
-          archivedOpen={archivedOpen.automations}
-          onToggleArchived={() => toggleArchivedOpen("automations")}
-          onUnarchive={(s) => void automations.unarchive(s.automation_id).catch(() => undefined)}
-          onArchive={(s) => automations.command(s.automation_id, "automation.archive")}
-          open={panels.automations}
-          onToggle={() => togglePanelOpen("automations")}
-        />
         <ConversationsPanel
           open={panels.conversations}
           onToggle={() => togglePanelOpen("conversations")}
@@ -1692,16 +1670,12 @@ export function CodeWorkspace() {
           }
         >
           {!currentSession ? (
-            <button
-              type="button"
-              className="code-session code-card is-selected"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <span>
-                <strong className="code-card-title">New conversation</strong>
-                <small className="code-card-meta">Ready when you are</small>
-              </span>
-            </button>
+            <div className="af-session-card code-session-placeholder" data-selected="true">
+              <button type="button" className="af-session-card__open" onClick={() => setSidebarOpen(false)}>
+                <span className="af-session-card__title">New conversation</span>
+                <span className="af-session-card__meta">Ready when you are</span>
+              </button>
+            </div>
           ) : null}
           {filteredSessions.map((item) => (
             <ConversationCard
@@ -1743,6 +1717,28 @@ export function CodeWorkspace() {
             />
           </ArchivedFooter>
         </ConversationsPanel>
+        <AutomationsSection
+          nowMs={automationNowMs}
+          state={automationsState}
+          attention={eventsFollowing ? { needsYou: needsYou(meEvents.fold), newResults: newResults(meEvents.fold) } : null}
+          available={automationsAvailable}
+          discovering={catalog.capabilitiesLoading}
+          createDisabled={schemaLoading || !!schemaError || !workflow}
+          selectedId={automationView ? automationsState.selectedId : ""}
+          onSelect={(id) => {
+            setAutomationView(true);
+            setSidebarOpen(false);
+            void automations.select(id);
+          }}
+          onNew={() => setNewAutomationOpen(true)}
+          onRefresh={() => void automations.refresh()}
+          archivedOpen={archivedOpen.automations}
+          onToggleArchived={() => toggleArchivedOpen("automations")}
+          onUnarchive={(s) => void automations.unarchive(s.automation_id).catch(() => undefined)}
+          onArchive={(s) => automations.command(s.automation_id, "automation.archive")}
+          open={panels.automations}
+          onToggle={() => togglePanelOpen("automations")}
+        />
         </SidebarLists>
       </SidebarDrawer>
       {sidebarOpen ? (
@@ -1938,7 +1934,7 @@ export function CodeWorkspace() {
                   const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
                   if (!status) return null;
                   const target = sessionReadTarget(message.kind === "attachments" ? [...messages,message] : messages, message.runId || "", status);
-                  return target.message === message && readScope && !snapshot.loading && !snapshot.error ? <><span>{target.outcome}</span><SessionReadMarker ownerKey={readScope} receipt={{ sessionId: session.sessionId, revision: sessionContentRevision(message.runId || "", status), updatedAt: "" }} enabled={!automationView && !sidebarOpen && identity === principalRef.current} onRead={sessionReads.markRead} /></> : null;
+                  return target.message === message && readScope && !snapshot.loading && !snapshot.error ? <><span>{target.outcome}</span><SessionReadMarker ownerKey={readScope} receipt={{ sessionId: session.sessionId, revision: sessionContentRevision(message.runId || "", status), updatedAt: "" }} relatedReceipts={message.runId === session.runId ? catalog.sessionActivity[session.sessionId]?.content : undefined} enabled={!automationView && !sidebarOpen && identity === principalRef.current} onRead={sessionReads.markRead} /></> : null;
                 },
                 ...(voice.tts_supported
                   ? {
