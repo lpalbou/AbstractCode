@@ -3016,3 +3016,6 @@ select option {
 .code-sidebar .code-card { border-radius: 0; }
 .code-sidebar .code-session.code-card { padding-inline: 10px; }
 .code-settings-revision { display: inline-flex; align-items: center; }
+
+/* Optional second view; existing chat layout is unchanged when absent. */
+.code-view-choice{display:flex;gap:4px;align-items:center}.code-view-choice button{border:1px solid var(--border,#414454);border-radius:8px;background:transparent;color:inherit;padding:5px 9px;font:inherit;font-size:12px;cursor:pointer}.code-view-choice button[aria-pressed="true"]{background:var(--surface-2,#292b38)}

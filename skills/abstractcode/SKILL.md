@@ -150,3 +150,12 @@ slash-command draft before adding context. Esc/Cancel preserves the coding draft
 Esc also stops current voice work. Custom user/tool/JSON cards use screen-copy
 fallback and do not provide semantic actions. See
 [terminal selection](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/tui/docs/api.md#selected-content).
+
+## Optional avatar conversation
+
+In the browser, choose **Avatar** for public subtitles and **Conversation** to restore the
+ordinary trace. Start the next task in Avatar mode to request actor-authored public updates;
+changing a legacy run's view does not create missing updates. Type or speak during work to
+guide it; selecting **Reply to this** fixes a public brève as context. Accepted guidance is
+not proof that the assistant adopted the suggestion. Answer the exact displayed question
+and use explicit permission controls for approval. See [web usage](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/docs/web.md).

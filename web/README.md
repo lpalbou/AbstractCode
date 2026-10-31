@@ -103,3 +103,31 @@ same message attachments, safe clickable links and structured tool-result viewer
 clients. Files accompany the original user or assistant message, including restored history
 and file-only replies. File bytes load when opened through authenticated reads. The build
 verifies snapshot hashes; no sibling checkout is required to build the committed web app.
+
+
+## Avatar conversation view
+
+Choose **Avatar** in the conversation header for a second view over the same work.
+The avatar shows activity and short subtitles communicate discoveries, choices and
+questions. **Conversation history** opens the full public exchanges and final answer;
+**Conversation** restores the ordinary chat and technical details. Switching views
+preserves the current draft and attachments.
+
+While work continues, type or speak naturally to guide it. **Reply to this** pins a
+specific public update as context. Sending a correction makes it available to the
+assistant; the assistant's later response shows whether it adopted the correction.
+Questions use their displayed answer controls. Permission requests require an explicit
+choice; an ordinary message or silence grants no permission.
+
+Essential questions keep waiting. A clarification may state a two-to-five minute
+answer deadline and what will happen without an answer. **Conversation cues** controls
+visual and audio alerts independently for questions, permission requests and completion.
+Audio alerts default off. Voice narration uses the existing voice preference;
+reading history or editing a reply silences automatic narration. Playback can be paused
+or silenced without stopping the task.
+
+Public updates require a run started in Avatar mode and a backend supporting the public
+conversation protocol. Switching an already active legacy run changes its presentation;
+it does not manufacture missing updates. Tool details remain available in the ordinary
+view. Public updates describe the assistant's communicated conclusions, not private
+reasoning, and source references establish provenance rather than proof of correctness.

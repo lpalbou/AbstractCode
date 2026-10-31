@@ -1,4 +1,5 @@
-import {WorkflowChat, useWorkflowSession} from "../vendor/abstractchat/conversation.js";
+import {WorkflowChat, useWorkflowSession, conversationSnapshot, useAvatarConversationPreferences, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
+import { ActivityAvatar, AfVoiceMicButton, voiceCaptureMode } from "@abstractframework/ui-kit";
 import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget, sessionOpeningReceipts } from "../vendor/abstractsessions/session_cards.js";
 import { createSessionReadClient, useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
@@ -58,7 +59,6 @@ import {
   uploadRefusal,
   useAttachmentUploads,
   type ComposerAttachment,
-  presentInteraction,
   workflowPendingInteraction,
   type ChatMessage,
 } from "@abstractframework/panel-chat";
@@ -175,6 +175,10 @@ export function CodeWorkspace() {
   const identity = connection.connected
     ? workspacePrincipalIdentity(connection.status)
     : "";
+  const avatarPreferences = useAvatarConversationPreferences(`abstractcode:${identity}`);
+  const avatarMode = avatarPreferences.mode === "avatar";
+  const [avatarReplyContext, setAvatarReplyContext] = useState<ChatMessage | null>(null);
+  const [avatarAttended, setAvatarAttended] = useState(false);
   const onAuthError = useCallback(() => {
     void connection.refresh();
   }, [connection.refresh]);
@@ -443,6 +447,7 @@ export function CodeWorkspace() {
         : null,
     );
   }, [controller, connection.connected, catalog.capabilitiesLoading, catalog.capabilitiesError, sessionPolicyCapability, session.sessionId]);
+  useEffect(() => setAvatarReplyContext(null), [identity, session.sessionId]);
   const active =
     Boolean(session.runId) &&
     !terminal(snapshot.status) &&
@@ -490,7 +495,7 @@ export function CodeWorkspace() {
   useEffect(() => {
     const { state, speak } = readAloudStep(readAloudState.current, readAloud);
     readAloudState.current = state;
-    if (speak && voicePreferences.read_aloud === true && voice.tts_supported) void voice.toggle_tts(speak.id, speak.text);
+    if (speak && voicePreferences.read_aloud === true && voice.tts_supported && (!avatarMode || (!avatarAttended && !draft.trim() && !voice.voice_ptt_recording))) void voice.toggle_tts(speak.id, speak.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readAloud.scope, readAloud.phase, readAloud.reply?.id, voicePreferences.read_aloud, voice.tts_supported]);
   // A tool batch this client already granted (the standing permission, or an
@@ -998,6 +1003,7 @@ export function CodeWorkspace() {
         sessionId: startedSession,
         input,
       });
+      if (avatarMode) Object.assign(body, { conversation: true });
       const result = await gatewayRequest(gatewayApiPath("runs/start"), {
         method: "POST",
         body: JSON.stringify(body),
@@ -1074,12 +1080,18 @@ export function CodeWorkspace() {
   // backlog 0030): "Guide this run" posts inject_guidance; "Queue next turn" holds the message
   // here and starts it when the run ends. A pending question/approval leaves only Queue.
   async function guideRun(text: string): Promise<{ accepted: boolean; seq?: number; duplicate?: boolean }> {
-    if (interaction) throw new Error("Answer the pending workflow request above, or queue the next turn.");
+    if (avatarMode && interaction?.kind === "ask-user") {
+      await interaction.onSubmit(text);
+      setAvatarReplyContext(null);
+      return { accepted: true };
+    }
+    if (interaction) throw new Error(avatarMode ? "Please use the request controls. A message does not grant permission." : "Answer the pending workflow request above, or queue the next turn.");
     const sid = session.sessionId;
     const rid = session.runId;
     const epoch = authEpoch.current;
-    const answer = (await controller.sendCommand("inject_guidance", { guidance: text })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
+    const answer = (await controller.sendCommand("inject_guidance", { guidance: avatarMode ? conversationReply(text, avatarReplyContext, session.runId) : text, ...(avatarMode ? { display_text: text } : {}) })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
     if (sessionRef.current.sessionId !== sid || sessionRef.current.runId !== rid || authEpoch.current !== epoch) throw staleSendAbort();
+    if (avatarMode && answer?.accepted !== false) setAvatarReplyContext(null);
     return {
       accepted: answer?.accepted !== false,
       ...(typeof answer?.seq === "number" ? { seq: answer.seq } : {}),
@@ -1103,7 +1115,7 @@ export function CodeWorkspace() {
   const steer =
     active && !sending
       ? {
-          modes: (interaction ? ["queue"] : ["guide", "queue"]) as ("guide" | "queue")[],
+          modes: (avatarMode ? ["guide"] : interaction ? ["queue"] : ["guide", "queue"]) as ("guide" | "queue")[],
           parked: snapshot.status === "waiting" && !interaction,
           onSteer: async (text: string, mode: "guide" | "queue") => (mode === "queue" ? queueNextTurn(text) : guideRun(text)),
         }
@@ -1112,10 +1124,10 @@ export function CodeWorkspace() {
   /** A message from outside the composer (the microphone): starts a turn, or steers / queues a busy run. */
   async function send(text: string) {
     if (!active) return startTurn(text);
-    const result = interaction ? queueNextTurn(text) : await guideRun(text);
+    const result = avatarMode ? await guideRun(text) : interaction ? queueNextTurn(text) : await guideRun(text);
     if (!result.accepted) throw new Error("The gateway did not accept this message.");
     setDraft("");
-    setNotice(interaction ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
+    setNotice(avatarMode ? "Sent. Your message is available to the assistant." : interaction ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");
@@ -1758,6 +1770,10 @@ export function CodeWorkspace() {
           >
             <Icon name="list" size={19} />
           </button>
+          {!automationView && <div className="code-view-choice" role="group" aria-label="Conversation view">
+            <button type="button" aria-pressed={!avatarMode} onClick={() => { voice.stop_tts(); avatarPreferences.setMode("chat"); }}>Conversation</button>
+            <button type="button" aria-pressed={avatarMode} onClick={() => { voice.stop_tts(); avatarPreferences.setMode("avatar"); }}>Avatar</button>
+          </div>}
           <div className="code-breadcrumb">
             <span>{automationView ? "Automations" : "Conversations"}</span>
             <span aria-hidden="true">/</span>
@@ -1914,6 +1930,25 @@ export function CodeWorkspace() {
               />
             ) : null}
             <WorkflowChat
+              avatarConversation={avatarMode ? {
+                sessionKey: `${identity}:${session.sessionId}`,
+                avatar: <ActivityAvatar design="halo" size={320} pose={voice.voice_ptt_recording ? "listening" : voice.tts_playback.status === "playing" ? "speaking" : pendingInteraction ? "waiting" : active ? "thinking" : snapshot.status === "failed" ? "error" : "ready"} label="Your assistant" />,
+                ...conversationSnapshot(snapshot),
+                listening: voice.voice_ptt_recording,
+                speaking: voice.tts_playback.status === "playing",
+                preferences: avatarPreferences.preferences,
+                onPreferencesChange: avatarPreferences.setPreferences,
+                onCue: (cue) => { void playConversationCue(cue).catch((reason) => setNotice(String(reason instanceof Error ? reason.message : reason))); },
+                onInterruptSpeech: () => voice.stop_tts(),
+                onReplyContext: setAvatarReplyContext,
+                onAttendedChange: setAvatarAttended,
+                narrate: voicePreferences.read_aloud === true && !voicePreferences.reply_muted,
+                onNarrate: (message) => { if (voice.tts_supported) void voice.toggle_tts(`brief:${message.id}`, message.content); },
+                voiceControl: <span onPointerDown={() => voice.stop_tts()}><AfVoiceMicButton voice={voice} mode={voiceCaptureMode(voicePreferences.capture_mode ?? CODE_CAPTURE_DEFAULTS.capture_mode)} label="Talk" onTranscript={(text) => { if ((voicePreferences.auto_send ?? CODE_CAPTURE_DEFAULTS.auto_send) === false) setDraft((d) => spokenMessage(d, text)); else void sendSpoken(text); }} /></span>,
+                playbackControl: <span role="group" aria-label="Voice controls">
+                  {["playing", "paused"].includes(voice.tts_playback.status) && <><AfSwitch variant="row" label="Voice paused" checked={voice.tts_playback.status === "paused"} onChange={() => { const message = messages.find((m) => String(m.id || "") === voice.tts_playback.key.replace(/^brief:/, "")); if (message) void voice.toggle_tts(voice.tts_playback.key, message.content); }} /><button type="button" onClick={() => voice.stop_tts()}>Silence voice</button></>}
+                </span>,
+              } : undefined}
                 artifactFetch={proxyGatewayFetch}
                 attachmentScope={JSON.stringify([identity,session.sessionId])}
                 attachmentRun={{runId:session.runId,output:snapshot.run?.output}}
@@ -1969,7 +2004,7 @@ export function CodeWorkspace() {
               onRemoveAttachment={removeAttachmentItem}
               onRetryAttachment={uploads.retry}
               placeholder={
-                active
+                avatarMode ? "Tell your assistant…" : active
                   ? interaction
                     ? "Answer the request above, or queue the next task…"
                     : "Guide the current workflow, or queue the next task…"
