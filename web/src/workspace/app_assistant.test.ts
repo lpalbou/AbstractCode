@@ -67,7 +67,7 @@ describe("Code Docs assistant (kit DocsAssistantDrawer)", () => {
     expect(html).toContain("<strong>Files</strong>");
     expect(html).toContain("panel");
     expect(html.match(/aria-label="Copy message"/g)?.length).toBe(2);
-    expect(html).toContain("Grounded on AbstractCode’s documentation (llms.txt) · docs-qa");
+    expect(html).toContain("Powered by AbstractCode’s documentation.");
   });
 
   it("is the kit's docs panel: drawer mode, kept alive, icon-only New conversation, attachments", () => {

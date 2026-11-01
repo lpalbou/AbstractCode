@@ -65,7 +65,7 @@ describe("the rail drawer", () => {
     // The Docs assistant is a drawer-mode panel: open, labelled, no rail tab of its own.
     expect(html).toMatch(/id="code-rail-panel-docs" role="tabpanel" aria-label="Docs assistant"/);
     expect(html).not.toContain('data-rail="docs"');
-    expect(html).toContain("Grounded on AbstractCode");
+    expect(html).toContain("Powered by AbstractCode’s documentation.");
     expect(RAIL_WIDTH_KEY).toBe("abstractcode.rail.width.v1");
     expect(appSource).not.toContain("abstractcode.rail.panel");
     expect(appSource).not.toMatch(/localStorage\.setItem\(RAIL/);

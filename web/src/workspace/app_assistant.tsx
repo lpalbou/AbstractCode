@@ -1,5 +1,6 @@
 import React from "react";
-import { DocsAssistantDrawer, docsAssistantPanel, type DocsAssistantSource, type GatewayFetch } from "@abstractframework/panel-chat";
+import { DocsAssistantDrawer, docsAssistantPanel, type DocsAssistantSource } from "../vendor/abstractdocs/docs_assistant.js";
+import type { GatewayFetch } from "../vendor/abstractdocs/workspace_browser.js";
 import type { AfDrawerPanel, VoiceClientPreferences } from "@abstractframework/ui-kit";
 import { csrfHeaders } from "./transport";
 

@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The chat composer is the shared rounded multiline composer in both Conversation and Avatar
   modes (AbstractUIC panel-chat 0.7.0): Attach, voice tools, Stop and the circular Send sit in
-  one box; Enter sends, Shift+Enter adds a line.
+  one box; Enter sends, Shift+Enter adds a line. The Docs assistant drawer is the shared
+  AbstractUIC component (vendored like the conversation), so its composer and footer match every app.
 
 ### Fixed
 
