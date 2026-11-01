@@ -582,7 +582,7 @@ select option {
   border: 0;
   background: transparent;
 }
-.code-conversation .pc-composer {
+.code-conversation .pc-composer:not(.pc-composer--compact) {
   gap: 0;
   padding: 15px 16px 11px;
   border: 1px solid var(--ui-border-2);
@@ -591,10 +591,10 @@ select option {
   box-shadow: 0 3px 16px color-mix(in srgb, var(--bg-primary) 60%, transparent);
   transition: border-color 0.15s;
 }
-.code-conversation .pc-composer:focus-within {
+.code-conversation .pc-composer:not(.pc-composer--compact):focus-within {
   border-color: var(--accent-border);
 }
-.code-conversation .pc-composer__textarea {
+.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
   border: 0;
   box-shadow: none;
   resize: vertical;
@@ -605,21 +605,21 @@ select option {
   font-size: var(--font-size-base);
   line-height: 1.7;
 }
-.code-conversation .pc-composer__textarea:focus {
+.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea:focus {
   border: 0;
   outline: 0;
   box-shadow: none;
 }
-.code-conversation .pc-composer__textarea::placeholder {
+.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea::placeholder {
   color: var(--text-secondary);
   opacity: 0.8;
 }
-.code-conversation .pc-composer__row {
+.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__row {
   border: 0;
   padding: 0;
   gap: 8px;
 }
-.code-conversation .pc-composer__actions {
+.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions {
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -1672,10 +1672,10 @@ select option {
   .code-conversation .pc-workflow-chat__composer {
     padding: 8px var(--gutter, 16px) max(8px, var(--safe-bottom, 0px));
   }
-  .code-conversation .pc-composer {
+  .code-conversation .pc-composer:not(.pc-composer--compact) {
     padding: 10px 12px 8px;
   }
-  .code-conversation .pc-composer__textarea {
+  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
     min-height: 44px;
     padding-bottom: 6px;
   }
@@ -1885,10 +1885,10 @@ select option {
     padding-top: 4px;
     padding-bottom: max(6px, var(--safe-bottom, 0px));
   }
-  .code-conversation .pc-composer {
+  .code-conversation .pc-composer:not(.pc-composer--compact) {
     padding: 6px 12px 4px;
   }
-  .code-conversation .pc-composer__textarea {
+  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
     min-height: var(--tap-min, 32px);
     padding-bottom: 4px;
   }
@@ -2003,10 +2003,10 @@ select option {
    the destination select + Stop + Send on the last one — every control stays >= 44 px on
    touch without the composer taking a third of the screen. */
 @container pc-composer (max-width: 419.98px) {
-  .code-conversation .pc-composer__actions {
+  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions {
     display: contents;
   }
-  .code-conversation .pc-composer__row {
+  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__row {
     gap: 6px 8px;
   }
   .code-composer-workspace {
@@ -2035,7 +2035,7 @@ select option {
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  .code-conversation .pc-composer__row > .pc-btn {
+  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__row > .pc-btn {
     min-width: 0;
     max-width: 45%;
     overflow: hidden;
@@ -2059,13 +2059,13 @@ select option {
   max-height: calc(var(--vv-height, var(--vh-full, 100vh)) * 0.3);
   padding-bottom: 2px;
 }
-:root[data-keyboard="open"] .code-conversation .pc-composer {
+:root[data-keyboard="open"] .code-conversation .pc-composer:not(.pc-composer--compact) {
   padding: 6px 10px 4px;
 }
-:root[data-keyboard="open"] .code-conversation .pc-composer__actions > button {
+:root[data-keyboard="open"] .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions > button {
   display: none;
 }
-:root[data-keyboard="open"] .code-conversation .pc-composer__actions > .pc-workflow-chat__stop {
+:root[data-keyboard="open"] .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions > .pc-workflow-chat__stop {
   display: inline-flex;
 }
 :root[data-keyboard="open"] .code-conversation .pc-chat-thread {
@@ -2082,7 +2082,7 @@ select option {
     min-height: var(--tap-min, 44px);
   }
   /* The app's 14 px composer field must not undo the kit's 16 px touch rule (iOS focus zoom). */
-  .code-conversation .pc-composer__textarea {
+  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
     font-size: var(--font-size-input, 16px);
   }
   /* "Review full tool arguments" is the only way into the call's JSON: a full-height row. */

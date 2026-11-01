@@ -1935,6 +1935,7 @@ export function CodeWorkspace() {
               />
             ) : null}
             <WorkflowChat
+              composerVariant={avatarMode ? "compact" : "default"}
               avatarConversation={avatarMode ? {
                 sessionKey: `${identity}:${session.sessionId}`,
                 avatar: <ConversationAvatar voice={voice} active={active} pending={Boolean(pendingInteraction)} failed={snapshot.status === "failed"} paused={paused && !terminal(snapshot.status)} />,
@@ -2030,7 +2031,7 @@ export function CodeWorkspace() {
               }
               composerExtras={
                 <>
-                  <span
+                  {!avatarMode && <span
                     className="code-composer-workspace"
                     title={
                       effectiveWorkspace ||
@@ -2042,7 +2043,7 @@ export function CodeWorkspace() {
                       {effectiveWorkspace.split("/").filter(Boolean).pop() ||
                         "Gateway workspace"}
                     </span>
-                  </span>
+                  </span>}
                   {connection.connected ? (
                     <VoiceTools
                       key={`${identity}:${session.sessionId}:${session.runId}`}

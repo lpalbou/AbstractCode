@@ -44,3 +44,30 @@ test('optional avatar keeps drafts, answers the real current question, and prese
  await expect(page.locator('.code-conversation .pc-chat-thread')).toContainText('structured-output');
  expect(errors).toEqual([]);
 });
+
+test('avatar keeps the real approval and compact multiline composer visible',async({page})=>{
+ const ready=await page.request.get(`${gateway}/api/gateway/bundles`,{headers:{Authorization:'Bearer abstractcode-e2e-only'},timeout:60000});expect(ready.ok()).toBe(true);
+ const appOrigin=new URL(process.env.ABSTRACTCODE_E2E_URL||'http://127.0.0.1:18782').origin;
+ await page.route('**/*',route=>new URL(route.request().url()).origin===appOrigin?route.continue():route.abort('blockedbyclient'));
+ const commands:any[]=[];page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/commands'))commands.push(r.postDataJSON());});
+ await page.goto('/');await page.locator('#gateway-session-url').fill(gateway);await page.locator('#gateway-session-user').fill('web-tester');await page.locator('#gateway-session-token').fill('abstractcode-e2e-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('dialog',{name:'Gateway connection'})).toBeHidden();
+ await openWorkspaceSection(page,'Workflow');const picker=page.getByRole('combobox',{name:'Workflow',exact:true});await expect(picker).toBeEnabled();await picker.click();await page.getByRole('listbox',{name:'Workflow'}).getByRole('option').filter({has:page.locator('.af-workflow-picker__name',{hasText:/^Delegated tool approval$/})}).click();await closeWorkspaceDrawer(page);
+ await page.getByRole('button',{name:'Avatar',exact:true}).click();
+ const composer=page.locator('.code-conversation .pc-composer');await expect(composer).toHaveClass(/pc-composer--compact/);
+ const input=composer.getByRole('textbox',{name:'Message',exact:true});await input.fill('Review these notes\nKeep both options\nCompare access');await expect(input).toHaveValue(/\n.*\n/);
+ await composer.screenshot({path:'/tmp/code-compact-multiline.png',animations:'disabled'});
+ await page.getByRole('button',{name:'Send',exact:true}).click();
+ const allow=page.getByRole('button',{name:'Allow once',exact:true});await expect(allow).toBeVisible();
+ await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Permission required');
+ const visible=async(locator:any)=>locator.evaluate((el:Element)=>{const b=el.getBoundingClientRect();let top=0,bottom=innerHeight;for(let p=el.parentElement;p;p=p.parentElement){if(/auto|scroll|hidden|clip/.test(getComputedStyle(p).overflowY)){const r=p.getBoundingClientRect();top=Math.max(top,r.top);bottom=Math.min(bottom,r.bottom);}}return b.top>=top&&b.bottom<=bottom;});
+ for(const viewport of[{width:1280,height:800},{width:1000,height:650},{width:390,height:844}]){
+  await page.setViewportSize(viewport);
+  await expect.poll(()=>visible(allow)).toBe(true);await expect.poll(()=>visible(page.locator('.pc-avatar-conversation__request .pc-workflow-interaction__prompt'))).toBe(true);
+  await allow.click({trial:true});
+  await expect(composer.getByRole('textbox',{name:'Message',exact:true})).toBeVisible();expect(commands.length).toBe(0);
+  await page.screenshot({path:`/tmp/code-avatar-request-${viewport.width}.png`,animations:'disabled'});
+ }
+ await allow.click();await expect.poll(()=>commands.some(c=>c.type==='resume'&&c.payload?.payload?.approved===true)).toBe(true);
+ await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Completed');
+ await page.getByRole('button',{name:'Conversation',exact:true}).click();await expect(composer).not.toHaveClass(/pc-composer--compact/);
+});
