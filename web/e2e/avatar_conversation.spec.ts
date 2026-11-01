@@ -82,7 +82,7 @@ test('avatar keeps the real approval and compact multiline composer visible',asy
  await allow.evaluate(element=>{(element as HTMLButtonElement).click();(element as HTMLButtonElement).click();});
  await expect.poll(()=>commands.filter(c=>c.type==='resume'&&c.payload?.payload?.approved===true).length).toBe(1);
  await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Completed');
- await page.getByRole('button',{name:'Conversation',exact:true}).click();await expect(composer).not.toHaveClass(/pc-composer--compact/);
+ await page.getByRole('button',{name:'Conversation',exact:true}).click();await expect(composer).toHaveClass(/pc-composer--compact/);await expect(composer.getByRole('button',{name:'Attach file',exact:true})).toHaveCount(1);
 });
 
 async function publicTargetVisible(locator:Locator):Promise<boolean>{

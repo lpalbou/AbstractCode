@@ -582,47 +582,6 @@ select option {
   border: 0;
   background: transparent;
 }
-.code-conversation .pc-composer:not(.pc-composer--compact) {
-  gap: 0;
-  padding: 15px 16px 11px;
-  border: 1px solid var(--ui-border-2);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));
-  box-shadow: 0 3px 16px color-mix(in srgb, var(--bg-primary) 60%, transparent);
-  transition: border-color 0.15s;
-}
-.code-conversation .pc-composer:not(.pc-composer--compact):focus-within {
-  border-color: var(--accent-border);
-}
-.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
-  border: 0;
-  box-shadow: none;
-  resize: vertical;
-  background: transparent;
-  padding: 1px 1px 12px;
-  min-height: 74px;
-  max-height: 220px;
-  font-size: var(--font-size-base);
-  line-height: 1.7;
-}
-.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea:focus {
-  border: 0;
-  outline: 0;
-  box-shadow: none;
-}
-.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.8;
-}
-.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__row {
-  border: 0;
-  padding: 0;
-  gap: 8px;
-}
-.code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions {
-  gap: 8px;
-  flex-wrap: wrap;
-}
 .code-conversation .pc-workflow-chat__icon-button {
   border: 0;
   padding: 5px 0;
@@ -1672,13 +1631,6 @@ select option {
   .code-conversation .pc-workflow-chat__composer {
     padding: 8px var(--gutter, 16px) max(8px, var(--safe-bottom, 0px));
   }
-  .code-conversation .pc-composer:not(.pc-composer--compact) {
-    padding: 10px 12px 8px;
-  }
-  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
-    min-height: 44px;
-    padding-bottom: 6px;
-  }
   /* Keyboard hints mean nothing on a phone; the policy note moves to Settings. */
   .code-conversation .pc-workflow-chat__footer {
     display: none;
@@ -1885,13 +1837,6 @@ select option {
     padding-top: 4px;
     padding-bottom: max(6px, var(--safe-bottom, 0px));
   }
-  .code-conversation .pc-composer:not(.pc-composer--compact) {
-    padding: 6px 12px 4px;
-  }
-  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
-    min-height: var(--tap-min, 32px);
-    padding-bottom: 4px;
-  }
   .code-run-strip {
     min-height: 34px;
     padding-block: 3px;
@@ -1999,16 +1944,10 @@ select option {
     min-height: calc(32px + var(--safe-bottom, 0px));
   }
 }
-/* Narrow composer (its own width < 420 px: phones, narrow panes): icons on the first row,
-   the destination select + Stop + Send on the last one — every control stays >= 44 px on
-   touch without the composer taking a third of the screen. */
+/* Narrow composer (its own width < 420 px: phones, narrow panes): the shared rounded composer
+   keeps one control row; the workspace destination collapses to its icon so every control
+   stays >= 44 px on touch. */
 @container pc-composer (max-width: 419.98px) {
-  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions {
-    display: contents;
-  }
-  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__row {
-    gap: 6px 8px;
-  }
   .code-composer-workspace {
     border-left: 0;
     justify-content: center;
@@ -2018,9 +1957,8 @@ select option {
     display: none;
   }
 }
-/* Very narrow composer (< 360 px: 320-wide phones): the last row still holds Stop + Send —
-   Stop shows its icon only (its word stays the accessible name), the send label shrinks with an
-   ellipsis instead of pushing Send onto a third row. */
+/* Very narrow composer (< 360 px: 320-wide phones): Stop shows its icon only (its word stays
+   the accessible name) so Stop and the icon-only Send stay on the control row. */
 @container pc-composer (max-width: 359.98px) {
   .code-conversation .pc-workflow-chat__stop {
     min-width: var(--tap-min, 32px);
@@ -2035,18 +1973,11 @@ select option {
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__row > .pc-btn {
-    min-width: 0;
-    max-width: 45%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding-inline: 10px;
-  }
 }
 /* On-screen keyboard up (<html data-keyboard="open">, from --keyboard-inset via layout.ts): the
    visible height is small, so the chrome steps aside while typing — no top bar, toolbar, run
    strip or status bar; the composer keeps its field (1-2 lines, at most 30 % of the visible
-   height) and its last row (select, Stop, Send); everything returns with the keyboard down. */
+   height) and its control row; everything returns with the keyboard down. */
 :root[data-keyboard="open"] .code-topbar,
 :root[data-keyboard="open"] .code-toolbar,
 :root[data-keyboard="open"] .code-run-strip,
@@ -2058,15 +1989,6 @@ select option {
   min-height: 0;
   max-height: calc(var(--vv-height, var(--vh-full, 100vh)) * 0.3);
   padding-bottom: 2px;
-}
-:root[data-keyboard="open"] .code-conversation .pc-composer:not(.pc-composer--compact) {
-  padding: 6px 10px 4px;
-}
-:root[data-keyboard="open"] .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions > button {
-  display: none;
-}
-:root[data-keyboard="open"] .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__actions > .pc-workflow-chat__stop {
-  display: inline-flex;
 }
 :root[data-keyboard="open"] .code-conversation .pc-chat-thread {
   padding-block: 8px;
@@ -2080,10 +2002,6 @@ select option {
   .code-conversation .pc-json-viewer__toolbar .pc-btn,
   .code-conversation .pc-workflow-chat__stop {
     min-height: var(--tap-min, 44px);
-  }
-  /* The app's 14 px composer field must not undo the kit's 16 px touch rule (iOS focus zoom). */
-  .code-conversation .pc-composer:not(.pc-composer--compact) .pc-composer__textarea {
-    font-size: var(--font-size-input, 16px);
   }
   /* "Review full tool arguments" is the only way into the call's JSON: a full-height row. */
   .code-conversation .pc-approval-summary summary {

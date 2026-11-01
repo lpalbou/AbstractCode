@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The chat composer is the shared rounded multiline composer in both Conversation and Avatar
+  modes (AbstractUIC panel-chat 0.7.0): Attach, voice tools, Stop and the circular Send sit in
+  one box; Enter sends, Shift+Enter adds a line.
+
 ### Fixed
 
 - Opening a conversation clears its existing unread history even when the latest answer was already read and older turns load later.

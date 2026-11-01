@@ -1936,7 +1936,6 @@ export function CodeWorkspace() {
               />
             ) : null}
             <WorkflowChat
-              composerVariant={avatarMode ? "compact" : "default"}
               avatarConversation={avatarMode ? {
                 onTechnicalView: () => { voice.stop_tts(); avatarPreferences.setMode("chat"); },
                 sessionKey: `${identity}:${session.sessionId}`,
@@ -2046,7 +2045,9 @@ export function CodeWorkspace() {
                         "Gateway workspace"}
                     </span>
                   </span>}
-                  {connection.connected ? (
+                </>
+              }
+              composerTrailingActions={connection.connected ? (
                     <VoiceTools
                       key={`${identity}:${session.sessionId}:${session.runId}`}
                       voice={voice}
@@ -2055,8 +2056,6 @@ export function CodeWorkspace() {
                       route={sttRouteText(voicePreferences, voiceDefaults.value)}
                     />
                   ) : null}
-                </>
-              }
               footer={
                 <>
                   <span>
