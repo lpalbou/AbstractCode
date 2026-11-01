@@ -29,5 +29,5 @@ export function codeDocsPanel(connected: boolean): AfDrawerPanel {
 
 /** Use the same drawer as Gateway, Observer, Flow, Entity and Note. */
 export function CodeDocsAssistant(props: { connected: boolean; open: boolean; onClose: () => void; voicePreferences?: VoiceClientPreferences }): React.ReactElement {
-  return <DocsAssistantDrawer source={CODE_DOCS_SOURCE} fetchGateway={docsGatewayFetch} connected={props.connected} open={props.open} onClose={props.onClose} voicePreferences={props.voicePreferences} topOffset="auto" suggestions={CODE_DOCS_SUGGESTIONS} placeholder="Ask about AbstractCode…" />;
+  return <DocsAssistantDrawer source={CODE_DOCS_SOURCE} fetchGateway={docsGatewayFetch} connected={props.connected} open={props.open} onClose={props.onClose} voicePreferences={props.voicePreferences} suggestions={CODE_DOCS_SUGGESTIONS} placeholder="Ask about AbstractCode…" />;
 }

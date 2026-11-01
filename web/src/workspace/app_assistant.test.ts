@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DocsAssistantPanel, DocsAssistantPanelContent, makeDocsQaAsk } from "@abstractframework/panel-chat";
+import { DocsAssistantPanel, DocsAssistantPanelContent, makeDocsQaAsk } from "../vendor/abstractdocs/docs_assistant.js";
 import { CODE_DOCS_SOURCE, codeDocsPanel, docsGatewayFetch } from "./app_assistant";
 // @ts-expect-error bin/server.js is plain ESM JavaScript without types
 import { createCodeRequestHandler } from "../../bin/server.js";

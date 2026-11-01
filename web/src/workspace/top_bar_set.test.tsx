@@ -45,7 +45,7 @@ describe("the shared top-bar set", () => {
   });
 
   it("the docs drawer is panel-chat's, and no piece is a local copy", () => {
-    expect(assistantSource).toMatch(/import \{ DocsAssistantDrawer[^}]*\} from "@abstractframework\/panel-chat"/);
+    expect(assistantSource).toMatch(/import \{ DocsAssistantDrawer[^}]*\} from "\.\.\/vendor\/abstractdocs\/docs_assistant\.js"/);
     expect(appSource).toMatch(/<CodeDocsAssistant/);
     for (const local of [/function \w*About\w*Dialog/, /function \w*Appearance\w*Dialog/, /Signed in as/, /af-topbar__/]) expect(appSource).not.toMatch(local);
   });
