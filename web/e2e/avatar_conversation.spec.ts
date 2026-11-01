@@ -55,6 +55,7 @@ test('avatar keeps the real approval and compact multiline composer visible',asy
  await page.getByRole('button',{name:'Avatar',exact:true}).click();
  const composer=page.locator('.code-conversation .pc-composer');await expect(composer).toHaveClass(/pc-composer--compact/);
  const input=composer.getByRole('textbox',{name:'Message',exact:true});await input.fill('Review these notes\nKeep both options\nCompare access');await expect(input).toHaveValue(/\n.*\n/);
+ await expect(input).toHaveCSS('outline-style','none');
  await composer.screenshot({path:'/tmp/code-compact-multiline.png',animations:'disabled'});
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const allow=page.getByRole('button',{name:'Allow once',exact:true});await expect(allow).toBeVisible();
