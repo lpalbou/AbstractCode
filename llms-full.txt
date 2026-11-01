@@ -4452,6 +4452,13 @@ questions. **Conversation history** opens the full public exchanges and final an
 **Conversation** restores the ordinary chat and technical details. Switching views
 preserves the current draft and attachments.
 
+Permission requests explain the action, its destinations and the assistant’s stated
+reason, with labeled Deny/Allow once icons. “Review details” opens Conversation mode
+for technical arguments and broader permission choices. A reason is shown only when
+the backend attached a public explanation to that exact request; older requests may
+have none. Avatar mode also uses the compact multiline composer and omits technical
+execution counters from its status strip.
+
 While work continues, type or speak naturally to guide it. **Reply to this** pins a
 specific public update as context. Sending a correction makes it available to the
 assistant; the assistant's later response shows whether it adopted the correction.

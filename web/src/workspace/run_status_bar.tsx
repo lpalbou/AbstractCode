@@ -17,6 +17,7 @@ export function RunStatusBar({
   onActivity,
   onInteraction,
   permissionsAll,
+  publicView = false,
 }: {
   active: boolean;
   paused: boolean;
@@ -26,6 +27,7 @@ export function RunStatusBar({
   onActivity: () => void;
   onInteraction?: () => void;
   permissionsAll?: boolean;
+  publicView?: boolean;
 }) {
   const progress = useMemo(() => workflowProgress(snapshot), [snapshot]);
   // Live model phase, when the provider reports one. "Generating the next
@@ -40,7 +42,8 @@ export function RunStatusBar({
         : "",
     [progress.tone, snapshot.records, snapshot.view],
   );
-  const detail = phase || progress.detail;
+  const detail = publicView ? "" : phase || progress.detail;
+  const label = publicView && progress.tone === "working" ? "Working" : progress.label;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!active) return;
@@ -86,11 +89,11 @@ export function RunStatusBar({
             onClick={onInteraction}
             title="Go to the pending request"
           >
-            <strong>{progress.label}</strong>
+            <strong>{label}</strong>
             <Icon name="chevronRight" size={12} />
           </button>
         ) : (
-          <strong>{progress.label}</strong>
+          <strong>{label}</strong>
         )}
         {/* A live model phase stays visible on phones too (the static detail does not). */}
         <span className={`code-run-strip__detail${phase ? " code-run-strip__detail--live" : ""}`} title={detail}>
@@ -102,12 +105,12 @@ export function RunStatusBar({
         aria-label="Run activity metrics"
       >
         {active && time ? <span>{time}</span> : null}
-        {progress.toolCalls ? (
+        {!publicView && progress.toolCalls ? (
           <span>
             {progress.toolCalls} {progress.toolCalls === 1 ? "tool" : "tools"}
           </span>
         ) : null}
-        {progress.totalTokens !== undefined ? (
+        {!publicView && progress.totalTokens !== undefined ? (
           <span>{progress.totalTokens.toLocaleString()} tokens</span>
         ) : null}
       </span>
@@ -116,7 +119,7 @@ export function RunStatusBar({
           <button onClick={() => onCommand(paused ? "resume" : "pause")}>
             {paused ? "Resume" : "Pause"} {/* state-toggle-lint: allow one-shot command on the running run (pause/resume the run tree), not a setting */}
           </button>
-          <button onClick={() => onCommand("conclude")}>Conclude</button>
+          <button onClick={() => onCommand("conclude")}>{publicView ? "Finish now" : "Conclude"}</button>
         </>
       ) : null}
       <button onClick={onActivity}>
@@ -125,7 +128,7 @@ export function RunStatusBar({
       {permissionsAll ? (
         <div className="code-run-strip__consent">
           <Icon name="check" size={13} />
-          <span>Auto: every enabled tool · this browser</span>
+          <span>{publicView ? "Automatic permissions are on · this browser" : "Auto: every enabled tool · this browser"}</span>
           <button onClick={onRevokeApproval}>Revoke</button>
         </div>
       ) : null}

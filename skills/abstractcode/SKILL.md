@@ -159,3 +159,7 @@ changing a legacy run's view does not create missing updates. Type or speak duri
 guide it; selecting **Reply to this** fixes a public brève as context. Accepted guidance is
 not proof that the assistant adopted the suggestion. Answer the exact displayed question
 and use explicit permission controls for approval. See [web usage](https://raw.githubusercontent.com/lpalbou/AbstractCode/main/docs/web.md).
+
+Avatar requests use plain actions/targets and the exact batch’s public explanation.
+“Review details” returns to the technical view without granting permission. Tool syntax,
+argument JSON and standing grants belong there. Missing reasons remain explicit.

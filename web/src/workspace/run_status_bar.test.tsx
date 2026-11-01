@@ -74,6 +74,17 @@ function llmRow(snapshot: WorkflowSessionSnapshot) {
 }
 
 describe("live model progress in the run strip and on the Activity llm row", () => {
+  it("keeps provider mechanics out of the public avatar strip while retaining technical activity", async () => {
+    const { controller, push } = await session();
+    push(progress(2, { phase: "generate", event_index: 1, generated_tokens: 46, tokens_per_second: 38.2 }));
+    const html = renderToStaticMarkup(<RunStatusBar publicView active paused={false} snapshot={controller.getSnapshot()} onRevokeApproval={() => {}} onCommand={() => {}} onActivity={() => {}} />);
+    expect(html).toContain("Working");
+    expect(html).toContain("Finish now");
+    expect(html).not.toContain("tokens");
+    expect(html).not.toContain("tok/s");
+    expect(strip(controller.getSnapshot())).toContain("46 tokens");
+    controller.dispose();
+  });
   it("prefill shows tokens done / total (%), decode shows tokens and tok/s, from a child run's stream", async () => {
     const { controller, push } = await session();
     push(progress(2, { phase: "prefill", event_index: 0, generated_tokens: 0 }));

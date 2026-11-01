@@ -1898,6 +1898,7 @@ export function CodeWorkspace() {
             {/* Kit gap K2 (ui-primitives 0030): WorkflowChat has no runStatus slot (metrics, pause/resume, activity). */}
             {active || terminal(snapshot.status) ? (
               <RunStatusBar
+                publicView={avatarMode}
                 active={active}
                 paused={paused}
                 snapshot={snapshot}
@@ -1906,7 +1907,7 @@ export function CodeWorkspace() {
                   interaction && !paused
                     ? () => {
                         const thread = document.querySelector<HTMLElement>(
-                          ".code-conversation .pc-chat-thread",
+                          avatarMode ? ".code-conversation .pc-avatar-conversation" : ".code-conversation .pc-chat-thread",
                         );
                         const request = thread?.querySelector<HTMLElement>(
                           ".pc-workflow-interaction",
@@ -1937,6 +1938,7 @@ export function CodeWorkspace() {
             <WorkflowChat
               composerVariant={avatarMode ? "compact" : "default"}
               avatarConversation={avatarMode ? {
+                onTechnicalView: () => { voice.stop_tts(); avatarPreferences.setMode("chat"); },
                 sessionKey: `${identity}:${session.sessionId}`,
                 avatar: <ConversationAvatar voice={voice} active={active} pending={Boolean(pendingInteraction)} failed={snapshot.status === "failed"} paused={paused && !terminal(snapshot.status)} />,
                 ...conversationSnapshot(snapshot),
