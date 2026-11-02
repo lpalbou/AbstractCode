@@ -1858,7 +1858,7 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.13.0**, pre-alpha. What's new in 0.13.0: six companion designs
+Status: **0.13.1**, pre-alpha. What's new in 0.13.0: six companion designs
 shared with the other apps, a larger Skills picker, and speech that stops at
 session boundaries ([CHANGELOG.md](CHANGELOG.md#0130---2026-11-02)).
 
@@ -4509,6 +4509,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.13.1] - 2026-11-02
+
+### Fixed
+
+- Terminal: release binaries for every platform (macOS, Linux, Windows) on the GitHub release; no code change since 0.13.0.
+
 ## [web 0.14.0] - 2026-11-02
 
 On AbstractUIC 0.9.0 (`@abstractframework/ui-kit` ^0.9.12, `@abstractframework/panel-chat` ^0.7.0, `@abstractframework/app-server` ^0.1.13).
@@ -5730,7 +5736,12 @@ Requires Rust **1.87+** (the crate's declared minimum; CI builds against it).
 cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
+python3 scripts/check_portable_paths.py   # every tracked name checks out on Windows
 ```
+
+CI also builds the terminal client on Windows. A tracked file name with `< > : " | ? *`,
+a trailing dot or space, or a reserved device name (`CON`, `NUL`, `COM1`...) fails
+`scripts/check_portable_paths.py`, which runs before every build and release.
 
 For an unreleased AbstractTUI dependency, use a sibling checkout explicitly:
 
