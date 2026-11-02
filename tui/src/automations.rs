@@ -131,6 +131,9 @@ pub struct Summary {
     /// Served (round 16): the last "Email result" when it FAILED — see
     /// [`FailedNotification`]; `None` otherwise (none, sent, queued…).
     pub email_failed: Option<FailedNotification>,
+    /// Served (ADR 0048): where the list draws it — "active", "paused" or
+    /// "archived"; `None` from a gateway that serves no sections.
+    pub section: Option<String>,
 }
 
 /// `last_notification` of a summary (round 16) while its status is
@@ -416,6 +419,7 @@ pub fn parse_summary(v: &Value) -> Parse<Summary> {
         revision: v.get("revision").and_then(Value::as_u64),
         capabilities: str_list(v, "capabilities"),
         email_failed: failed_notification(v),
+        section: opt_str(v, "section"),
     })
 }
 
@@ -811,6 +815,24 @@ pub fn visible(items: &[Summary]) -> Vec<Summary> {
         .filter(|s| s.status != "archived")
         .cloned()
         .collect()
+}
+
+/// ADR 0048: the rows in the gateway's order, split by the `section` it
+/// serves — the active ones, then the paused ones (drawn folded under
+/// `Paused · N`). Nothing is sorted or decided here; a gateway that serves
+/// no `section` (0.19.0 and earlier) gets every row as today.
+pub fn sections(items: &[Summary]) -> (Vec<Summary>, Vec<Summary>) {
+    let rows = visible(items);
+    if !rows.iter().any(|s| s.section.is_some()) {
+        return (rows, Vec::new());
+    }
+    rows.into_iter()
+        .partition(|s| s.section.as_deref() != Some("paused"))
+}
+
+/// `Paused · 2` — the quiet line after the active rows; `None` at 0.
+pub fn paused_line(count: usize) -> Option<String> {
+    (count > 0).then(|| format!("Paused · {count}"))
 }
 
 /// `Archived · 6` — the quiet line at the end of a list; `None` at 0 (the
@@ -2712,6 +2734,11 @@ pub struct View {
     pub archived: Option<Result<Vec<Summary>, String>>,
     /// The `Archived · N` line is open (its rows show, each with Unarchive).
     pub archived_open: bool,
+    /// The `Paused · N` line is open (ADR 0048; closed at first).
+    pub paused_open: bool,
+    /// `paused_automations_count` of the newest list answer (ADR 0048);
+    /// `None` when the gateway serves none (the rows are counted).
+    pub paused_count: Option<u64>,
     pub detail: Option<Detail>,
     /// An action is in flight (controls are disabled with "Working…").
     pub busy: bool,
@@ -3127,6 +3154,7 @@ mod tests {
             revision: Some(1),
             capabilities: caps.iter().map(|c| c.to_string()).collect(),
             email_failed: None,
+            section: None,
         }
     }
 

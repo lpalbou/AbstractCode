@@ -213,6 +213,26 @@ export function ArchivedFooter(props: {
   /** The archived items (rendered only while open). */
   children: React.ReactNode;
 }): React.ReactElement | null {
+  return <FoldedFooter {...props} section="archived" label="Archived" />;
+}
+
+/**
+ * ADR 0048: the paused automations after the active ones, behind `Paused · N` (closed at first),
+ * labelled and drawn like Archived; its items are the same cards as the active rows.
+ */
+export function PausedFooter(props: { count: number; open: boolean; onToggle(): void; children: React.ReactNode }): React.ReactElement | null {
+  return <FoldedFooter {...props} list="automations" section="paused" label="Paused" />;
+}
+
+function FoldedFooter(props: {
+  list: SidebarPanel;
+  section: "archived" | "paused";
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle(): void;
+  children: React.ReactNode;
+}): React.ReactElement | null {
   // Opened by a click: bring the inline list into view (the footer sits at the end of a scrolled list).
   const listRef = useRef<HTMLUListElement>(null);
   const clicked = useRef(false);
@@ -222,15 +242,15 @@ export function ArchivedFooter(props: {
     listRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
   }, [props.open]);
   if (!(props.count > 0)) return null;
-  const region = `code-archived-${props.list}`;
+  const region = `code-${props.section}-${props.list}`;
   return (
-    <div className="code-archived" data-list={props.list} data-open={props.open ? "true" : "false"}>
+    <div className="code-archived" data-section={props.section} data-list={props.list} data-open={props.open ? "true" : "false"}>
       <button type="button" className="code-archived-toggle" aria-expanded={props.open} aria-controls={region} onClick={() => { clicked.current = true; props.onToggle(); }}>
-        <span>Archived · {props.count}</span>
+        <span>{props.label} · {props.count}</span>
         <Icon name="chevronDown" size={12} />
       </button>
       {props.open ? (
-        <ul ref={listRef} className="code-archived-list" id={region} aria-label={`Archived ${props.list}`}>
+        <ul ref={listRef} className="code-archived-list" id={region} aria-label={`${props.label} ${props.list}`}>
           {props.children}
         </ul>
       ) : null}

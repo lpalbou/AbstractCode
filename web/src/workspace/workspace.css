@@ -2096,6 +2096,8 @@ select option {
 .code-archived[data-open="true"] .code-archived-toggle svg { transform: none; }
 .code-archived-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 .code-archived-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.code-archived[data-section="paused"] .code-archived-list { gap: 6px; }
+.code-paused-row { list-style: none; }
 .code-archived-row {
   display: flex;
   flex-wrap: wrap;

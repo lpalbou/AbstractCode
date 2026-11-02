@@ -249,16 +249,15 @@ impl AutomationClient {
 
     /// Every page of the list (v1 has no change cursor: full pages are polled).
     pub fn list_all(&self) -> Result<Vec<auto::Summary>, String> {
-        self.list_pages(auto::list_request).map(|(items, _)| items)
+        self.list_pages(auto::list_request).map(|l| l.items)
     }
 
-    /// Every page of a listing + the first page's `archived_automations`.
-    fn list_pages(
-        &self,
-        request: fn(Option<&str>) -> Request,
-    ) -> Result<(Vec<auto::Summary>, u64), String> {
+    /// Every page of a listing + the first page's `archived_automations` and
+    /// `paused_automations_count` (ADR 0048; `None` when not served).
+    fn list_pages(&self, request: fn(Option<&str>) -> Request) -> Result<Listing, String> {
         let mut out = Vec::new();
         let mut archived = 0;
+        let mut paused = None;
         let mut cursor: Option<String> = None;
         for page_no in 0..200 {
             let v = self
@@ -269,12 +268,19 @@ impl AutomationClient {
                     .get("archived_automations")
                     .and_then(Value::as_u64)
                     .unwrap_or(0);
+                paused = v.get("paused_automations_count").and_then(Value::as_u64);
             }
             let page = auto::parse_list_page(&v)?;
             out.extend(page.items);
             match page.next_cursor {
                 Some(c) => cursor = Some(c),
-                None => return Ok((out, archived)),
+                None => {
+                    return Ok(Listing {
+                        items: out,
+                        archived,
+                        paused,
+                    })
+                }
             }
         }
         Err("GET /api/gateway/automations kept returning next_cursor after 200 pages".into())
@@ -410,16 +416,23 @@ impl AutomationClient {
     }
 }
 
+/// One listing: every page's rows and the first page's served counts.
+struct Listing {
+    items: Vec<auto::Summary>,
+    archived: u64,
+    paused: Option<u64>,
+}
+
 /// Read the list (+ the open automation) and post it.
 fn refresh(client: &AutomationClient, wake: &WakeHandle, store: Store, open: Option<String>) {
     let list = client.list_pages(auto::list_request);
     // The archived ones are read only when the gateway counts some: the
     // `Archived · N` line opens onto them without another round trip.
     let archived = match &list {
-        Ok((_, n)) if *n > 0 => Some(
+        Ok(l) if l.archived > 0 => Some(
             client
                 .list_pages(auto::archived_list_request)
-                .map(|(items, _)| items),
+                .map(|l| l.items),
         ),
         Ok(_) => Some(Ok(Vec::new())),
         Err(_) => None,
@@ -431,9 +444,10 @@ fn refresh(client: &AutomationClient, wake: &WakeHandle, store: Store, open: Opt
                 v.archived = Some(a);
             }
             match list {
-                Ok((items, archived_count)) => {
-                    v.archived_count = archived_count;
-                    v.apply_list(items)
+                Ok(listing) => {
+                    v.archived_count = listing.archived;
+                    v.paused_count = listing.paused;
+                    v.apply_list(listing.items)
                 }
                 Err(e) => {
                     v.list = Some(Err(e));

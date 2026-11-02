@@ -305,6 +305,50 @@ fn archived_automations_live_under_archived_n_with_unarchive() {
     assert!(!screen.contains("Archived ·"), "{screen}");
 }
 
+/// ADR 0048: the gateway's order; the paused ones sit behind `Paused · N`
+/// after the active ones, and Enter on that line opens them as the same cards.
+#[test]
+fn paused_automations_fold_under_paused_n_and_enter_opens_them() {
+    let mut h = harness();
+    h.command("/automations");
+    let mut items = auto::parse_list_page(&fixture("list.json")).unwrap().items;
+    items.retain(|s| s.status != "archived");
+    items[0].status = "paused".into();
+    for s in items.iter_mut() {
+        s.section = Some(
+            if s.status == "paused" {
+                "paused"
+            } else {
+                "active"
+            }
+            .into(),
+        );
+    }
+    // Served order: the active ones first, then the paused ones.
+    let (active, paused): (Vec<_>, Vec<_>) = items.into_iter().partition(|s| s.status != "paused");
+    let paused_title = paused[0].title.clone();
+    let line = format!("Paused · {}", paused.len());
+    let shown = active.len();
+    let served: Vec<_> = active.into_iter().chain(paused).collect();
+    h.store.automations.update(|v| v.apply_list(served));
+    let screen = h.turn();
+    if let Ok(dir) = std::env::var("SHOTS_DIR") {
+        std::fs::write(format!("{dir}/tui-folded.txt"), &screen).unwrap();
+    }
+    assert!(screen.contains(&line), "{screen}");
+    assert!(!screen.contains(&paused_title), "{screen}");
+    for _ in 0..shown {
+        h.keys(b"\x1b[B");
+    }
+    let screen = h.keys(b"\r");
+    if let Ok(dir) = std::env::var("SHOTS_DIR") {
+        std::fs::write(format!("{dir}/tui-open.txt"), &screen).unwrap();
+    }
+    assert!(screen.contains(&paused_title), "{screen}");
+    let at = |needle: &str| screen.find(needle).unwrap_or(usize::MAX);
+    assert!(at(&line) < at(&paused_title), "{screen}");
+}
+
 #[test]
 fn controls_follow_the_shared_rules_and_send_typed_commands() {
     let mut h = harness();

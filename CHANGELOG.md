@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conversation bundle re-synced from AbstractUIC panel-chat.
 - **Web Avatar history in plain words.** Entries are labelled You, Update, Question or Answer, and
   technical source ids are no longer listed there (they stay in the Conversation view).
+- **Web automations: the active ones first, the paused ones under `Paused · N`.** The sidebar draws
+  the gateway's order (most recent activity first) and keeps the paused automations behind a quiet
+  `Paused · N` row above `Archived · N`, which opens them as the same cards (framework ADR 0048).
+  With a gateway that does not serve sections (0.19.0 and earlier) the list is drawn as before.
+- **Terminal automations: the paused ones under `Paused · N`.** `/automations` lists the active ones
+  in the gateway's order, then a `Paused · N` line that Enter opens (the same cards), then
+  `Archived · N`. With a gateway that does not serve sections the list is drawn as before.
 
 ## [terminal 0.13.2] - 2026-11-02
 

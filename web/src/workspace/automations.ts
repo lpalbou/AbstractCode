@@ -138,6 +138,24 @@ export function visibleAutomations(items: AutomationSummary[]): AutomationSummar
   return items.filter((s) => s.status !== "archived");
 }
 
+/**
+ * ADR 0048: the rows in the gateway's order, split by the `section` it serves: the active ones,
+ * then the paused ones (drawn folded under `Paused · N`). Nothing is sorted or decided here; a
+ * gateway that serves no `section` (0.19.0 and earlier) gets every row as today.
+ */
+export function automationSections(items: AutomationSummary[]): { main: AutomationSummary[]; paused: AutomationSummary[] } {
+  const rows = visibleAutomations(items);
+  const section = (s: AutomationSummary): unknown => (s as AutomationSummary & { section?: unknown }).section;
+  if (!rows.some((s) => typeof section(s) === "string")) return { main: rows, paused: [] };
+  return { main: rows.filter((s) => section(s) !== "paused"), paused: rows.filter((s) => section(s) === "paused") };
+}
+
+/** `paused_automations_count` of a `GET /automations` page (ADR 0048): the gateway's count of paused automations; null when not served. */
+export function pausedAutomationCount(page: unknown): number | null {
+  const n = (page as { paused_automations_count?: unknown } | null)?.paused_automations_count;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+}
+
 /** `archived_automations` of a `GET /automations` page: the gateway's count of archived automations (it lists them only when asked). */
 export function archivedAutomationCount(page: unknown): number {
   const n = (page as { archived_automations?: unknown } | null)?.archived_automations;
@@ -205,6 +223,8 @@ export type AutomationsState = {
   error: ApiError | null;
   /** The gateway's count of archived automations (`archived_automations`), for the `Archived · N` footer. */
   archivedCount: number;
+  /** The gateway's `paused_automations_count` (ADR 0048), for the `Paused · N` footer; null when not served. */
+  pausedCount: number | null;
   /** The archived automations (`GET /automations?status=archived`); null until the footer is opened. */
   archived: AutomationSummary[] | null;
   selectedId: string;
@@ -229,6 +249,7 @@ export const INITIAL_AUTOMATIONS_STATE: AutomationsState = {
   listError: null,
   error: null,
   archivedCount: 0,
+  pausedCount: null,
   archived: null,
   selectedId: "",
   detail: null,
@@ -291,15 +312,19 @@ export class AutomationsController {
     return (await this.listPages(status)).items;
   }
 
-  private async listPages(status?: "archived"): Promise<{ items: AutomationSummary[]; archivedCount: number }> {
+  private async listPages(status?: "archived"): Promise<{ items: AutomationSummary[]; archivedCount: number; pausedCount: number | null }> {
     const out: AutomationSummary[] = [];
     let cursor: string | undefined;
     let archivedCount = 0;
+    let pausedCount: number | null = null;
     for (let guard = 0; guard < 200; guard += 1) {
       const page = await this.client.listAutomations({ ...(status ? { status } : {}), ...(cursor ? { cursor } : {}), limit: AUTOMATIONS_PAGE_LIMIT });
-      if (!cursor) archivedCount = archivedAutomationCount(page);
+      if (!cursor) {
+        archivedCount = archivedAutomationCount(page);
+        pausedCount = pausedAutomationCount(page);
+      }
       out.push(...page.items);
-      if (!page.next_cursor) return { items: out, archivedCount };
+      if (!page.next_cursor) return { items: out, archivedCount, pausedCount };
       cursor = page.next_cursor;
     }
     throw new Error("GET /api/gateway/automations kept returning next_cursor after 200 pages.");
@@ -335,12 +360,12 @@ export class AutomationsController {
     const seq = ++this.listSeq;
     this.set({ loading: true });
     try {
-      const { items, archivedCount } = await this.listPages();
+      const { items, archivedCount, pausedCount } = await this.listPages();
       void this.loadEmailStatus();
       if (seq !== this.listSeq) return;
       const detail = this.state.detail;
       const fresh = detail ? items.find((s) => s.automation_id === detail.automationId) : undefined;
-      this.set({ items, archivedCount, loaded: true, loading: false, listError: null, ...(detail && fresh ? { detail: { ...detail, summary: fresh } } : {}) });
+      this.set({ items, archivedCount, pausedCount, loaded: true, loading: false, listError: null, ...(detail && fresh ? { detail: { ...detail, summary: fresh } } : {}) });
       if (this.state.archived !== null) void this.loadArchived();
       if (detail) await this.reloadDetail(detail.automationId);
     } catch (e) {
