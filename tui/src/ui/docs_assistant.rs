@@ -6,7 +6,7 @@ use abstracttui::{
     widgets::{ChatMessage, ChatPanel, ChatRole},
 };
 
-pub fn run_reference(store: Store) -> String {
+pub fn run_reference(store: Store) -> crate::assistant_context::Reference {
     crate::assistant_context::capture(store)
 }
 
@@ -36,13 +36,15 @@ fn send_question(store: Store, ctx: &UiCtx, scope: ChatScope, question: &str, ap
     } else {
         chat.corpus.clone()
     };
+    let reference = run_reference(store);
+    chat.context_note = reference.window.notice();
     let cmd = Cmd::AssistantAsk {
         scope,
         session: chat.session_id.clone(),
         operation: chat.operation,
         question: question.into(),
         corpus,
-        context: run_reference(store),
+        context: reference.text,
     };
     signal.set(chat);
     if append {
@@ -76,7 +78,7 @@ fn conversation_view(root: Scope, cx: Scope, store: Store, ctx: UiCtx, scope: Ch
     let intro = if scope == ChatScope::Docs {
         "Ask about AbstractCode documentation, features and settings. Recent conversation context is available when relevant.".to_string()
     } else {
-        "Your current conversation. Recent requests and replies are included; tool details are excluded. Answers do not change the run.".to_string()
+        "Your current conversation. The newest requests and replies are included, up to 50,000 tokens; tool details are excluded. Answers do not change the run.".to_string()
     };
     let messages = move || {
         chat.with(|s| {
@@ -91,6 +93,16 @@ fn conversation_view(root: Scope, cx: Scope, store: Store, ctx: UiCtx, scope: Ch
                     }
                 })
                 .collect::<Vec<_>>();
+            // What the latest question's conversation reference left out,
+            // stated beside that question (ADR-0026: never silent).
+            if let Some(note) = &s.context_note {
+                let at = s
+                    .messages
+                    .iter()
+                    .rposition(|(role, _)| role == "user")
+                    .map_or(rows.len(), |i| i + 1);
+                rows.insert(at, ChatMessage::new(ChatRole::Notice, note.clone()));
+            }
             if scope == ChatScope::Run {
                 if let Some((source, text)) = store.companion_advice.get() {
                     if source == store.session_id.get() {

@@ -7,9 +7,10 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.13.1**, pre-alpha. What's new in 0.13.0: six companion designs
-shared with the other apps, a larger Skills picker, and speech that stops at
-session boundaries ([CHANGELOG.md](CHANGELOG.md#0130---2026-11-02)).
+Status: **0.13.2**, pre-alpha. What's new in 0.13.2: Companion and Documentation
+questions read the newest whole turns of your conversation up to 50,000 tokens,
+never a shortened message, and say what they left out
+([CHANGELOG.md](CHANGELOG.md#0132---2026-11-02)).
 
 ## What it looks like
 

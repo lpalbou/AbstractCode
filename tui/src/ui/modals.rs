@@ -2959,7 +2959,8 @@ pub fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
 /// because the rounded number was not enough — two calls that both read
 /// "29k" can differ by 900 tokens, which is the whole delta being
 /// examined.
-fn tk_exact(n: u64) -> String {
+/// A token count grouped by thousands, exact ("29,200").
+pub(crate) fn tk_exact(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {

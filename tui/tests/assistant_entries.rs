@@ -254,3 +254,33 @@ fn dropping_the_host_with_either_drawer_open_does_not_read_disposed_store_signal
         drop(h);
     }
 }
+
+#[test]
+fn a_side_question_sends_the_history_window_and_shows_what_it_left_out() {
+    let mut h = harness();
+    h.turn();
+    // An older turn larger than the 50,000-token window, then a newer one.
+    let huge = "older reply ".repeat(20_000);
+    h.store.fold.update(|f| {
+        f.push_item(Item::Assistant {
+            text: huge.clone(),
+            final_answer: true,
+        });
+        f.push_item(Item::User {
+            text: "Newest request".into(),
+        });
+    });
+    h.open(ChatScope::Run);
+    h.term.push_input(b"\r");
+    let screen = h.turn();
+    let Cmd::AssistantAsk { context, .. } = h.rx.try_recv().unwrap() else {
+        panic!("expected a side question")
+    };
+    assert!(context.contains("## User\nNewest request"), "{context}");
+    assert!(!context.contains("Main conversation request") && !context.contains(&huge));
+    assert!(context.contains("[#TRUNCATION: 2 earlier message(s)"));
+    let note = h.store.run_chat.with_untracked(|s| s.context_note.clone());
+    let note = note.expect("the left-out messages are stated in the drawer");
+    assert!(note.contains("2 older message(s)"), "{note}");
+    assert!(screen.contains("This question included"), "{screen}");
+}

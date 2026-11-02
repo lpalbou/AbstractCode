@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.13.2] - 2026-11-02
+
+### Changed
+
+- Terminal: Companion and Documentation questions, and automatic comments, include the
+  newest whole turns of the loaded conversation up to 50,000 tokens, estimated
+  as characters / 4: the same rule the Gateway applies when it replays a
+  session (previously the newest 24,000 characters). Messages are never shortened and there is no
+  message-count limit; a newest turn larger than the window is included whole.
+  When older messages are left out, the snapshot starts with a note that counts
+  them, and the drawer shows the same count beside your question.
+- Terminal: automatic comments are shown whole (previously shortened at 800 characters).
+
 ## [terminal 0.13.1] - 2026-11-02
 
 ### Fixed
