@@ -2937,3 +2937,9 @@ select option {
 
 /* Optional second view; existing chat layout is unchanged when absent. */
 .code-view-choice{display:flex;gap:4px;align-items:center}.code-view-choice button{border:1px solid var(--border,#414454);border-radius:8px;background:transparent;color:inherit;padding:5px 9px;font:inherit;font-size:12px;cursor:pointer}.code-view-choice button[aria-pressed="true"]{background:var(--surface-2,#292b38)}
+
+/* Phones: the header keeps only the button that switches to the other view, so the
+   Docs, Theme, About and account controls stay on screen at 360 px. */
+@media (max-width: 479.98px) {
+  .code-view-choice button[aria-pressed="true"] { display: none; }
+}

@@ -126,7 +126,7 @@ session boundaries ([CHANGELOG.md](CHANGELOG.md#0130---2026-11-02)).
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
 - **Sessions and memory**: one durable session id per conversation, and a
-  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with
+  `/sessions` board over them (`Oct 2 · 2 turns`), with
   **Search conversations** (`/`, title + id), Archive and **Archived · N** /
   Unarchive — nothing is ever deleted.
   The client carries the live conversation into each run; the gateway
@@ -393,8 +393,6 @@ show ‖ Pause or ▶ Resume for the current audio. Message-level playback contr
 remain available. These two shared controls never select or start another reply.
 
 ## Work with a selected passage
-
-Available in the unreleased source checkout.
 
 Click assistant text, a table cell or code, then choose **Explain**, **Use as context**
 or **Change** above the composer. The selection is quoted into your existing draft;
@@ -1641,8 +1639,6 @@ recovers it.
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
 
 ## Selected content
-
-These controls describe the unreleased source checkout.
 
 Click a mapped assistant passage to highlight a word, then choose **Explain**,
 **Use as context** or **Change** in the action row above the composer. The action
@@ -2896,7 +2892,8 @@ from AbstractAvatar 0.1.0, resolved from crates.io).
 - The composer has a one-cell inner inset. Assistant messages use the shared engine
   ChatPanel with measured bubbles; This run adds isolated, read-only snapshot questions.
 - Session discovery omits expensive ledger metrics, publishes a small metadata page first,
-  retains cached rows/titles during refresh and keeps them on errors.
+  retains cached rows/titles during refresh and keeps them on errors. `/sessions` rows
+  show the date and turn count, no longer the tool count.
 - **The header groups Tools, Skills and MCP under one Tools menu**, with more spacing
   between actions and no duplicate capability counts in the footer. Context/tokens
   still open Cache, GPU/memory open Resources, workspace mode opens Workspace and

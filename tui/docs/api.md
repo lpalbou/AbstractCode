@@ -648,8 +648,6 @@ recovers it.
 
 ## Selected content
 
-These controls describe the unreleased source checkout.
-
 Click a mapped assistant passage to highlight a word, then choose **Explain**,
 **Use as context** or **Change** in the action row above the composer. The action
 adds quoted content to the existing draft; review it and press the normal Send

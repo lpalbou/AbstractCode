@@ -2155,11 +2155,6 @@ export function CodeWorkspace() {
         workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         open={newAutomationOpen}
         onClose={() => setNewAutomationOpen(false)}
-        onOpenPreferences={() => {
-          // The time zone is chosen in Settings → Workflow (the dialog only shows it).
-          setNewAutomationOpen(false);
-          openPanel("workflow");
-        }}
         target={automationTarget(selection, workflow)}
         availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
         initialTools={automationToolSelection(hasToolChoices(catalog.toolCatalog, { app: appToolLayer }) ? { ...inputs, tools: planRunTools(catalog.toolCatalog, { app: appToolLayer }).tools } : inputs)}

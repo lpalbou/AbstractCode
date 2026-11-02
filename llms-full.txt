@@ -51,7 +51,8 @@ abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.
 ```
 
 Archiving conversations, the **Archived · N** lists and the gateway's default
-voice routes need AbstractGateway 0.13.0 or later.
+voice routes need AbstractGateway 0.13.0 or later; the browser client 0.14.0
+(shared unread markers, the Avatar view's public updates) needs 0.19.0 or later.
 
 Then start whichever client you prefer:
 
@@ -155,7 +156,9 @@ abstractgateway serve            # binds 0.0.0.0:8080 by default
 ```
 
 Use AbstractGateway 0.13.0 or later to archive conversations and to see the
-gateway's default voice routes in the clients.
+gateway's default voice routes in the clients. The browser client 0.14.0 needs
+AbstractGateway 0.19.0 or later for shared unread markers and the Avatar view's
+public updates.
 
 The gateway ships working agent bundles out of the box. Its default agent
 workflow is the shipped `basic-agent` until its operator chooses another, and
@@ -817,8 +820,8 @@ controls. The **Archived · N** line with **Unarchive** needs AbstractGateway
 Schedules are **Repeat** (a fixed UTC interval: every N minutes, hours or days),
 **Daily**, **Weekly** (on the days you pick) or **Monthly** (day 1 to 31, or the
 last day) at a time of day, or **Once at** a date and time. Daily, weekly, monthly
-and one-time rules run on your account's time zone (Settings → Workflow → **Time
-zone** in the browser, or the console's Accounts → Preferences), at the same wall-clock
+and one-time rules run on your account's time zone (set in the gateway console's
+Accounts → Preferences; unset, it follows the gateway host), at the same wall-clock
 time across daylight-saving changes; a day the month does not have runs on its last
 day. The gateway words every rule and computes every next run. Controls that do not
 apply are disabled, with the reason.
@@ -836,7 +839,7 @@ conversation workflow. Choosing a different automation workflow leaves the conve
 
 | Choice | Options |
 |---|---|
-| When | **Repeat** every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, or every N minutes/hours/days (UTC; the first run starts at once); **Daily** at HH:MM; **Weekly** on the days you pick at HH:MM; **Monthly** on day 1–31 or the last day at HH:MM; **Once at** a date and time. For every schedule the line under **When** is the gateway's own sentence ("Runs every 24 hours (UTC), first run now." for Repeat); for the last four it reads, for example, ("Runs every Mon and Fri at 07:30 (Europe/Paris), first run Fri 9 Oct 07:30.") with "in Europe/Paris (your account's time zone)"; the zone changes only in your account preferences (**Change in preferences** opens Settings → Workflow). |
+| When | **Repeat** every 5 or 30 minutes, every hour, 8 hours, 24 hours or 7 days, or every N minutes/hours/days (UTC; the first run starts at once); **Daily** at HH:MM; **Weekly** on the days you pick at HH:MM; **Monthly** on day 1–31 or the last day at HH:MM; **Once at** a date and time. For every schedule the line under **When** is the gateway's own sentence ("Runs every 24 hours (UTC), first run now." for Repeat); for the last four it reads, for example, ("Runs every Mon and Fri at 07:30 (Europe/Paris), first run Fri 9 Oct 07:30.") with "in Europe/Paris (your account's time zone)"; the zone changes only in your account preferences (the gateway console's Accounts → Preferences). |
 | Context | **Independent** — each run starts fresh. **Growing** — each run is the next turn of one conversation and sees the previous runs, within the gateway's history window. |
 | Tools | **Run without asking** — tools run without asking (you approve them now by creating this automation). **Ask me before each tool call** — every tool call waits for your approval. Questions a workflow asks always wait for you. |
 | Email | **When an email arrives** (a When choice), **Email result** and **Recipients** — see [Email automations](#email-automations). |
@@ -1364,6 +1367,11 @@ routes (`POST /sessions/{id}/archive`, `archived_sessions`,
 `archived_automations`). Update AbstractGateway to 0.13.0 or later; until then
 the refusal is shown under the confirmation and the lists show no
 **Archived · N** line. Nothing is deleted either way.
+
+**"Shared read state unavailable (HTTP 404)" under Conversations.**
+The browser client keeps unread markers in the gateway's shared read receipts
+(`GET`/`POST /api/gateway/me/session-reads`). Update AbstractGateway to 0.19.0
+or later; until then conversations open normally but show no unread markers.
 
 **Voice does not show the gateway's engines as "Gateway default · provider / model".**
 The clients read the default routes from `GET /api/gateway/voice/defaults`,
@@ -1958,7 +1966,7 @@ session boundaries ([CHANGELOG.md](CHANGELOG.md#0130---2026-11-02)).
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
 - **Sessions and memory**: one durable session id per conversation, and a
-  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with
+  `/sessions` board over them (`Oct 2 · 2 turns`), with
   **Search conversations** (`/`, title + id), Archive and **Archived · N** /
   Unarchive — nothing is ever deleted.
   The client carries the live conversation into each run; the gateway
@@ -2225,8 +2233,6 @@ show ‖ Pause or ▶ Resume for the current audio. Message-level playback contr
 remain available. These two shared controls never select or start another reply.
 
 ## Work with a selected passage
-
-Available in the unreleased source checkout.
 
 Click assistant text, a table cell or code, then choose **Explain**, **Use as context**
 or **Change** above the composer. The selection is quoted into your existing draft;
@@ -3184,8 +3190,6 @@ recovers it.
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
 
 ## Selected content
-
-These controls describe the unreleased source checkout.
 
 Click a mapped assistant passage to highlight a word, then choose **Explain**,
 **Use as context** or **Change** in the action row above the composer. The action
@@ -4393,7 +4397,8 @@ Docs:
   - Voice (optional): composer dictation, replies read aloud, and the **Voice** panel (see [`../docs/web.md`](../docs/web.md#optional-voice))
 
 Archiving conversations, **Archived · N** and the gateway's default voice
-routes need AbstractGateway 0.13.0 or later.
+routes need AbstractGateway 0.13.0 or later. Shared unread markers and the
+Avatar view's public updates need AbstractGateway 0.19.0 or later.
 
 ## Local dev
 ```bash
@@ -4507,6 +4512,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [web 0.14.0] - 2026-11-02
 
 On AbstractUIC 0.9.0 (`@abstractframework/ui-kit` ^0.9.12, `@abstractframework/panel-chat` ^0.7.0, `@abstractframework/app-server` ^0.1.13).
+Needs AbstractGateway 0.19.0: unread markers read the gateway's shared read receipts (`/api/gateway/me/session-reads`), and
+the Avatar view's public updates come from the 0.19.0 runtime stack. With an older gateway the sidebar reports that
+shared read state is unavailable.
 
 ### Added
 
@@ -4532,6 +4540,11 @@ On AbstractUIC 0.9.0 (`@abstractframework/ui-kit` ^0.9.12, `@abstractframework/p
   states on each card, automation cards in the Watch layout, and the shared automation replay panel.
 - Messages show their files with the shared attachment previews; archive controls are compact; the account menu is
   the kit's single account widget.
+- An automation is paused and resumed from its header; the sidebar cards no longer carry the switch.
+- The account time zone is no longer edited in Code's settings. The schedule line still names it; change it in the
+  gateway console's Accounts → Preferences.
+- On phones (under 480 px) the header shows only the button that switches to the other view (Conversation or Avatar),
+  so Docs, Theme, About and the account menu stay on screen.
 
 ### Fixed
 
@@ -4569,6 +4582,7 @@ Needs AbstractTUI 0.7.1 with its `avatar` feature (AbstractAvatar 0.1.0). The fu
   messages for review before sending.
 - Terminal: speech stops at session boundaries, and a new submission interrupts the previous narration; the playback
   control sits beside the speaking meter.
+- Terminal: `/sessions` loads without ledger metrics, so its rows show date and turns but no longer a tool count.
 
 ### Fixed
 

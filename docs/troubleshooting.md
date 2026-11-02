@@ -122,6 +122,11 @@ routes (`POST /sessions/{id}/archive`, `archived_sessions`,
 the refusal is shown under the confirmation and the lists show no
 **Archived · N** line. Nothing is deleted either way.
 
+**"Shared read state unavailable (HTTP 404)" under Conversations.**
+The browser client keeps unread markers in the gateway's shared read receipts
+(`GET`/`POST /api/gateway/me/session-reads`). Update AbstractGateway to 0.19.0
+or later; until then conversations open normally but show no unread markers.
+
 **Voice does not show the gateway's engines as "Gateway default · provider / model".**
 The clients read the default routes from `GET /api/gateway/voice/defaults`,
 which AbstractGateway 0.13.0 and later provide. Update the gateway, or choose

@@ -115,7 +115,7 @@ session boundaries ([CHANGELOG.md](CHANGELOG.md#0130---2026-11-02)).
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
 - **Sessions and memory**: one durable session id per conversation, and a
-  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with
+  `/sessions` board over them (`Oct 2 · 2 turns`), with
   **Search conversations** (`/`, title + id), Archive and **Archived · N** /
   Unarchive — nothing is ever deleted.
   The client carries the live conversation into each run; the gateway
@@ -382,8 +382,6 @@ show ‖ Pause or ▶ Resume for the current audio. Message-level playback contr
 remain available. These two shared controls never select or start another reply.
 
 ## Work with a selected passage
-
-Available in the unreleased source checkout.
 
 Click assistant text, a table cell or code, then choose **Explain**, **Use as context**
 or **Change** above the composer. The selection is quoted into your existing draft;

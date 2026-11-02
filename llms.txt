@@ -21,7 +21,8 @@ Ground rules for reading this repository:
   tag `web-v<version>` publishes the npm package.
 - A reachable AbstractGateway is required. There is no standalone mode.
   Archiving conversations, the Archived · N lists and the gateway's default
-  voice routes need AbstractGateway 0.13.0 or later.
+  voice routes need AbstractGateway 0.13.0 or later; the browser client's shared
+  unread markers and Avatar public updates need 0.19.0 or later.
 - Tools are approval-gated by default; approvals are durable gateway commands,
   so a wait raised in one client is answerable from the other.
 - The authoritative command list is `/help` inside the terminal client, and

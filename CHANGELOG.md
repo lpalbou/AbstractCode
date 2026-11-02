@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [web 0.14.0] - 2026-11-02
 
 On AbstractUIC 0.9.0 (`@abstractframework/ui-kit` ^0.9.12, `@abstractframework/panel-chat` ^0.7.0, `@abstractframework/app-server` ^0.1.13).
+Needs AbstractGateway 0.19.0: unread markers read the gateway's shared read receipts (`/api/gateway/me/session-reads`), and
+the Avatar view's public updates come from the 0.19.0 runtime stack. With an older gateway the sidebar reports that
+shared read state is unavailable.
 
 ### Added
 
@@ -35,6 +38,11 @@ On AbstractUIC 0.9.0 (`@abstractframework/ui-kit` ^0.9.12, `@abstractframework/p
   states on each card, automation cards in the Watch layout, and the shared automation replay panel.
 - Messages show their files with the shared attachment previews; archive controls are compact; the account menu is
   the kit's single account widget.
+- An automation is paused and resumed from its header; the sidebar cards no longer carry the switch.
+- The account time zone is no longer edited in Code's settings. The schedule line still names it; change it in the
+  gateway console's Accounts → Preferences.
+- On phones (under 480 px) the header shows only the button that switches to the other view (Conversation or Avatar),
+  so Docs, Theme, About and the account menu stay on screen.
 
 ### Fixed
 
@@ -72,6 +80,7 @@ Needs AbstractTUI 0.7.1 with its `avatar` feature (AbstractAvatar 0.1.0). The fu
   messages for review before sending.
 - Terminal: speech stops at session boundaries, and a new submission interrupts the previous narration; the playback
   control sits beside the speaking meter.
+- Terminal: `/sessions` loads without ledger metrics, so its rows show date and turns but no longer a tool count.
 
 ### Fixed
 

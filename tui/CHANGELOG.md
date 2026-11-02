@@ -54,7 +54,8 @@ from AbstractAvatar 0.1.0, resolved from crates.io).
 - The composer has a one-cell inner inset. Assistant messages use the shared engine
   ChatPanel with measured bubbles; This run adds isolated, read-only snapshot questions.
 - Session discovery omits expensive ledger metrics, publishes a small metadata page first,
-  retains cached rows/titles during refresh and keeps them on errors.
+  retains cached rows/titles during refresh and keeps them on errors. `/sessions` rows
+  show the date and turn count, no longer the tool count.
 - **The header groups Tools, Skills and MCP under one Tools menu**, with more spacing
   between actions and no duplicate capability counts in the footer. Context/tokens
   still open Cache, GPU/memory open Resources, workspace mode opens Workspace and

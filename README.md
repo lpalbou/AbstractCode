@@ -39,7 +39,8 @@ abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.
 ```
 
 Archiving conversations, the **Archived · N** lists and the gateway's default
-voice routes need AbstractGateway 0.13.0 or later.
+voice routes need AbstractGateway 0.13.0 or later; the browser client 0.14.0
+(shared unread markers, the Avatar view's public updates) needs 0.19.0 or later.
 
 Then start whichever client you prefer:
 
