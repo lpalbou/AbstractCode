@@ -1,0 +1,11 @@
+
+Running 4 tests using 1 worker
+
+(node:26783) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/rail_drawer.spec.ts:62:5 › desktop › no header gear, rail at the right edge, panels beside it (desktop) (3.3s)
+  ✓  2 e2e/rail_drawer.spec.ts:62:5 › tablet › no header gear, rail at the right edge, panels beside it (tablet) (2.9s)
+  ✓  3 e2e/rail_drawer.spec.ts:62:5 › phone › no header gear, rail at the right edge, panels beside it (phone) (2.9s)
+  ✓  4 e2e/rail_drawer.spec.ts:275:1 › automation selected: every settings panel edits its definition and saves a new revision (6.4s)
+
+  4 passed (16.1s)

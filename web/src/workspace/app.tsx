@@ -1,4 +1,9 @@
-import { codeDocsPanel } from "./app_assistant";
+import {WorkflowChat, useWorkflowSession, conversationSnapshot, useAvatarConversationPreferences, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
+import { ActivityAvatar, AfVoiceMicButton, voiceCaptureMode, useVoiceLevel } from "@abstractframework/ui-kit";
+import "../vendor/abstractchat/conversation.css";
+import { sessionReadTarget, sessionOpeningReceipts } from "../vendor/abstractsessions/session_cards.js";
+import { createSessionReadClient, useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
+import { CodeDocsAssistant } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
 import {
   automationToolSelection,
@@ -50,13 +55,10 @@ import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useAr
 import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
 import { ConversationCard } from "./sidebar_cards";
 import {
-  WorkflowChat,
   WorkspaceBrowser,
   uploadRefusal,
   useAttachmentUploads,
   type ComposerAttachment,
-  presentInteraction,
-  useWorkflowSession,
   workflowPendingInteraction,
   type ChatMessage,
 } from "@abstractframework/panel-chat";
@@ -70,11 +72,12 @@ import {
   fetchWorkflowSchema,
   useWorkspaceCatalog,
 } from "./use_workspace_catalog";
-import { gateway, gatewayRequest, formatError, newId } from "./transport";
+import { gateway, gatewayRequest, formatError, newId, csrfHeaders } from "./transport";
 import { createWorkflowTransport } from "./session_transport";
 import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
 import { AccountWorkflowDefault } from "./account_workflow_default";
-import { AccountTimeZone } from "./account_time_zone";
+import { AgentSettings } from "./agent_settings";
+import { SettingsHelp } from "./settings_help";
 import {
   SettingsContent,
   DEFAULT_PREFERENCES,
@@ -164,6 +167,11 @@ function writeRoute(sessionId: string, runId = "") {
   window.history.replaceState(null, "", `#${params}`);
 }
 
+function ConversationAvatar({ voice, active, pending, failed, paused }: { voice: ReturnType<typeof useWorkspaceVoice>; active: boolean; pending: boolean; failed: boolean; paused: boolean }) {
+  const microphone = useVoiceLevel(voice.voice_ptt_recording ? voice : null);
+  return <ActivityAvatar design="halo" size={320} pose={voice.voice_ptt_recording ? "listening" : voice.tts_playback.status === "playing" ? "speaking" : paused || pending ? "waiting" : active ? "thinking" : failed ? "error" : "ready"} level={voice.voice_ptt_recording ? microphone : 0} label="Your assistant" />;
+}
+
 export function CodeWorkspace() {
   const connection = useGatewayConnection({
     appName: "AbstractCode",
@@ -172,10 +180,18 @@ export function CodeWorkspace() {
   const identity = connection.connected
     ? workspacePrincipalIdentity(connection.status)
     : "";
+  const avatarPreferences = useAvatarConversationPreferences(`abstractcode:${identity}`);
+  const avatarMode = avatarPreferences.mode === "avatar";
+  const [avatarReplyContext, setAvatarReplyContext] = useState<ChatMessage | null>(null);
+  const [avatarAttended, setAvatarAttended] = useState(false);
   const onAuthError = useCallback(() => {
     void connection.refresh();
   }, [connection.refresh]);
   const catalog = useWorkspaceCatalog(identity, onAuthError);
+  const readScope = sessionReadScope(connection.status);
+  const observedReceipts = useMemo(() => Object.values(catalog.sessionActivity || {}).flatMap((a) => a.content), [catalog.sessionActivity]);
+  const readClient = useMemo(() => createSessionReadClient((path, init) => fetch(path, { ...init, credentials: "same-origin", headers: { ...init?.headers, ...csrfHeaders() } })), [identity]);
+  const sessionReads = useSessionReads(readScope, observedReceipts, readClient);
   const [appearance, setAppearance] = useAppearanceSettings("abstractcode", {
     defaults: { theme: "observer-night" },
   });
@@ -188,6 +204,7 @@ export function CodeWorkspace() {
   const [voicePreferences, changeVoicePreferences] = useVoicePreferences(identity ? `abstractcode.voice:${identity}` : null);
   useEffect(() => {
     setPanelOpen(false);
+    setDocsOpen(false);
   }, [identity]);
   const [preferences, setPreferences] =
     useState<RunPreferences>(DEFAULT_PREFERENCES);
@@ -289,9 +306,10 @@ export function CodeWorkspace() {
     any
   > | null>(null);
   const [restoreError, setRestoreError] = useState("");
-  // The right side: the kit's drawer system (Activity, Files, Model, Workflow, Workspace, Tools,
-  // Skills, Voice on the rail; the Docs assistant from the top bar). It restores the docked panel.
+  // The shared rail restores its docked panel. Docs uses the standalone shared
+  // drawer, independently of the current workspace panel.
   const [railPanel, setRailPanel] = useState<CodePanel | null>(null);
+  const [docsOpen, setDocsOpen] = useState(false);
   const railOverlay = useAfMedia(AF_MEDIA.md);
   // A phone always starts with the content visible: becoming an overlay folds the panel away.
   useEffect(() => {
@@ -304,12 +322,12 @@ export function CodeWorkspace() {
   };
   const openPanel = (section: RailPanel) => {
     setSidebarOpen(false);
-    setRailPanel(section);
+    setRailPanel(section === "workflow" || section === "tools" || section === "skills" ? "agent" : section);
   };
-  /** The workflow's inputs live in the Workflow panel; "Back to chat" collapses it to the rail. */
+  /** The workflow's inputs live in the Agent panel; "Back to chat" collapses it to the rail. */
   const setInputsOpen = (open: boolean) => {
-    if (open) openPanel("workflow");
-    else if (railPanel === "workflow") setRailPanel(null);
+    if (open) openPanel("agent");
+    else if (railPanel === "agent") setRailPanel(null);
   };
   // Conversation navigation becomes a drawer below the tablet breakpoint.
   const panesAreDrawers = useAfMedia(AF_MEDIA.md);
@@ -326,7 +344,12 @@ export function CodeWorkspace() {
   // The person's event stream (backlog 1047): the badge and the list refresh follow it.
   const meEvents = useMeEvents(identity, connection.connected);
   const eventsFollowing = meEvents.state === "following";
-  const { ctl: automations, state: automationsState } = useAutomations(
+  useEffect(() => {
+    if (!meEvents.fold.cursor) return;
+    const timer = setTimeout(() => { void catalog.refreshSessions(); void sessionReads.refresh(); }, 500);
+    return () => clearTimeout(timer);
+  }, [meEvents.fold.cursor, catalog.refreshSessions, sessionReads.refresh]);
+  const { ctl: automations, state: automationsState, nowMs: automationNowMs } = useAutomations(
     identity,
     connection.connected && automationsAvailable.available,
     { following: eventsFollowing, epoch: meEvents.fold.automationEpoch },
@@ -345,7 +368,7 @@ export function CodeWorkspace() {
   const [queueRunning, setQueueRunning] = useState(false);
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
   // The one-time migration of the Permissions tier / tool picker into this app's tool layer
-  // (decision 2026-10-27): labeled, never silent — the Tools panel says so until dismissed.
+  // (decision 2026-10-27): labeled, never silent — the Agent panel says so until dismissed.
   useEffect(() => {
     const legacy = preferences.legacyTools;
     if (!legacy || !toolStore || catalog.loading || !catalog.toolCatalog.length) return;
@@ -429,6 +452,7 @@ export function CodeWorkspace() {
         : null,
     );
   }, [controller, connection.connected, catalog.capabilitiesLoading, catalog.capabilitiesError, sessionPolicyCapability, session.sessionId]);
+  useEffect(() => setAvatarReplyContext(null), [identity, session.sessionId]);
   const active =
     Boolean(session.runId) &&
     !terminal(snapshot.status) &&
@@ -476,7 +500,7 @@ export function CodeWorkspace() {
   useEffect(() => {
     const { state, speak } = readAloudStep(readAloudState.current, readAloud);
     readAloudState.current = state;
-    if (speak && voicePreferences.read_aloud === true && voice.tts_supported) void voice.toggle_tts(speak.id, speak.text);
+    if (speak && voicePreferences.read_aloud === true && voice.tts_supported && (!avatarMode || (!avatarAttended && !draft.trim() && !voice.voice_ptt_recording))) void voice.toggle_tts(speak.id, speak.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readAloud.scope, readAloud.phase, readAloud.reply?.id, voicePreferences.read_aloud, voice.tts_supported]);
   // A tool batch this client already granted (the standing permission, or an
@@ -574,7 +598,7 @@ export function CodeWorkspace() {
       void automations.select(automationId);
     }
     setSidebarOpen(false);
-    setRailPanel("workflow");
+    setRailPanel("agent");
   };
   /** The automation header's "Change workspaces": the same, on the rail's Workspace panel (its chooser). */
   const openAutomationWorkspaces = (automationId: string) => {
@@ -984,6 +1008,7 @@ export function CodeWorkspace() {
         sessionId: startedSession,
         input,
       });
+      if (avatarMode) Object.assign(body, { conversation: true });
       const result = await gatewayRequest(gatewayApiPath("runs/start"), {
         method: "POST",
         body: JSON.stringify(body),
@@ -1060,12 +1085,18 @@ export function CodeWorkspace() {
   // backlog 0030): "Guide this run" posts inject_guidance; "Queue next turn" holds the message
   // here and starts it when the run ends. A pending question/approval leaves only Queue.
   async function guideRun(text: string): Promise<{ accepted: boolean; seq?: number; duplicate?: boolean }> {
-    if (interaction) throw new Error("Answer the pending workflow request above, or queue the next turn.");
+    if (avatarMode && interaction?.kind === "ask-user") {
+      await interaction.onSubmit(text);
+      setAvatarReplyContext(null);
+      return { accepted: true };
+    }
+    if (interaction) throw new Error(avatarMode ? "Please use the request controls. A message does not grant permission." : "Answer the pending workflow request above, or queue the next turn.");
     const sid = session.sessionId;
     const rid = session.runId;
     const epoch = authEpoch.current;
-    const answer = (await controller.sendCommand("inject_guidance", { guidance: text })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
+    const answer = (await controller.sendCommand("inject_guidance", { guidance: avatarMode ? conversationReply(text, avatarReplyContext, session.runId, snapshot.view?.root_run_id === session.runId ? snapshot.view.runs.map((run) => run.run_id) : []) : text, ...(avatarMode ? { display_text: text } : {}) })) as { accepted?: boolean; seq?: number; duplicate?: boolean } | null;
     if (sessionRef.current.sessionId !== sid || sessionRef.current.runId !== rid || authEpoch.current !== epoch) throw staleSendAbort();
+    if (avatarMode && answer?.accepted !== false) setAvatarReplyContext(null);
     return {
       accepted: answer?.accepted !== false,
       ...(typeof answer?.seq === "number" ? { seq: answer.seq } : {}),
@@ -1089,7 +1120,7 @@ export function CodeWorkspace() {
   const steer =
     active && !sending
       ? {
-          modes: (interaction ? ["queue"] : ["guide", "queue"]) as ("guide" | "queue")[],
+          modes: (avatarMode ? ["guide"] : interaction ? ["queue"] : ["guide", "queue"]) as ("guide" | "queue")[],
           parked: snapshot.status === "waiting" && !interaction,
           onSteer: async (text: string, mode: "guide" | "queue") => (mode === "queue" ? queueNextTurn(text) : guideRun(text)),
         }
@@ -1098,10 +1129,10 @@ export function CodeWorkspace() {
   /** A message from outside the composer (the microphone): starts a turn, or steers / queues a busy run. */
   async function send(text: string) {
     if (!active) return startTurn(text);
-    const result = interaction ? queueNextTurn(text) : await guideRun(text);
+    const result = avatarMode ? await guideRun(text) : interaction ? queueNextTurn(text) : await guideRun(text);
     if (!result.accepted) throw new Error("The gateway did not accept this message.");
     setDraft("");
-    setNotice(interaction ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
+    setNotice(avatarMode ? "Sent. Your message is available to the assistant." : interaction ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");
@@ -1270,7 +1301,7 @@ export function CodeWorkspace() {
             setPreferences({ ...next, toolLayer: {} });
   };
   const renderSettings = (
-    section: "model" | "workspace" | "tools" | "skills",
+    section: "model" | "workspace" | "tools" | "skills" | "behavior",
     value: RunPreferences = { ...preferences, toolLayer: appToolLayer },
     onChange: (next: RunPreferences) => void = conversationSettingsChange,
     automation?: { root: string },
@@ -1331,6 +1362,7 @@ export function CodeWorkspace() {
     id: SettingsRailPanel,
     conversation: () => React.ReactNode,
     automation: (value: RunPreferences, onChange: (next: RunPreferences) => void, root: { root: string }) => React.ReactNode,
+    binding = true,
   ) => {
     if (automationView) {
       if (!automationDetail?.definition || !automationSettings)
@@ -1338,16 +1370,14 @@ export function CodeWorkspace() {
       const root = { root: automationDetail.definition.workspace_root || "" };
       return (
         <div className="code-automation-settings" id={`code-settings-${id}`} data-revision={automationSettings.revision}>
-          <AutomationBinding summary={automationDetail.summary} settings={automationSettings} />
+          {binding ? <AutomationBinding summary={automationDetail.summary} settings={automationSettings} /> : null}
           {automation(automationSettings.draft, automationSettings.onChange, root)}
         </div>
       );
     }
     return (
       <div className="code-conversation-settings" id={`code-settings-${id}`}>
-        <p className="code-settings-binding">
-          <span>Conversation</span> <strong title={title}>{title}</strong>
-        </p>
+        {binding ? <p className="code-settings-binding"><span>Conversation</span> <strong title={title}>{title}</strong></p> : null}
         {conversation()}
       </div>
     );
@@ -1403,24 +1433,22 @@ export function CodeWorkspace() {
           </div>
         {accountWorkflow.state.status === "ok" ? (
           <>
-            <AccountWorkflowDefault
+            <details className="code-settings-advanced">
+              <summary>Default for new chats <SettingsHelp label="About the default workflow">This account default is used by new conversations in every app. The workflow above belongs to this conversation.</SettingsHelp></summary>
+              <AccountWorkflowDefault
               row={accountWorkflow.state.row}
               save={accountWorkflow.save}
               disabled={!connection.connected}
-            />
-            <AccountTimeZone block={accountWorkflow.state.timeZone} save={accountWorkflow.saveTimeZone} disabled={!connection.connected} />
+              />
+            </details>
           </>
         ) : null}
         <div className="code-settings code-workflow-inputs">
-          <h3 className="code-settings-heading">Inputs</h3>
-          <p className="code-muted">
-            {workflow?.description ||
-              "Configure the values this workflow needs to run."}
-          </p>
           {schemaLoading ? (
             <p role="status">Loading input schema…</p>
           ) : schemaError ? null : isAgent || promptProperty ? (
             <AgentWorkflowInputs
+              concise
               key={workflow?.id}
               schema={schema}
               promptProperty={promptProperty}
@@ -1447,14 +1475,7 @@ export function CodeWorkspace() {
               {schemaError}
             </p>
           ) : null}
-          {chatReady ? (
-            <button
-              className="code-primary-button"
-              onClick={() => setInputsOpen(false)}
-            >
-              Back to chat <Icon name="chat" size={16} />
-            </button>
-          ) : (
+          {chatReady ? null : (
             <button
               className="code-primary-button"
               disabled={
@@ -1494,18 +1515,17 @@ export function CodeWorkspace() {
           prepareTarget={prepareAutomationTargetForCode}
           workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         />
-        {accountWorkflow.state.status === "ok" ? (
-          <AccountTimeZone block={accountWorkflow.state.timeZone} save={accountWorkflow.saveTimeZone} disabled={!connection.connected} />
-        ) : null}
+
         </>
       ) : null,
+    false,
   );
   const workspacePanel = settingsPanel(
     "workspace",
     () => (
       <>
         <p className="code-current-workspace">
-          Current workspace <code title={effectiveWorkspace || "Gateway workspace"}>{effectiveWorkspace.split("/").filter(Boolean).pop() || "Gateway workspace"}</code>
+          Run folder <code title={effectiveWorkspace || "Created by the Gateway for each run"}>{effectiveWorkspace.split("/").filter(Boolean).pop() || "Gateway managed"}</code>
         </p>
         {renderSettings("workspace")}
       </>
@@ -1516,13 +1536,20 @@ export function CodeWorkspace() {
     "tools",
     () => renderSettings("tools"),
     (value, onChange, root) => renderSettings("tools", value, onChange, root),
+    false,
   );
   const skillsPanel = settingsPanel(
     "skills",
     () => renderSettings("skills"),
     (value, onChange, root) => renderSettings("skills", value, onChange, root),
+    false,
   );
-  const voicePanel = settingsPanel("voice", () => voiceSection, () => voiceSection);
+  const agentContents = (behavior: React.ReactNode, skillCount = preferences.skills.length) => (
+    <AgentSettings workflow={workflowPanel} tools={toolsPanel} skills={skillsPanel}
+      behavior={behavior} skillCount={skillCount} workflowDescription={automationView ? undefined : workflow?.description} />
+  );
+  const agentPanel = settingsPanel("agent", () => agentContents(renderSettings("behavior")), (value, onChange, root) => agentContents(renderSettings("behavior", value, onChange, root), value.skills.length));
+  const voicePanel = voiceSection;
   // Settings follow the selection: a newly selected conversation or automation starts at the top of the open panel.
   const settingsBinding = automationView ? `automation:${automationsState.selectedId}` : `conversation:${session.sessionId}`;
   const settingsScrolledFor = useRef<Record<string, string>>({});
@@ -1541,7 +1568,6 @@ export function CodeWorkspace() {
       key={`rail:${identity}`}
       panel={railPanel}
       onPanel={setRailPanel}
-      docs={codeDocsPanel(connection.connected)}
       activityBadge={activityAttn.count}
       activityHint={activityAttn.hint}
       content={{
@@ -1592,10 +1618,8 @@ export function CodeWorkspace() {
         </>
       ),
       model: modelPanel,
-      workflow: workflowPanel,
+      agent: agentPanel,
       workspace: workspacePanel,
-      tools: toolsPanel,
-      skills: skillsPanel,
       voice: voicePanel,
       }}
     />
@@ -1638,27 +1662,6 @@ export function CodeWorkspace() {
           <kbd>⌘K</kbd>
         </div>
         <SidebarLists panels={panels}>
-        <AutomationsSection
-          state={automationsState}
-          attention={eventsFollowing ? { needsYou: needsYou(meEvents.fold), newResults: newResults(meEvents.fold) } : null}
-          available={automationsAvailable}
-          discovering={catalog.capabilitiesLoading}
-          createDisabled={schemaLoading || !!schemaError || !workflow}
-          selectedId={automationView ? automationsState.selectedId : ""}
-          onSelect={(id) => {
-            setAutomationView(true);
-            setSidebarOpen(false);
-            void automations.select(id);
-          }}
-          onNew={() => setNewAutomationOpen(true)}
-          onRefresh={() => void automations.refresh()}
-          archivedOpen={archivedOpen.automations}
-          onToggleArchived={() => toggleArchivedOpen("automations")}
-          onUnarchive={(s) => void automations.unarchive(s.automation_id).catch(() => undefined)}
-          onToggleActive={(s) => void automations.toggleActive(s).catch(() => undefined)}
-          open={panels.automations}
-          onToggle={() => togglePanelOpen("automations")}
-        />
         <ConversationsPanel
           open={panels.conversations}
           onToggle={() => togglePanelOpen("conversations")}
@@ -1685,21 +1688,20 @@ export function CodeWorkspace() {
           }
         >
           {!currentSession ? (
-            <button
-              type="button"
-              className="code-session code-card is-selected"
-              onClick={() => setSidebarOpen(false)}
-            >
-              <span>
-                <strong className="code-card-title">New conversation</strong>
-                <small className="code-card-meta">Ready when you are</small>
-              </span>
-            </button>
+            <div className="af-session-card code-session-placeholder" data-selected="true">
+              <button type="button" className="af-session-card__open" onClick={() => setSidebarOpen(false)}>
+                <span className="af-session-card__title">New conversation</span>
+                <span className="af-session-card__meta">Ready when you are</span>
+              </button>
+            </div>
           ) : null}
           {filteredSessions.map((item) => (
             <ConversationCard
               key={item.sessionId}
               item={item}
+              activity={catalog.sessionActivity[item.sessionId]}
+              unread={Boolean(catalog.sessionActivity[item.sessionId] && catalog.sessionActivity[item.sessionId].content.some(sessionReads.isUnread))}
+              needsAttention={Boolean(catalog.sessionActivity[item.sessionId]?.needsAttention || Object.values(meEvents.fold.waits).includes(item.sessionId))}
               selected={item.sessionId === session.sessionId}
               onClick={() =>
                 openConversation(item.sessionId, item.latestRunId)
@@ -1715,6 +1717,7 @@ export function CodeWorkspace() {
                 : "Your conversations will live here. Pick up where you left off, on any device."}
             </p>
           ) : null}
+          {sessionReads.error && <p className="code-inline-error" role="status">{sessionReads.error}</p>}
           {catalog.loading && !catalog.sessionsLoaded ? (
             <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}
@@ -1732,6 +1735,28 @@ export function CodeWorkspace() {
             />
           </ArchivedFooter>
         </ConversationsPanel>
+        <AutomationsSection
+          nowMs={automationNowMs}
+          state={automationsState}
+          attention={eventsFollowing ? { needsYou: needsYou(meEvents.fold), newResults: newResults(meEvents.fold) } : null}
+          available={automationsAvailable}
+          discovering={catalog.capabilitiesLoading}
+          createDisabled={schemaLoading || !!schemaError || !workflow}
+          selectedId={automationView ? automationsState.selectedId : ""}
+          onSelect={(id) => {
+            setAutomationView(true);
+            setSidebarOpen(false);
+            void automations.select(id);
+          }}
+          onNew={() => setNewAutomationOpen(true)}
+          onRefresh={() => void automations.refresh()}
+          archivedOpen={archivedOpen.automations}
+          onToggleArchived={() => toggleArchivedOpen("automations")}
+          onUnarchive={(s) => void automations.unarchive(s.automation_id).catch(() => undefined)}
+          onArchive={(s) => automations.command(s.automation_id, "automation.archive")}
+          open={panels.automations}
+          onToggle={() => togglePanelOpen("automations")}
+        />
         </SidebarLists>
       </SidebarDrawer>
       {sidebarOpen ? (
@@ -1750,6 +1775,10 @@ export function CodeWorkspace() {
           >
             <Icon name="list" size={19} />
           </button>
+          {!automationView && <div className="code-view-choice" role="group" aria-label="Conversation view">
+            <button type="button" aria-pressed={!avatarMode} onClick={() => { voice.stop_tts(); avatarPreferences.setMode("chat"); }}>Conversation</button>
+            <button type="button" aria-pressed={avatarMode} onClick={() => { voice.stop_tts(); avatarPreferences.setMode("avatar"); }}>Avatar</button>
+          </div>}
           <div className="code-breadcrumb">
             <span>{automationView ? "Automations" : "Conversations"}</span>
             <span aria-hidden="true">/</span>
@@ -1766,7 +1795,7 @@ export function CodeWorkspace() {
             />
           ) : null}
           <AfTopBarActions
-            docs={{ open: railPanel === "docs", onToggle: () => { setRailPanel((open) => (open === "docs" ? null : "docs")); setSidebarOpen(false); }, label: "Docs assistant" }}
+            docs={{ open: docsOpen, onToggle: () => { setDocsOpen((open) => !open); setSidebarOpen(false); }, label: "Docs assistant" }}
             appearance={{ value: appearance, onChange: setAppearance }}
             about={{ identity: APP_IDENTITY, fetch: proxyGatewayFetch }}
             identity="menu"
@@ -1869,6 +1898,7 @@ export function CodeWorkspace() {
             {/* Kit gap K2 (ui-primitives 0030): WorkflowChat has no runStatus slot (metrics, pause/resume, activity). */}
             {active || terminal(snapshot.status) ? (
               <RunStatusBar
+                publicView={avatarMode}
                 active={active}
                 paused={paused}
                 snapshot={snapshot}
@@ -1877,7 +1907,7 @@ export function CodeWorkspace() {
                   interaction && !paused
                     ? () => {
                         const thread = document.querySelector<HTMLElement>(
-                          ".code-conversation .pc-chat-thread",
+                          avatarMode ? ".code-conversation .pc-avatar-conversation" : ".code-conversation .pc-chat-thread",
                         );
                         const request = thread?.querySelector<HTMLElement>(
                           ".pc-workflow-interaction",
@@ -1906,6 +1936,29 @@ export function CodeWorkspace() {
               />
             ) : null}
             <WorkflowChat
+              avatarConversation={avatarMode ? {
+                onTechnicalView: () => { voice.stop_tts(); avatarPreferences.setMode("chat"); },
+                sessionKey: `${identity}:${session.sessionId}`,
+                avatar: <ConversationAvatar voice={voice} active={active} pending={Boolean(pendingInteraction)} failed={snapshot.status === "failed"} paused={paused && !terminal(snapshot.status)} />,
+                ...conversationSnapshot(snapshot),
+                listening: voice.voice_ptt_recording,
+                speaking: voice.tts_playback.status === "playing",
+                preferences: avatarPreferences.preferences,
+                onPreferencesChange: avatarPreferences.setPreferences,
+                onCue: (cue) => { void playConversationCue(cue).catch((reason) => setNotice(String(reason instanceof Error ? reason.message : reason))); },
+                onInterruptSpeech: () => voice.stop_tts(),
+                onReplyContext: setAvatarReplyContext,
+                onAttendedChange: setAvatarAttended,
+                narrate: voicePreferences.read_aloud === true && !voicePreferences.reply_muted,
+                onNarrate: (message) => { if (voice.tts_supported) void voice.toggle_tts(`brief:${message.id}`, message.content); },
+                voiceControl: <span onPointerDown={() => voice.stop_tts()}><AfVoiceMicButton voice={voice} mode={voiceCaptureMode(voicePreferences.capture_mode ?? CODE_CAPTURE_DEFAULTS.capture_mode)} label="Talk" onTranscript={(text) => { if ((voicePreferences.auto_send ?? CODE_CAPTURE_DEFAULTS.auto_send) === false) setDraft((d) => spokenMessage(d, text)); else void sendSpoken(text); }} /></span>,
+                playbackControl: <span role="group" aria-label="Voice controls">
+                  {["playing", "paused"].includes(voice.tts_playback.status) && <><AfSwitch variant="row" label="Voice paused" checked={voice.tts_playback.status === "paused"} onChange={() => { const message = messages.find((m) => String(m.id || "") === voice.tts_playback.key.replace(/^brief:/, "")); if (message) void voice.toggle_tts(voice.tts_playback.key, message.content); }} /><button type="button" onClick={() => voice.stop_tts()}>Silence voice</button></>}
+                </span>,
+              } : undefined}
+                artifactFetch={proxyGatewayFetch}
+                attachmentScope={JSON.stringify([identity,session.sessionId])}
+                attachmentRun={{runId:session.runId,output:snapshot.run?.output}}
               streamReplies={streamReplies}
               messages={
                 interaction?.kind === "tool-approval"
@@ -1920,6 +1973,12 @@ export function CodeWorkspace() {
                   : messages
               }
               messageProps={{
+                renderFooter: (message) => {
+                  const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
+                  if (!status) return null;
+                  const target = sessionReadTarget(message.kind === "attachments" ? [...messages,message] : messages, message.runId || "", status);
+                  return target.message === message && readScope && !snapshot.loading && !snapshot.historyLoading && !snapshot.error ? <><span>{target.outcome}</span><SessionReadMarker ownerKey={readScope} receipt={{ sessionId: session.sessionId, revision: sessionContentRevision(message.runId || "", status), updatedAt: "" }} relatedReceipts={sessionOpeningReceipts(messages, catalog.sessionActivity[session.sessionId]?.content, message.runId || "")} enabled={!automationView && !sidebarOpen && identity === principalRef.current} onRead={sessionReads.markRead} /></> : null;
+                },
                 ...(voice.tts_supported
                   ? {
                       onSpeakToggle: (message) => {
@@ -1952,7 +2011,7 @@ export function CodeWorkspace() {
               onRemoveAttachment={removeAttachmentItem}
               onRetryAttachment={uploads.retry}
               placeholder={
-                active
+                avatarMode ? "Tell your assistant…" : active
                   ? interaction
                     ? "Answer the request above, or queue the next task…"
                     : "Guide the current workflow, or queue the next task…"
@@ -1973,7 +2032,7 @@ export function CodeWorkspace() {
               }
               composerExtras={
                 <>
-                  <span
+                  {!avatarMode && <span
                     className="code-composer-workspace"
                     title={
                       effectiveWorkspace ||
@@ -1985,8 +2044,10 @@ export function CodeWorkspace() {
                       {effectiveWorkspace.split("/").filter(Boolean).pop() ||
                         "Gateway workspace"}
                     </span>
-                  </span>
-                  {connection.connected ? (
+                  </span>}
+                </>
+              }
+              composerTrailingActions={connection.connected ? (
                     <VoiceTools
                       key={`${identity}:${session.sessionId}:${session.runId}`}
                       voice={voice}
@@ -1995,8 +2056,6 @@ export function CodeWorkspace() {
                       route={sttRouteText(voicePreferences, voiceDefaults.value)}
                     />
                   ) : null}
-                </>
-              }
               footer={
                 <>
                   <span>
@@ -2055,6 +2114,7 @@ export function CodeWorkspace() {
           </main>
           )}
           {railElement}
+          <CodeDocsAssistant key={identity || "signed-out"} connected={connection.connected} open={docsOpen} onClose={() => setDocsOpen(false)} voicePreferences={voicePreferences} />
         </div>
         <footer className="code-statusbar">
           <span>
@@ -2095,11 +2155,6 @@ export function CodeWorkspace() {
         workflowPickerOptions={{ interfaceId: CODE_AGENT_INTERFACE, workflows: { ...catalog.executable, reload: () => void catalog.refresh() } }}
         open={newAutomationOpen}
         onClose={() => setNewAutomationOpen(false)}
-        onOpenPreferences={() => {
-          // The time zone is chosen in Settings → Workflow (the dialog only shows it).
-          setNewAutomationOpen(false);
-          openPanel("workflow");
-        }}
         target={automationTarget(selection, workflow)}
         availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
         initialTools={automationToolSelection(hasToolChoices(catalog.toolCatalog, { app: appToolLayer }) ? { ...inputs, tools: planRunTools(catalog.toolCatalog, { app: appToolLayer }).tools } : inputs)}
@@ -2239,7 +2294,7 @@ function EmptyConversation({
           "Discovering your workflows…"
         ) : workflow ? (
           <>
-            Using <strong>{workflow.name}</strong> · Choose another in the Workflow panel
+            Using <strong>{workflow.name}</strong> · Choose another in Agent
           </>
         ) : connected ? (
           "Register a workflow with AbstractGateway to get started."

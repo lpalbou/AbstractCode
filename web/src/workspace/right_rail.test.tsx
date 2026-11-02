@@ -45,7 +45,7 @@ describe("the rail drawer", () => {
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-orientation="vertical"');
     const names = [...html.matchAll(/role="tab"[^>]*aria-label="([^"]+)"|aria-label="([^"]+)"[^>]*role="tab"/g)].map((m) => m[1] || m[2]);
-    expect(names).toEqual(["Activity", "Files", "Model", "Workflow", "Workspace", "Tools", "Skills", "Voice"]);
+    expect(names).toEqual(["Activity", "Files", "Model", "Agent", "Workspace", "Voice"]);
     expect(html).toContain("FILES");
     expect(html).not.toContain("af-tabs");
     expect(html).toContain('class="af-rail__badge"');
@@ -57,7 +57,7 @@ describe("the rail drawer", () => {
     expect(appSource).not.toMatch(/setRailPanel\("settings"\)/);
   });
   it("app.tsx gives every rail panel its own content", () => {
-    for (const id of ["activity", "files", "model", "workflow", "workspace", "tools", "skills", "voice"]) expect(appSource).toMatch(new RegExp(`\\n\\s+${id}: `));
+    for (const id of ["activity", "files", "model", "agent", "workspace", "voice"]) expect(appSource).toMatch(new RegExp(`\\n\\s+${id}: `));
   });
   it("is the kit's drawer system: widths and the docked open panel under ONE key (no app-side persistence)", () => {
     const html = renderToStaticMarkup(<CodeRightRail panel="docs" onPanel={() => {}} content={content} docs={codeDocsPanel(true)} />);
@@ -65,13 +65,13 @@ describe("the rail drawer", () => {
     // The Docs assistant is a drawer-mode panel: open, labelled, no rail tab of its own.
     expect(html).toMatch(/id="code-rail-panel-docs" role="tabpanel" aria-label="Docs assistant"/);
     expect(html).not.toContain('data-rail="docs"');
-    expect(html).toContain("Grounded on AbstractCode");
+    expect(html).toContain("Powered by AbstractCode’s documentation.");
     expect(RAIL_WIDTH_KEY).toBe("abstractcode.rail.width.v1");
     expect(appSource).not.toContain("abstractcode.rail.panel");
     expect(appSource).not.toMatch(/localStorage\.setItem\(RAIL/);
   });
   it("is mounted inside the content area (beside the conversation), not as an overlay drawer", () => {
-    expect(appSource).toMatch(/<\/main>\s*\)\}\s*\{railElement\}\s*<\/div>/);
+    expect(appSource).toMatch(/<\/main>\s*\)\}\s*\{railElement\}/);
   });
 });
 
@@ -179,7 +179,7 @@ describe("automation settings = its definition", () => {
     expect(appSource).toContain("<AutomationDefinitionForm");
     expect(appSource).toMatch(/onRevise=\{\(changes, expected\) => automations\.revise\(automationDetail\.automationId, changes, expected\)\}/);
     // Edit on the automation header opens its Workflow panel (task, schedule, workflow).
-    expect(appSource).toMatch(/const openAutomationSettings = \(automationId: string\) => \{[\s\S]*?setRailPanel\("workflow"\);/);
+    expect(appSource).toMatch(/const openAutomationSettings = \(automationId: string\) => \{[\s\S]*?setRailPanel\("agent"\);/);
   });
 });
 

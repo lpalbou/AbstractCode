@@ -139,7 +139,7 @@ describe("sidebar panels DOM", () => {
     expect(appSource).toMatch(/<ConversationsPanel\s+open=\{panels\.conversations\}/);
     expect(appSource).toMatch(/open=\{panels\.automations\}\s+onToggle=/);
     const lists = /<SidebarLists panels=\{panels\}>([\s\S]*?)<\/SidebarLists>\s*<\/SidebarDrawer>/.exec(appSource)?.[1] ?? "";
-    expect(lists).toMatch(/^\s*<AutomationsSection[\s\S]*<ConversationsPanel[\s\S]*<\/ConversationsPanel>\s*$/);
+    expect(lists).toMatch(/^\s*<ConversationsPanel[\s\S]*<\/ConversationsPanel>\s*<AutomationsSection[\s\S]*\/>\s*$/);
     expect(renderToStaticMarkup(<SidebarLists panels={{ automations: true, conversations: false }}>x</SidebarLists>)).toBe(
       '<div class="code-sidebar-lists" data-automations="open" data-conversations="closed">x</div>',
     );
@@ -213,9 +213,9 @@ describe("two stacking drawers (round 4, DESIGN §3): fold/split, each list scro
     expect(decl(panel, "min-height")).toBe("0");
   });
 
-  it("Automations open: both drawers share the height (the Conversations header mid-height); only Conversations open: it takes the rest", () => {
+  it("Conversations open: both drawers share the height (the Automations header mid-height); only Automations open: it takes the rest", () => {
     const split = ruleFor(
-      '.code-sidebar-lists[data-automations="open"] > .code-panel,\n.code-sidebar-lists[data-automations="closed"][data-conversations="open"] > .code-conversations',
+      '.code-sidebar-lists[data-conversations="open"] > .code-panel,\n.code-sidebar-lists[data-conversations="closed"][data-automations="open"] > .code-automations',
     );
     expect(decl(split, "flex")).toBe("1 1 0");
     // Nothing else grows a drawer: both closed = the two header rows at the top.
@@ -245,7 +245,7 @@ describe("Workspace row (round 2, item 10)", () => {
     expect(html).toContain("<small>sess_ed8c3b0bf5fd4d249477aca68da7f494-3f2a9c71e0b84d5e</small>");
     expect(workspaceLabel("")).toBe("Gateway managed");
     expect(appSource).toContain('className="code-current-workspace"');
-    expect(appSource).toContain('{effectiveWorkspace || "Gateway workspace"}');
+    expect(appSource).toContain('{effectiveWorkspace || "Created by the Gateway for each run"}');
   });
 
   it("is a three-column grid whose value never wraps or reaches the chevron", () => {

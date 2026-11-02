@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-31",
+  "tests": {
+    "passed": 1228,
+    "failed": 0,
+    "ignored": 23
+  },
+  "focused_companion_tests": 22,
+  "minimum_error_hold_ms": 1000,
+  "checked_at_ms": [
+    1,
+    500,
+    999,
+    1000,
+    1599,
+    1600
+  ],
+  "error_cases": [
+    "recoverable tool failure + final answer + speaking in one batch",
+    "each new failure extends the hold",
+    "history replay suppressed",
+    "session switch clears hold",
+    "new run begins and fails in one UI batch",
+    "disposal cancels the timer"
+  ],
+  "preview_cases": [
+    "all six saved designs initially focused and marked",
+    "Apply avatar saves and closes",
+    "Cancel preserves preference",
+    "reopening focuses saved Vortex"
+  ],
+  "native_installed": {
+    "preview_initial_focus": "hover",
+    "applied": "vortex",
+    "reopened_focus": "vortex",
+    "preview_apply_closes": true,
+    "styles": [
+      {
+        "style": "hover",
+        "ready": true,
+        "pointer_mode_1003": true,
+        "exit": 0
+      }
+    ],
+    "execution_requests": 0,
+    "fixture": "loopback-only; isolated prefs; no running session changed"
+  },
+  "installed_binary_sha256": "5fe7d7984bb7a2b4e4f8aded69ae41401f309e0c8201c49b0bdac6b01af1ed4b",
+  "checks": [
+    "all-target Code tests",
+    "all-target Clippy with warnings denied",
+    "cargo fmt --check",
+    "git diff --check",
+    "native installed PTY preview apply/persistence with isolated preferences and zero execution requests"
+  ],
+  "scope": "Code-only host state policy and preview controls; rendering core unchanged; local install, no release or process restart"
+}

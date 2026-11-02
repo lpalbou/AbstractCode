@@ -1,6 +1,6 @@
 {
   "name": "@abstractframework/code",
-  "version": "0.13.3",
+  "version": "0.14.0",
   "description": "Browser-based coding assistant for AbstractFramework - connects to AbstractGateway for durable agent sessions",
   "type": "module",
   "author": "Laurent-Philippe Albou",
@@ -31,13 +31,16 @@
   ],
   "scripts": {
     "dev": "vite --host --port 3002",
-    "build": "tsc && vite build && node scripts/check_relative_urls.mjs --dist",
+    "build": "node scripts/sync_conversation.mjs --check && node scripts/sync_sessions.mjs --check && node scripts/sync_docs_assistant.mjs --check && tsc && vite build && node scripts/check_relative_urls.mjs --dist",
     "preview": "vite preview",
     "start": "node ./bin/cli.js",
     "test": "vitest run",
     "check:lock": "node scripts/check_lock.mjs",
     "test:e2e": "playwright test",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "sync:sessions": "node scripts/sync_sessions.mjs",
+    "sync:conversation": "node scripts/sync_conversation.mjs",
+    "sync:docs": "node scripts/sync_docs_assistant.mjs"
   },
   "dependencies": {
     "@abstractframework/app-server": "^0.1.13"
@@ -45,8 +48,8 @@
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.10",
     "@abstractframework/monitor-gpu": "^0.1.10",
-    "@abstractframework/panel-chat": "^0.6.5",
-    "@abstractframework/ui-kit": "^0.9.6",
+    "@abstractframework/panel-chat": "^0.7.0",
+    "@abstractframework/ui-kit": "^0.9.12",
     "@monaco-editor/react": "^4.6.0",
     "@playwright/test": "^1.63.0",
     "@types/react": "^18.2.48",

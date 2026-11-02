@@ -27,6 +27,10 @@
 > with gateway-hosted summoned entities (`@name`). One crate, three
 > dependencies (abstracttui, ureq, serde_json). MIT licensed.
 
+Selected assistant prose, tables and code can be quoted into the coding draft
+through Explain, Use as context or Change; review and send explicitly. See the
+[selection guide](docs/api.md#selected-content) for keyboard use and custom-card limits.
+
 ## Core docs
 
 - [README](README.md): The pitch, a rendered-screen sketch, install,
@@ -45,7 +49,7 @@
   testing model, known limits.
 - [Reference](docs/api.md): Every CLI option and env var (including
   `--workflow default`, `--stream`, `--mtp`), slash commands
-  (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/automation`, `/stream`, `/about`, `/model`, `/mtp`,
+  (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/automation`, `/stream`, `/docs`, `/about`, `/model`, `/mtp`,
   `/workspace send`, `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
   `/resources`, `/redraw`), the Workspaces chooser (`/workspace`: this
@@ -73,7 +77,7 @@
 ## Project
 
 - [Changelog](CHANGELOG.md): Release history, from 0.1.0 (the first
-  application built on AbstractTUI) through 0.12.0 (the clickable chrome: workflow, model, gateway, workspace, session and theme widgets; 0.11.0: the attention chip from your event stream; 0.10.0: turns as cards and folded cycle panels, hold Space to talk,
+  application built on AbstractTUI) through 0.13.0 (six shared companion designs, the larger Skills picker, speech that stops at session boundaries; 0.12.0: the clickable chrome: workflow, model, gateway, workspace, session and theme widgets; 0.11.0: the attention chip from your event stream; 0.10.0: turns as cards and folded cycle panels, hold Space to talk,
   the theme dropdown, pause / resume and per-message read-aloud, sessions and the queue off `prefs.json`, calendar
   schedules and the seven-step New automation; 0.9.1: the workspace chooser per conversation and automation, the
   command-sandbox line per command; 0.9.0: settings panels, Archive / Unarchive, voice through the gateway's routes).

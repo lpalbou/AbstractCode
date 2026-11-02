@@ -42,7 +42,8 @@ Docs:
   - Voice (optional): composer dictation, replies read aloud, and the **Voice** panel (see [`../docs/web.md`](../docs/web.md#optional-voice))
 
 Archiving conversations, **Archived · N** and the gateway's default voice
-routes need AbstractGateway 0.13.0 or later.
+routes need AbstractGateway 0.13.0 or later. Shared unread markers and the
+Avatar view's public updates need AbstractGateway 0.19.0 or later.
 
 ## Local dev
 ```bash
@@ -85,3 +86,56 @@ it from anywhere, behind your own access control. Behind a reverse proxy every
 peer is the proxy, so loopback carries no meaning there — set
 `ABSTRACTCODE_TRUST_PROXY_HEADERS=1` to refuse browser-supplied changes
 regardless of peer, and add the env var above if you still want to permit them.
+
+### Compact conversation cards
+
+Conversation rows use AbstractUIC's shared Watch-style `SessionCard`: cyan marks unread
+content, orange marks a pending human question or approval, and a small ring marks work.
+Reading clears unread only when loaded content is visible in the focused page. It never
+answers or dismisses a pending approval. Read receipts are local to this browser and account;
+Code and Assistant share them when served on the same origin. Existing history is baselined
+on first use. Regenerate the canonical compatibility snapshot with `npm run sync:sessions`;
+the normal build verifies its provenance. Other devices keep independent read state.
+
+### Message files and tool results
+
+The canonical AbstractUIC conversation snapshot (`npm run sync:conversation`) supplies the
+same message attachments, safe clickable links and structured tool-result viewer in both web
+clients. Files accompany the original user or assistant message, including restored history
+and file-only replies. File bytes load when opened through authenticated reads. The build
+verifies snapshot hashes; no sibling checkout is required to build the committed web app.
+
+
+## Avatar conversation view
+
+Choose **Avatar** in the conversation header for a second view over the same work.
+The avatar shows activity and short subtitles communicate discoveries, choices and
+questions. **Conversation history** opens the full public exchanges and final answer;
+**Conversation** restores the ordinary chat and technical details. Switching views
+preserves the current draft and attachments.
+
+Permission requests explain the action, its destinations and the assistant’s stated
+reason, with labeled Deny/Allow once icons. “Review details” opens Conversation mode
+for technical arguments and broader permission choices. A reason is shown only when
+the backend attached a public explanation to that exact request; older requests may
+have none. Avatar mode also uses the compact multiline composer and omits technical
+execution counters from its status strip.
+
+While work continues, type or speak naturally to guide it. **Reply to this** pins a
+specific public update as context. Sending a correction makes it available to the
+assistant; the assistant's later response shows whether it adopted the correction.
+Questions use their displayed answer controls. Permission requests require an explicit
+choice; an ordinary message or silence grants no permission.
+
+Essential questions keep waiting. A clarification may state a two-to-five minute
+answer deadline and what will happen without an answer. **Conversation cues** controls
+visual and audio alerts independently for questions, permission requests and completion.
+Audio alerts default off. Voice narration uses the existing voice preference;
+reading history or editing a reply silences automatic narration. Playback can be paused
+or silenced without stopping the task.
+
+Public updates require a run started in Avatar mode and a backend supporting the public
+conversation protocol. Switching an already active legacy run changes its presentation;
+it does not manufacture missing updates. Tool details remain available in the ordinary
+view. Public updates describe the assistant's communicated conclusions, not private
+reasoning, and source references establish provenance rather than proof of correctness.

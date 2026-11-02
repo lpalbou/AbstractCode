@@ -349,7 +349,7 @@ pub fn open_approval(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
     // tier row 1 + gaps 4 + buttons 1 + hint 1 = 12 fixed rows; the body
     // scroll gets the rest, capped so big batches stay on screen.
     let size = modal_size(width_hint, 12 + (body_rows.len() as i32).clamp(2, 18));
-    ctx.open_modal(cx, size, move |mcx| {
+    ctx.open_blocking_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let run_id = wait.run_id.clone();
         let wait_key = wait.wait_key.clone();
@@ -583,7 +583,7 @@ pub fn open_ask(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
     const FIXED_ROWS: i32 = 10;
     let size = modal_size(panel_w, FIXED_ROWS + prompt_rows);
     let scrollable = size.h < FIXED_ROWS + prompt_rows;
-    ctx.open_modal(cx, size, move |mcx| {
+    ctx.open_blocking_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let run_id = wait.run_id.clone();
         let wait_key = wait.wait_key.clone();
@@ -801,7 +801,12 @@ pub(crate) fn open_picker(cx: Scope, ctx: &UiCtx, picker: Picker) {
             }
         };
         let mut root = Element::new()
-            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .style(
+                LayoutStyle::column()
+                    .grow(1.0)
+                    .gap(1)
+                    .padding(Edges::all(1)),
+            )
             .shortcut(KeyChord::plain(Key::Escape), move |_| cancel())
             .child(title_row(&t, picker.title));
         for (chord, action) in picker.keys {
@@ -1840,17 +1845,13 @@ fn open_model_stage(cx: Scope, store: Store, ctx: &UiCtx, provider: crate::store
 }
 
 // ---------------------------------------------------------------------------
-// Windowed selectable rows (tools / skills / sessions / mcp)
+// Legacy windowed rows (new interactive pickers use the engine List)
 // ---------------------------------------------------------------------------
 //
-// A hand-rolled row surface instead of `List`/`Scroll`: multi-select needs
-// live checkbox re-render on toggle, and `List::on_select` fires on plain
-// arrow movement BY DESIGN (0.2.0 kept it as the selection-changed
-// notification; the new `on_activate` fires on Enter AND Space, so a
-// List-based multi-select could not tell Space-toggles from Enter-closes
-// either) — a toggle-on-move list would flip checkboxes while browsing.
-// Here the modal ROOT owns focus + keys; rows are pure draws windowed by
-// a cursor signal.
+// Retained by older informational surfaces that paint cursor-windowed rows.
+// Interactive pickers such as Tools and Skills use the engine List instead,
+// with unbound activation keys handled by their modal: pointer scrolling and
+// selection stay in the shared widget, while explicit actions change state.
 
 /// The state marker in front of a row.
 ///
@@ -2136,317 +2137,7 @@ pub(crate) fn tool_rows(
 /// Untouched = the workflow's own defaults; once customized, the CHECKED
 /// set is exactly the allowlist sent with every run (`input_data.tools`).
 pub fn open_tools(cx: Scope, store: Store, ctx: &UiCtx) {
-    let ctx2 = ctx.clone();
-    let size = modal_size(84, 26);
-    ctx.open_modal(cx, size, move |mcx| {
-        let t = abstracttui::app::current_theme().tokens;
-        let cursor = mcx.signal(0usize);
-
-        let toggle = {
-            let ctx = ctx2.clone();
-            move |all: bool, on: Option<bool>| {
-                let tools = store.tools.get_untracked();
-                if tools.is_empty() {
-                    return;
-                }
-                // Any edit PRUNES stale names (tools the gateway no longer
-                // serves): a leftover disabled name from another gateway
-                // must not silently hold the client in allowlist mode
-                // (adversary finding 6) or skew counts (finding 2).
-                let mut disabled: Vec<String> = store
-                    .disabled_tools
-                    .get_untracked()
-                    .into_iter()
-                    .filter(|d| tools.iter().any(|tl| tl.name == *d))
-                    .collect();
-                if all {
-                    disabled = if on == Some(true) {
-                        Vec::new()
-                    } else {
-                        // "All off" scopes to the GRANTABLE rows: served-
-                        // disabled names are a server fact, not a client
-                        // selection — parking them in the user's disabled
-                        // set would persist stale names past a gate flip.
-                        tools
-                            .iter()
-                            .filter(|x| !x.served_disabled)
-                            .map(|x| x.name.clone())
-                            .collect()
-                    };
-                } else {
-                    let ix = cursor.get_untracked();
-                    let Some(tool) = tools.get(ix) else { return };
-                    // Served-disabled rows are visible, never grantable
-                    // (full-catalog surfacing, this seat's c4555
-                    // commitment): a toggle teaches the gate instead of
-                    // mutating a selection the gateway cannot honor.
-                    if tool.served_disabled {
-                        let gate = gate_suffix(&tool.enable_gate);
-                        store.notify(format!(
-                            "{} is disabled on this gateway{gate}",
-                            tool.name
-                        ));
-                        return;
-                    }
-                    if let Some(pos) = disabled.iter().position(|d| *d == tool.name) {
-                        disabled.remove(pos);
-                    } else {
-                        disabled.push(tool.name.clone());
-                    }
-                }
-                store.disabled_tools.set(disabled.clone());
-                crate::ui::persist_tool_prefs(store, &ctx, |p| p.disabled_tools = disabled.clone());
-            }
-        };
-
-        let move_cursor = move |delta: i64| {
-            let n = store.tools.with_untracked(|tl| tl.len());
-            if n == 0 {
-                return;
-            }
-            cursor.update(|c| {
-                let cur = *c as i64 + delta;
-                *c = cur.clamp(0, n as i64 - 1) as usize;
-            });
-        };
-
-        // Per-CATEGORY toggle (operator ask): flip EVERY grantable tool in
-        // the cursor's toolset on/off in one keystroke. Toggle semantics
-        // by current state — if any grantable tool in the category is ON,
-        // turn the whole category OFF; else turn it all ON. Served-disabled
-        // rows (a gateway gate, not a client selection) are skipped, so a
-        // category that is entirely gate-disabled reports the gate instead
-        // of silently doing nothing. Pure app logic over `disabled_tools`
-        // (the modal owns the set) — no engine capability needed.
-        let toggle_category = {
-            let ctx = ctx2.clone();
-            move || {
-                let tools = store.tools.get_untracked();
-                let ix = cursor.get_untracked();
-                let Some(here) = tools.get(ix) else { return };
-                let toolset = here.toolset.clone();
-                let label = if toolset.is_empty() {
-                    "other".to_string()
-                } else {
-                    toolset.clone()
-                };
-                let in_cat: Vec<&crate::store::ToolInfo> =
-                    tools.iter().filter(|t| t.toolset == toolset).collect();
-                let grantable: Vec<&&crate::store::ToolInfo> =
-                    in_cat.iter().filter(|t| !t.served_disabled).collect();
-                if grantable.is_empty() {
-                    let gated = in_cat.len();
-                    store.notify(format!(
-                        "'{label}': all {gated} tool(s) are disabled on this gateway — nothing to toggle"
-                    ));
-                    return;
-                }
-                // Prune stale names (tools no longer served) on every edit —
-                // same discipline as the single-tool toggle.
-                let mut disabled: Vec<String> = store
-                    .disabled_tools
-                    .get_untracked()
-                    .into_iter()
-                    .filter(|d| tools.iter().any(|tl| tl.name == *d))
-                    .collect();
-                let any_on = grantable
-                    .iter()
-                    .any(|t| !disabled.contains(&t.name));
-                // any_on → turn the category OFF; all off → turn it ON.
-                for t in &grantable {
-                    let is_disabled = disabled.contains(&t.name);
-                    if any_on && !is_disabled {
-                        disabled.push(t.name.clone());
-                    } else if !any_on && is_disabled {
-                        disabled.retain(|d| *d != t.name);
-                    }
-                }
-                store.disabled_tools.set(disabled.clone());
-                crate::ui::persist_tool_prefs(store, &ctx, |p| p.disabled_tools = disabled.clone());
-                store.notify(format!(
-                    "'{label}': {} tool(s) turned {}",
-                    grantable.len(),
-                    if any_on { "OFF" } else { "ON" }
-                ));
-            }
-        };
-
-        // Per-tool approval PIN (item 4): cycle the tool under the cursor
-        // none → auto → ask → none. A pin beats the tier in BOTH
-        // directions ('auto' auto-approves even above the tier; 'ask'
-        // always prompts even for a read) and is persisted alongside the
-        // tier. The run-start expansion reads the same pins, so a pin
-        // reaches both the server-side policy and the client-side belt.
-        let cycle_pin = {
-            let ctx = ctx2.clone();
-            move || {
-                let tools = store.tools.get_untracked();
-                let ix = cursor.get_untracked();
-                let Some(tool) = tools.get(ix) else { return };
-                // No pins on served-disabled rows: an approval decision
-                // for a tool the gateway refuses to run is fiction (and
-                // the policy layer clamps them to ask regardless).
-                if tool.served_disabled {
-                    store.notify(format!(
-                        "{} is disabled on this gateway — no approval pin to set",
-                        tool.name
-                    ));
-                    return;
-                }
-                let name = tool.name.clone();
-                let mut overrides = store.tool_overrides.get_untracked();
-                let pos = overrides.iter().position(|(n, _)| *n == name);
-                let next = match pos.map(|p| overrides[p].1.as_str()) {
-                    None => Some("auto"),
-                    Some("auto") => Some("ask"),
-                    _ => None, // "ask" (or stray) → clear
-                };
-                match (pos, next) {
-                    (Some(p), None) => {
-                        overrides.remove(p);
-                    }
-                    (Some(p), Some(d)) => overrides[p].1 = d.to_string(),
-                    (None, Some(d)) => overrides.push((name.clone(), d.to_string())),
-                    (None, None) => {}
-                }
-                store.tool_overrides.set(overrides.clone());
-                crate::ui::persist_tool_prefs(store, &ctx, |p| p.tool_overrides = overrides.clone());
-                store.notify(match next {
-                    Some("auto") => format!("{name}: pinned auto (always approves)"),
-                    Some("ask") => format!("{name}: pinned ask (always prompts)"),
-                    _ => format!("{name}: pin cleared (tier decides)"),
-                });
-            }
-        };
-
-        Element::new()
-            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
-            .focusable()
-            .autofocus()
-            .shortcut(KeyChord::plain(Key::Escape), {
-                let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
-            })
-            .shortcut(KeyChord::plain(Key::Enter), {
-                let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
-            })
-            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
-            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
-            .shortcut(KeyChord::plain(Key::Char(' ')), {
-                let tg = toggle.clone();
-                move |_| tg(false, None)
-            })
-            .shortcut(KeyChord::plain(Key::Char('a')), {
-                let tg = toggle.clone();
-                move |_| tg(true, Some(true))
-            })
-            .shortcut(KeyChord::plain(Key::Char('n')), {
-                let tg = toggle.clone();
-                move |_| tg(true, Some(false))
-            })
-            .shortcut(KeyChord::plain(Key::Char('c')), {
-                let tc = toggle_category.clone();
-                move |_| tc()
-            })
-            .shortcut(KeyChord::plain(Key::Char('p')), {
-                let cp = cycle_pin.clone();
-                move |_| cp()
-            })
-            .shortcut(KeyChord::plain(Key::Char('t')), {
-                // Cycle the PERSISTED permissions level (read → write →
-                // all → read): the same knob as `/permissions <t>` —
-                // one apply path, two surfaces.
-                let ctx = ctx2.clone();
-                move |_| crate::ui::cycle_permissions(store, &ctx)
-            })
-            .child(dyn_view(LayoutStyle::line(1), move || {
-                let t2 = abstracttui::app::current_theme().tokens;
-                let err = store.tools_error.get();
-                let tier =
-                    crate::tool_policy::Tier::parse_or_default(&store.accepted_tier.get());
-                // Count only disabled names that EXIST in the inventory:
-                // stale names from another gateway must never skew the
-                // arithmetic (a raw `n - off` underflowed to u64::MAX in
-                // release — adversary finding 2). Served-disabled rows
-                // (gateway gate, not user selection) count SEPARATELY —
-                // they are visible but never part of the grantable
-                // arithmetic.
-                let (n, off, gated) = store.tools.with(|tl| {
-                    let gated = tl.iter().filter(|t| t.served_disabled).count();
-                    // The ONE shared effective-disabled predicate (the
-                    // run-start "customized?" decision reads the same
-                    // helper — cycle-3 P2-2: two textual copies drift).
-                    let off = store
-                        .disabled_tools
-                        .with(|d| crate::store::Store::effective_user_disabled(tl, d));
-                    (tl.len() - gated, off, gated)
-                });
-                let gated_part = if gated > 0 {
-                    format!(" · {gated} gated off server-side")
-                } else {
-                    String::new()
-                };
-                let title = if !err.is_empty() {
-                    format!("gateway tools — discovery failed: {err}")
-                } else if n == 0 && gated == 0 {
-                    format!("gateway tools — loading… · permissions: {}", tier.label())
-                } else if off == 0 {
-                    // "All checked" ≠ the workflow's own pin: the flow's
-                    // baked tool set decides when the client sends nothing.
-                    format!(
-                        "gateway tools — {n} available{gated_part} · untouched (workflow's own tool set decides) · permissions: {}",
-                        tier.label()
-                    )
-                } else {
-                    format!(
-                        "gateway tools — {} on / {off} off{gated_part} · explicit allowlist · permissions: {}",
-                        n.saturating_sub(off),
-                        tier.label()
-                    )
-                };
-                title_row(&t2, title)
-            }))
-            .child(dyn_view(
-                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
-                move || {
-                    let tools = store.tools.get();
-                    let disabled = store.disabled_tools.get();
-                    let overrides = store.tool_overrides.get();
-                    let cur = cursor.get();
-                    let mut rows = Vec::new();
-                    let mut selectable = Vec::new();
-                    for row in tool_rows(&tools, &|n| !disabled.iter().any(|d| d == n), &overrides) {
-                        if row.name.is_some() {
-                            selectable.push(rows.len());
-                        }
-                        rows.push(row.spec);
-                    }
-                    if rows.is_empty() {
-                        rows.push(RowSpec {
-                            text: "no tools discovered yet".into(),
-                            header: false,
-                            checked: None,
-                            dim: true,
-                        });
-                    }
-                    // Clamp the anchor if the inventory shrank mid-modal.
-                    let cur = cur.min(selectable.len().saturating_sub(1));
-                    draw_rows(rows, cur, selectable)
-                },
-            ))
-            .child(hint_row(
-                &t,
-                "↑↓ move · space switch · c switches the category · a all on · n all off · p pins auto/ask · t cycles permissions · Enter/Esc closes"
-                    .into(),
-            ))
-            .child(hint_row(
-                &t,
-                "sticky per session · untouched = workflow defaults; customized = checked set is the run's exact tools · a pin beats the tier"
-                    .into(),
-            ))
-            .build()
-    });
+    super::tools_view::open(cx, store, ctx);
 }
 
 /// `/files` — the current run's workspace ON THE GATEWAY HOST (§W): the
@@ -2901,138 +2592,7 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
 
 /// `/skills` — attach gateway skills to every run (`input_data.skills`).
 pub fn open_skills(cx: Scope, store: Store, ctx: &UiCtx) {
-    let ctx2 = ctx.clone();
-    let size = modal_size(84, 24);
-    ctx.open_modal(cx, size, move |mcx| {
-        let t = abstracttui::app::current_theme().tokens;
-        let cursor = mcx.signal(0usize);
-
-        let toggle = {
-            let ctx = ctx2.clone();
-            move || {
-                let catalog = store.skills_catalog.get_untracked();
-                let ix = cursor.get_untracked();
-                let Some(skill) = catalog.get(ix) else { return };
-                if skill.blocked {
-                    store.notify(format!(
-                        "skill {} is blocked by the gateway's trust policy",
-                        skill.name
-                    ));
-                    return;
-                }
-                let mut selected = store.selected_skills.get_untracked();
-                if let Some(pos) = selected.iter().position(|s| *s == skill.name) {
-                    selected.remove(pos);
-                } else {
-                    selected.push(skill.name.clone());
-                }
-                store.selected_skills.set(selected.clone());
-                crate::ui::persist_prefs(&ctx, |p| p.skills = selected.clone());
-            }
-        };
-        let move_cursor = move |delta: i64| {
-            let n = store.skills_catalog.with_untracked(|c| c.len());
-            if n == 0 {
-                return;
-            }
-            cursor.update(|c| {
-                let cur = *c as i64 + delta;
-                *c = cur.clamp(0, n as i64 - 1) as usize;
-            });
-        };
-
-        Element::new()
-            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
-            .focusable()
-            .autofocus()
-            .shortcut(KeyChord::plain(Key::Escape), {
-                let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
-            })
-            .shortcut(KeyChord::plain(Key::Enter), {
-                let ctx = ctx2.clone();
-                move |_| ctx.close_modal()
-            })
-            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
-            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
-            .shortcut(KeyChord::plain(Key::Char(' ')), move |_| toggle())
-            .child(dyn_view(LayoutStyle::line(1), move || {
-                let t2 = abstracttui::app::current_theme().tokens;
-                let n = store.skills_catalog.with(|c| c.len());
-                let err = store.skills_error.get();
-                let on = store.selected_skills.with(|s| s.len());
-                let loaded = store.skills_shelf.with(Option::is_some);
-                let title = if !err.is_empty() {
-                    format!("gateway skills — discovery failed: {err}")
-                } else if n == 0 && !loaded {
-                    "gateway skills — loading…".to_string()
-                } else if n == 0 {
-                    "gateway skills — the shelf is empty".to_string()
-                } else {
-                    format!("gateway skills — {n} on the shelf · {on} attached to your runs")
-                };
-                title_row(&t2, title)
-            }))
-            .child(dyn_view(
-                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
-                move || {
-                    let catalog = store.skills_catalog.get();
-                    let selected = store.selected_skills.get();
-                    let cur = cursor.get();
-                    let mut rows = Vec::new();
-                    let mut selectable = Vec::new();
-                    for skill in &catalog {
-                        let on = selected.contains(&skill.name);
-                        let trust = skill.trust.clone();
-                        selectable.push(rows.len());
-                        rows.push(if skill.blocked {
-                            RowSpec {
-                                text: format!("{} — blocked by the gateway", skill.name),
-                                header: false,
-                                checked: Some(Mark::Unavailable),
-                                dim: true,
-                            }
-                        } else {
-                            RowSpec {
-                                text: format!("{} ({trust})  {}", skill.name, skill.description),
-                                header: false,
-                                checked: Some(Mark::switch(on)),
-                                dim: false,
-                            }
-                        });
-                    }
-                    if rows.is_empty() {
-                        // §X: the gateway's own reason, never a bare "no
-                        // skills" — where the shelf is, how it was chosen,
-                        // and every warning verbatim.
-                        let lines = match store.skills_shelf.get() {
-                            Some(shelf) => empty_shelf_lines(&shelf),
-                            None => vec!["waiting for the gateway's skill shelf…".to_string()],
-                        };
-                        for text in lines {
-                            rows.push(RowSpec {
-                                text,
-                                header: false,
-                                checked: None,
-                                dim: true,
-                            });
-                        }
-                    }
-                    // Clamp the anchor if the shelf shrank mid-modal.
-                    let cur = cur.min(selectable.len().saturating_sub(1));
-                    draw_rows(rows, cur, selectable)
-                },
-            ))
-            .child(hint_row(
-                &t,
-                "↑↓ move · space switch (attached to your runs) · Enter/Esc closes".into(),
-            ))
-            .child(hint_row(
-                &t,
-                "attached skills ride each run as input_data.skills (resolved gateway-side)".into(),
-            ))
-            .build()
-    });
+    super::skills_view::open(cx, store, ctx);
 }
 
 /// One row of the `/sessions` board — a session the GATEWAY lists, with

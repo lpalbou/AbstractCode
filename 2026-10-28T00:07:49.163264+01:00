@@ -1,0 +1,11 @@
+Access to your filesystem, I do not have. To list folders larger than 2 GB, run:
+
+```bash
+du -sk /Users/albou/tmp/abstractframework/untracked/* 2>/dev/null | awk '$1 > 2097152 { printf "%.2f GB\t%s\n", $1/1048576, $2 }' | sort -hr
+```
+
+For nested folders too, use:
+
+```bash
+find /Users/albou/tmp/abstractframework/untracked -type d -exec du -sk {} + 2>/dev/null | awk '$1 > 2097152 { printf "%.2f GB\t%s\n", $1/1048576, $2 }' | sort -hr
+```

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DocsAssistantPanel, DocsAssistantPanelContent, makeDocsQaAsk } from "@abstractframework/panel-chat";
+import { DocsAssistantPanel, DocsAssistantPanelContent, makeDocsQaAsk } from "../vendor/abstractdocs/docs_assistant.js";
 import { CODE_DOCS_SOURCE, codeDocsPanel, docsGatewayFetch } from "./app_assistant";
 // @ts-expect-error bin/server.js is plain ESM JavaScript without types
 import { createCodeRequestHandler } from "../../bin/server.js";
@@ -67,12 +67,12 @@ describe("Code Docs assistant (kit DocsAssistantDrawer)", () => {
     expect(html).toContain("<strong>Files</strong>");
     expect(html).toContain("panel");
     expect(html.match(/aria-label="Copy message"/g)?.length).toBe(2);
-    expect(html).toContain("Grounded on AbstractCode’s documentation (llms.txt) · docs-qa");
+    expect(html).toContain("Powered by AbstractCode’s documentation.");
   });
 
   it("is the kit's docs panel: drawer mode, kept alive, icon-only New conversation, attachments", () => {
     const panel = codeDocsPanel(true);
-    expect(panel).toMatchObject({ id: "docs", label: "Docs assistant", icon: "book", mode: "drawer", keepAlive: "always" });
+    expect(panel).toMatchObject({ id: "docs", label: "Docs assistant", icon: "book", mode: "drawer", keepAlive: "always", fill: true });
     const html = renderToStaticMarkup(panel.content as React.ReactElement);
     expect(html).toMatch(/aria-label="New conversation"[^>]*><svg/);
     expect(html).not.toMatch(/>New conversation</);
@@ -83,9 +83,9 @@ describe("Code Docs assistant (kit DocsAssistantDrawer)", () => {
   });
 
   it("the top bar opens it from the shared docs slot (book icon) as the right side's docs panel", () => {
-    expect(appSource).toContain('docs={{ open: railPanel === "docs",');
+    expect(appSource).toContain('docs={{ open: docsOpen,');
     expect(appSource).not.toContain("assistant={{");
-    expect(appSource).toContain("docs={codeDocsPanel(connection.connected)}");
+    expect(appSource).toContain("<CodeDocsAssistant");
   });
 
   it("the app serves its llms.txt as text/plain (what the gateway reads)", async () => {

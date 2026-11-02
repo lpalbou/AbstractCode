@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-30",
+  "engine_revision": "095ee77c563fd40da95dfbd69655648bc43c2767",
+  "uic_revision": "8d972f8c67c20ce13dbb5257081f5910e38163d3",
+  "installed_binary_sha256": "948e8ce6bb72b47acc9b7c991bba44a9ef9152c1638fae1d7ccea81a30a765c1",
+  "tests": {
+    "code": {
+      "passed": 1224,
+      "failed": 0,
+      "ignored": 23
+    },
+    "engine": {
+      "passed": 2706,
+      "failed": 0,
+      "ignored": 89
+    }
+  },
+  "core_ffi_tests": 6,
+  "native_wasm_frames": 54,
+  "native_wasm_max_channel_error": 0,
+  "browser": {
+    "styles": 6,
+    "phases": 7,
+    "ready_frames_in_1_1s": 12,
+    "tracking_frames_in_500ms": 30,
+    "after_2s_idle_frames_in_1_1s": 12,
+    "reduced_motion_frames": 0,
+    "mount_cycles": 5,
+    "context_recovery": true,
+    "console_errors": []
+  },
+  "qt": "42 style/phase frames, gaze/idle reset, Error, reduced motion, hide and release passed",
+  "native_installed": {
+    "styles": [
+      {
+        "style": "halo",
+        "ready": true,
+        "pointer_mode_1003": true,
+        "exit": 0
+      },
+      {
+        "style": "hover",
+        "ready": true,
+        "pointer_mode_1003": true,
+        "exit": 0
+      },
+      {
+        "style": "vortex",
+        "ready": true,
+        "pointer_mode_1003": true,
+        "exit": 0
+      },
+      {
+        "style": "eclipse",
+        "ready": true,
+        "pointer_mode_1003": true,
+        "exit": 0
+      },
+      {
+        "style": "eye",
+        "ready": true,
+        "pointer_mode_1003": true,
+        "exit": 0
+      },
+      {
+        "style": "rover",
+        "ready": true,
+        "pointer_mode_1003": true,
+        "exit": 0
+      }
+    ],
+    "execution_requests": 0,
+    "fixture": "loopback-only; isolated prefs; no running session changed"
+  },
+  "checks": [
+    "Code and engine all-target Clippy with warnings denied",
+    "core FFI Clippy with warnings denied",
+    "cargo fmt --check",
+    "UI-kit npm test",
+    "Wasm provenance --check",
+    "npm pack --dry-run includes Wasm/provenance, excludes gallery",
+    "core cargo package --no-verify --offline"
+  ],
+  "scope": "Local installation; no release/push or running session restart. Rendering shared, application rollout and shared identity migration separate."
+}

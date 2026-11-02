@@ -106,6 +106,7 @@ export function CodeSessionWorkspaces({ connected, sessionId, onOpenDefaults, re
   return (
     <>
       <WorkspaceChooser
+        compact
         level="session"
         idPrefix="code-workspace-session"
         state={session.state}
@@ -146,6 +147,7 @@ export function CodeDefaultWorkspacesDialog({ open, onClose, connected, onChange
   return (
     <AfModal open={open} onClose={onClose} title="My default workspaces" size="narrow">
       <WorkspaceChooser
+        compact
         level="account"
         idPrefix="code-workspace-account"
         state={account.state}
@@ -204,6 +206,7 @@ function CodeRunWorkspaces({ connected, automation, idPrefix = "code-workspace-a
   const unavailable = connected ? null : DISCONNECTED;
   return (
     <WorkspaceChooser
+        compact
       level="run"
       idPrefix={idPrefix}
       value={automation.value}

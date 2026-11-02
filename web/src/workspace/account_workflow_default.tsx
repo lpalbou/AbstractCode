@@ -51,11 +51,7 @@ export function AccountWorkflowDefault(props: {
         <p className="code-field-help code-workflow-resolved is-missing" role="alert" data-account-workflow-reason>
           {row.reason}
         </p>
-      ) : (
-        <p className="code-field-help">
-          Kept by the gateway for your account: the Assistant and every browser use the same choice. This conversation's workflow is picked above.
-        </p>
-      )}
+      ) : null}
       {note ? (
         <p className={`code-field-help${note.ok ? "" : " is-error"}`} role="status" data-account-workflow-note>
           {note.text}

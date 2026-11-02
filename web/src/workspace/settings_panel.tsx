@@ -10,6 +10,7 @@ import {
 } from "@abstractframework/ui-kit";
 import { CodeWorkspaceFolders, type RunWorkspace } from "./workspace_folders";
 import { SkillsPicker } from "./skills_picker";
+import { SettingsHelp } from "./settings_help";
 import { modelDiscovery } from "./model_discovery";
 import type { LegacyToolPreferences } from "./tool_layers";
 import {
@@ -63,7 +64,7 @@ export const DEFAULT_PREFERENCES: RunPreferences = {
   streamReplies: "gateway_default",
 };
 /** The settings panels SettingsContent renders (Workflow and Voice have their own components). */
-export type SettingsTab = "model" | "workspace" | "tools" | "skills";
+export type SettingsTab = "model" | "workspace" | "tools" | "skills" | "behavior";
 
 /** One rail panel's preference sections (Model, Workspace, Tools or Skills). No drawer or navigation wrappers. */
 export type SettingsContentProps = {
@@ -123,6 +124,8 @@ export function SettingsContent({
           <>
             <section className="code-settings-section" aria-label="Model">
               <ProviderModelPicker
+                layout="compact"
+                optionsDisclosure
                 defaultModeLabel={
                   workflowDefault ? "Workflow default" : "Gateway default"
                 }
@@ -142,21 +145,9 @@ export function SettingsContent({
                   : { fetchGatewayDefault: modelDiscovery.fetchGatewayDefault })}
               />
             </section>
-            <section className="code-settings-section">
-              <h3>Behavior</h3>
-              <div className="code-field-pair">
-                <label className="code-field">
-                  Iteration limit
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    placeholder="Workflow default"
-                    value={value.maxIterations}
-                    disabled={disabled}
-                    onChange={(e) => update({ maxIterations: e.target.value })}
-                  />
-                </label>
+            <details className="code-settings-advanced">
+              <summary>{hideStreamReplies ? "Limits" : "Limits & streaming"} <SettingsHelp label="About model limits">Leave these unchanged to use the workflow and Gateway defaults. Context limits control how much conversation the model can use.</SettingsHelp></summary>
+              <section className="code-settings-section">
                 <label className="code-field">
                   Context token limit
                   <input
@@ -169,36 +160,50 @@ export function SettingsContent({
                     onChange={(e) => update({ maxTokens: e.target.value })}
                   />
                 </label>
-              </div>
+                {hideStreamReplies ? null : (
+                  <StreamRepliesField
+                    value={value.streamReplies}
+                    onChange={(streamReplies) => update({ streamReplies })}
+                    disabled={disabled}
+                    streaming={streaming}
+                  />
+                )}
+              </section>
+            </details>
+          </>
+        ) : tab === "behavior" ? (
+          <section className="code-settings-section">
+            <label className="code-field">
+              Additional instructions
+              <textarea
+                rows={3}
+                value={value.system}
+                placeholder="Project conventions or guidance for this conversation…"
+                disabled={disabled}
+                onChange={(e) => update({ system: e.target.value })}
+              />
+            </label>
+            <details className="code-settings-advanced">
+              <summary>Run limits <SettingsHelp label="About iteration limits">Maximum agent iterations for this selection. Leave blank to use the workflow default.</SettingsHelp></summary>
               <label className="code-field">
-                Additional instructions
-                <textarea
-                  rows={5}
-                  value={value.system}
-                  placeholder="Project conventions or guidance for this conversation…"
+                Iteration limit
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  placeholder="Workflow default"
+                  value={value.maxIterations}
                   disabled={disabled}
-                  onChange={(e) => update({ system: e.target.value })}
+                  onChange={(e) => update({ maxIterations: e.target.value })}
                 />
               </label>
-              <p className="code-field-help">
-                Reasoning and additional instructions depend on the selected
-                workflow and model.
-              </p>
-              {hideStreamReplies ? null : (
-                <StreamRepliesField
-                  value={value.streamReplies}
-                  onChange={(streamReplies) => update({ streamReplies })}
-                  disabled={disabled}
-                  streaming={streaming}
-                />
-              )}
-            </section>
-          </>
+            </details>
+          </section>
         ) : tab === "workspace" ? (
           <section className="code-settings-section">
             {workspaceRootFixed ? (
               <p className="code-field-help" data-setting="workspace-root-fixed">
-                Runs work in the automation workspace <code title={workspaceRootFixed}>{workspaceRootFixed.split(/[\\/]/).filter(Boolean).pop() || workspaceRootFixed}</code>.
+                Run folder <strong>This automation</strong> <SettingsHelp label="About the automation folder">Each run uses this automation’s private folder. Folder access below controls which additional folders it can use.</SettingsHelp>
               </p>
             ) : null}
             <CodeWorkspaceFolders
@@ -221,6 +226,7 @@ export function SettingsContent({
               </p>
             ) : null}
             <ToolModeEditor
+              compact
               catalog={toolCatalog}
               layer="app"
               value={value.toolLayer}
@@ -287,13 +293,7 @@ export function StreamRepliesField({
           <option value="off">Off</option>
         </select>
       </label>
-      <p
-        id="code-stream-replies-help"
-        className="code-field-help"
-        data-streaming={streaming.status}
-      >
-        {help}
-      </p>
+      <span id="code-stream-replies-help" data-streaming={streaming.status}><SettingsHelp label="About streaming">{help}</SettingsHelp></span>
     </>
   );
 }

@@ -1,0 +1,54 @@
+{
+  "themes": [
+    {
+      "theme": "observer-night",
+      "checks": {
+        "rail": true,
+        "modelFolded": true,
+        "modelHeight": true,
+        "categories": true,
+        "timezone": true,
+        "noLegacyTabs": true,
+        "workspace": true,
+        "docs": true,
+        "Model390": true,
+        "Agent390": true,
+        "Workspace390": true,
+        "Model320": true,
+        "Agent320": true,
+        "Workspace320": true
+      }
+    },
+    {
+      "theme": "light",
+      "checks": {
+        "rail": true,
+        "modelFolded": true,
+        "modelHeight": true,
+        "categories": true,
+        "timezone": true,
+        "noLegacyTabs": true,
+        "workspace": true,
+        "docs": true,
+        "Model390": true,
+        "Agent390": true,
+        "Workspace390": true,
+        "Model320": true,
+        "Agent320": true,
+        "Workspace320": true
+      }
+    }
+  ],
+  "errors": [],
+  "writes": [
+    {
+      "path": "/api/connection/gateway",
+      "method": "POST"
+    },
+    {
+      "path": "/api/connection/gateway",
+      "method": "POST"
+    }
+  ],
+  "forbiddenWrites": []
+}

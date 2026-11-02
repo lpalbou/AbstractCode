@@ -29,6 +29,7 @@ pub mod config;
 pub mod conversations;
 pub mod convo;
 pub mod discovery;
+pub mod docs_chat;
 pub mod entities;
 pub mod exec;
 pub mod export;
@@ -44,12 +45,14 @@ pub mod protocol;
 pub mod rail;
 pub mod run_input;
 pub mod runner;
+mod runner_docs;
 pub mod sandbox_line;
 pub mod schedule_input;
 pub mod signin;
 pub mod speculation;
 pub mod store;
 pub mod streaming;
+pub mod tool_modes;
 pub mod tool_policy;
 pub mod transcript;
 pub mod ui;
@@ -475,14 +478,14 @@ fn run_tui(args: &cli::Args) -> i32 {
         });
         let _ = tx.send(runner::Cmd::LoadTools);
         let _ = tx.send(runner::Cmd::LoadSkills);
-        // MCP registry at boot (HDR-1/REST-1): the header + footer carry
-        // `mcp N` — without this load the count existed only after /mcp
-        // was opened once. One cheap GET.
+        // MCP registry at boot: populate the grouped Tools menu and idle
+        // summary before the registry panel is first opened.
         let _ = tx.send(runner::Cmd::LoadMcp);
         // Capability contracts at boot: `/resources` is GATED on them
         // (host_state contract absent = the modal says so honestly).
         // One cheap GET; a transient failure self-heals at the gesture.
         let _ = tx.send(runner::Cmd::LoadCapabilities);
+        let _ = tx.send(runner::Cmd::LoadAccount);
         let _ = tx.send(runner::Cmd::LoadEntities);
         let _ = tx.send(runner::Cmd::ProbeAttach {
             session_id: attach_session.clone(),
@@ -685,3 +688,7 @@ mod tests {
         abstracttui::app::set_redraw_on_focus_gained(false);
     }
 }
+
+pub mod assistant_context;
+
+pub mod companion;

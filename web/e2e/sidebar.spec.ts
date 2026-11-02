@@ -157,7 +157,7 @@ test.describe("AbstractCode sidebar", () => {
       if (await opener.isVisible()) await opener.click();
       // The drawer slides in (0.2 s): measure once it has arrived.
       await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-sidebar")!).transform === "none");
-      await expect(page.locator(".code-auto-card")).toHaveCount(autos.length);
+      await expect(page.locator(".code-automation-item")).toHaveCount(autos.length);
       // Round 4: no big top button; New conversation is the "+" beside the Conversations refresh.
       await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "New conversation", exact: true })).toBeVisible();
       await expect(page.locator(".code-conversations .code-panel-header").getByRole("button", { name: "Refresh conversations", exact: true })).toBeVisible();
@@ -182,7 +182,7 @@ test.describe("AbstractCode sidebar", () => {
           background: getComputedStyle(l).backgroundColor, overflowY: getComputedStyle(l).overflowY,
         }));
         const hidden: string[] = [];
-        for (const row of document.querySelectorAll<HTMLElement>(".code-auto-card, .code-sessions .code-session")) {
+        for (const row of document.querySelectorAll<HTMLElement>(".code-automation-item, .code-sessions .code-session")) {
           row.scrollIntoView({ block: "nearest" });
           const last = (row.querySelector(".code-card-meta") || row).getBoundingClientRect();
           const hit = document.elementFromPoint(last.left + 4, last.top + last.height / 2);
@@ -227,18 +227,13 @@ test.describe("AbstractCode sidebar", () => {
     expect(runLimits.length).toBeGreaterThan(0);
     // Synthetic conversation 3 (s = 2): 3 turns, 2 tools each.
     await expect(page.locator(".code-sessions .code-session", { hasText: "Synthetic conversation 3" }).locator('[data-field="meta"]')).toHaveText(/ · 3 turns · 6 tools$/);
-    // Automation cards (R5): name, then `every … · last …`, then `next …` with the Active switch right-aligned on that line.
-    const first = page.locator(".code-auto-card").first();
-    await expect(first.getByRole("switch", { name: "Active" })).toBeVisible();
-    await expect(first.locator('[data-field="timing"]')).toHaveText(/^every [^·]+ · (last [^·]+ ago|running now|waiting since [^·]+|last never)$/i);
-    await expect(first.locator('[data-field="next"]')).toHaveText(/^(next (in [^·]+|due now))?$/);
-    const line2 = (await first.locator(".code-card-line2").boundingBox())!;
-    const sw = (await first.getByRole("switch", { name: "Active" }).boundingBox())!;
-    const next = (await first.locator('[data-field="next"]').boundingBox())!;
-    const card = (await first.boundingBox())!;
-    expect(Math.abs(sw.y + sw.height / 2 - (line2.y + line2.height / 2))).toBeLessThan(4); // same line as `next`
-    expect(card.x + card.width - (sw.x + sw.width)).toBeLessThan(16); // right-aligned
-    expect(sw.x).toBeGreaterThan(next.x);
+    // Watch-style automation facts share the conversation card shell; Active is in the editor.
+    const first = page.locator(".code-automation-item").first();
+    await expect(first.getByRole("switch")).toHaveCount(0);
+    await expect(first.locator('[data-field="runs"]')).toBeVisible();
+    await expect(first.locator('[data-field="cadence"]')).toBeVisible();
+    await expect(first.locator('[data-field="next"]')).toHaveText(/^(now|\d+[mhd])$/);
+    await expect(first.locator('.af-session-card')).toHaveAttribute('data-attention', 'true');
 
     for (const [width, height] of [[1440, 900], [834, 1194], [390, 844]] as const) {
       await page.setViewportSize({ width, height });
@@ -248,7 +243,7 @@ test.describe("AbstractCode sidebar", () => {
         await page.waitForFunction(() => getComputedStyle(document.querySelector(".code-sidebar")!).transform === "none");
       }
       // The lists have loaded (after the previous size's reload too).
-      await expect(page.locator(".code-auto-card")).toHaveCount(14);
+      await expect(page.locator(".code-automation-item")).toHaveCount(14);
       await expect(page.locator(".code-sessions .code-session[data-session-id]")).toHaveCount(25);
       const geometry = () =>
         page.evaluate(() => {
@@ -269,40 +264,40 @@ test.describe("AbstractCode sidebar", () => {
       const mid = (g: Awaited<ReturnType<typeof geometry>>) => g.top + g.height / 2;
 
       // Both closed: the two header rows at the top, nothing below.
-      await set("automations", false);
       await set("conversations", false);
-      let g = await geometry();
-      expect(g.aHead.top - g.top, `${width} both closed: Automations header at the top`).toBeLessThanOrEqual(12);
-      expect(g.cHead.top - g.aHead.bottom, `${width} both closed: Conversations header right below`).toBeLessThanOrEqual(12);
-      expect(g.aList).toBeNull();
-      expect(g.cList).toBeNull();
-
-      // Automations open: it takes the space above the Conversations header, which sits mid-height.
-      await set("automations", true);
-      g = await geometry();
-      expect(Math.abs(g.cHead.top - mid(g)), `${width} A open: Conversations header mid-height`).toBeLessThanOrEqual(10);
-      expect(g.aList!.bottom, `${width} A list ends above the Conversations header`).toBeLessThanOrEqual(g.cHead.top + 1);
-      expect(g.aList!.scrolls && g.aList!.overflowY === "auto", `${width} A list scrolls inside its drawer`).toBe(true);
-      expect(g.cList).toBeNull();
-
-      // Conversations open alone: it takes the rest below its header.
       await set("automations", false);
+      let g = await geometry();
+      expect(g.cHead.top - g.top, `${width} both closed: Conversations header at the top`).toBeLessThanOrEqual(12);
+      expect(g.aHead.top - g.cHead.bottom, `${width} both closed: Automations header right below`).toBeLessThanOrEqual(12);
+      expect(g.cList).toBeNull();
+      expect(g.aList).toBeNull();
+
+      // Conversations open: it takes the space above the Automations header, which sits mid-height.
       await set("conversations", true);
       g = await geometry();
-      expect(g.cHead.top - g.aHead.bottom, `${width} C open: its header right below Automations`).toBeLessThanOrEqual(12);
-      expect(g.bottom - g.cList!.bottom, `${width} C list reaches the bottom`).toBeLessThanOrEqual(12);
-      expect(g.cList!.scrolls && g.cList!.overflowY === "auto", `${width} C list scrolls inside its drawer`).toBe(true);
+      expect(Math.abs(g.aHead.top - mid(g)), `${width} C open: Automations header mid-height`).toBeLessThanOrEqual(10);
+      expect(g.cList!.bottom, `${width} C list ends above the Automations header`).toBeLessThanOrEqual(g.aHead.top + 1);
+      expect(g.cList!.scrolls && g.cList!.overflowY === "auto", `${width} A list scrolls inside its drawer`).toBe(true);
+      expect(g.aList).toBeNull();
 
-      // Both open: an even split, the Conversations header pinned mid-height; each list scrolls.
+      // Automations open alone: it takes the rest below its header.
+      await set("conversations", false);
       await set("automations", true);
       g = await geometry();
-      expect(Math.abs(g.cHead.top - mid(g)), `${width} both open: Conversations header mid-height`).toBeLessThanOrEqual(10);
-      expect(g.aList!.scrolls && g.cList!.scrolls, `${width} both lists scroll inside their drawers`).toBe(true);
-      // The last automation card is reachable by scrolling ITS drawer, and not under a header.
-      const last = page.locator(".code-auto-card").last();
+      expect(g.aHead.top - g.cHead.bottom, `${width} A open: its header right below Conversations`).toBeLessThanOrEqual(12);
+      expect(g.bottom - g.aList!.bottom, `${width} A list reaches the bottom`).toBeLessThanOrEqual(12);
+      expect(g.aList!.scrolls && g.aList!.overflowY === "auto", `${width} A list scrolls inside its drawer`).toBe(true);
+
+      // Both open: an even split, the Automations header pinned mid-height; each list scrolls.
+      await set("conversations", true);
+      g = await geometry();
+      expect(Math.abs(g.aHead.top - mid(g)), `${width} both open: Automations header mid-height`).toBeLessThanOrEqual(10);
+      expect(g.cList!.scrolls && g.aList!.scrolls, `${width} both lists scroll inside their drawers`).toBe(true);
+      // The last conversation card is reachable by scrolling ITS drawer, and not under a header.
+      const last = page.locator(".code-session-item").last();
       await last.scrollIntoViewIfNeeded();
       const lb = (await last.boundingBox())!;
-      expect(lb.y + lb.height, `${width} last card above the Conversations header`).toBeLessThanOrEqual(g.cHead.top + 1);
+      expect(lb.y + lb.height, `${width} last card above the Automations header`).toBeLessThanOrEqual(g.aHead.top + 1);
       expect(g.docOverflow, `${width} no horizontal overflow`).toBe(false);
 
       // Remembered: Automations closed survives a reload.

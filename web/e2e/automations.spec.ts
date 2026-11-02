@@ -79,11 +79,12 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await expect(dialog).toBeHidden();
 
   // The row states the gateway's truth: text + icon, next run from next_fire_at.
-  const row = page.locator(".code-auto-card", { hasText: title });
+  const row = page.locator(".code-automation-item", { hasText: title });
   await expect(row).toBeVisible();
   // The kit's state label: the word, then its icon.
-  await expect(row.getByRole("switch", { name: "Active" })).toHaveAttribute("aria-checked", "true");
-  await expect(row.locator('[data-field="timing"]')).toContainText(/^every /i);
+  await expect(row.locator('[data-field="cadence"]')).toBeVisible();
+  await expect(row.getByRole("switch")).toHaveCount(0);
+  await expect(row.locator('[data-field="cadence"]')).toHaveText(/^(\d+[smhd]|Daily|Weekly|Monthly|Once)$/);
 
   // The first run starts now and parks on a typed tool approval.
   const main = page.locator(".code-automation-main");
@@ -141,7 +142,7 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await capture(page, "automation-discussion");
 
   // Archive: asks first; then hidden from the list, history kept (the `Archived · N` footer, R5).
-  await row.locator(".code-card-main").click();
+  await row.locator(".af-session-card__open").click();
   await main.getByRole("button", { name: "Archive", exact: true }).click();
   await main.locator('[data-action="archive-confirm"]').click();
   await expect(main.locator('.code-auto-header [data-field="result"]')).toHaveText("Automation archived.");
@@ -198,7 +199,7 @@ test("the automation detail's lists collapse, stay collapsed after a reload, and
   // Remembered per viewer: reopen the same automation after a reload.
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".code-mobile-nav").click();
-  await page.locator(".code-auto-card", { hasText: title }).locator(".code-card-main").click();
+  await page.locator(".code-automation-item", { hasText: title }).locator(".af-session-card__open").click();
   await expect(main.locator("#code-detail-occurrences-toggle")).toHaveAttribute("aria-expanded", "false");
   await expect(main.locator(".af-auto__timeline")).toBeHidden();
   await expect(main.locator("#code-detail-folder-toggle")).toHaveAttribute("aria-expanded", "false");
@@ -225,12 +226,12 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   await dialog.getByRole("button", { name: "Create automation" }).click();
   expect((await posted).postDataJSON().context).toEqual({ mode: "growing", growing: { max_tokens: 30000 } });
   await expect(dialog).toBeHidden();
-  const row = page.locator(".code-auto-card", { hasText: title });
+  const row = page.locator(".code-automation-item", { hasText: title });
   await expect(row).toBeVisible();
   const main = page.locator(".code-automation-main");
   // Round 5: Edit opens the rail's Workflow panel on this automation; its definition form holds the context.
   await main.getByRole("button", { name: "Edit", exact: true }).click();
-  const settings = page.locator("#code-rail-panel-workflow");
+  const settings = page.locator("#code-rail-panel-agent");
   const editBudget = settings.getByRole("spinbutton", { name: /Max growing context/ });
   await expect(editBudget).toHaveValue("30000");
   await settings.getByRole("radio", { name: /Independent/ }).check();
@@ -244,7 +245,7 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
   await expect(settings.getByTestId("automation-revision")).toHaveText("Revision 2");
   await page.reload();
   await expect(row).toBeVisible();
-  await row.locator(".code-card-main").click();
+  await row.locator(".af-session-card__open").click();
   await main.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(editBudget).toHaveValue("20000");
   await editBudget.scrollIntoViewIfNeeded();
@@ -254,7 +255,7 @@ test("creates and edits a custom growing context budget", async ({ page }) => {
 test("list refreshes preserve sidebar rows without adding loading messages", async ({ page }) => {
   await signIn(page);
   // The first loads have landed (a refresh held below must not be the first one: that one says Loading).
-  await expect(page.locator(".code-auto-card").or(page.getByText("No automations yet", { exact: false })).first()).toBeVisible();
+  await expect(page.locator(".code-automation-item").or(page.getByText("No automations yet", { exact: false })).first()).toBeVisible();
   await expect(page.getByRole("status").filter({ hasText: /Loading (automations|conversations)…/ })).toHaveCount(0);
   for (const [label, endpoint, message] of [
     ["Refresh automations", /\/automations\?/, "Loading automations…"],
@@ -262,7 +263,7 @@ test("list refreshes preserve sidebar rows without adding loading messages", asy
   ] as const) {
     const button = page.getByRole("button", { name: label, exact: true });
     await expect(button).toBeEnabled();
-    const rows = page.locator(".code-auto-card, .code-session");
+    const rows = page.locator(".code-automation-item, .code-session");
     const before = await rows.allTextContents();
     expect(before.length).toBeGreaterThan(0);
     const bounds = await button.boundingBox();

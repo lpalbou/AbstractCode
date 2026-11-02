@@ -141,7 +141,8 @@ describe("the panel as Code shows it", () => {
       <SettingsContent tab="workspace" value={DEFAULT_PREFERENCES} onChange={() => {}} tools={[]} disabled={false} connected automationFolders workspaceRootFixed="/srv/gw/workspaces/automation-1" />,
     );
     expect(automation).toContain('id="code-workspace-automation"');
-    expect(automation).toContain("automation-1");
+    expect(automation).toContain("This automation");
+    expect(automation).not.toContain("automation-1");
     expect(automation).not.toContain('id="code-workspace-session"');
   });
 
@@ -149,10 +150,10 @@ describe("the panel as Code shows it", () => {
     const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
     expect(app).toMatch(/sessionId=\{automation \? undefined : session\.sessionId\}/);
     expect(app).toContain("<CodeDefaultWorkspacesDialog");
-    expect(app).toContain("Current workspace <code");
+    expect(app).toContain("Run folder <code");
     const panel = readFileSync(new URL("./workspace_folders.tsx", import.meta.url), "utf8");
     expect(panel).toContain('level: "session", session: sessionId');
-    expect(panel).toMatch(/<WorkspaceChooser\s+level="session"/);
+    expect(panel).toMatch(/<WorkspaceChooser\s+compact\s+level="session"/);
     expect(panel).toMatch(/title="My default workspaces"[\s\S]*level="account"/);
   });
 

@@ -65,10 +65,11 @@ abstractcode --help | --version
 | Command | Effect |
 | --- | --- |
 | `/help` | Command + key reference modal |
-| `/new` | Fresh session (new durable id, cleared view) |
-| `/voice [read-aloud on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `space on\|off` turns hold-Space-to-talk on or off (on by default) |
+| `/new` | Fresh session (new durable id, cleared view); stops current and queued speech (`/clear` too) |
+| `/voice [read-aloud on\|off \| auto-send on\|off \| space on\|off]` | Voice settings (see [Voice](#voice-voice-speak-dictate)); `read-aloud on\|off` flips that switch without the screen; `auto-send off` reviews held voice in the prompt; `auto-send on` sends it on release (default); `space on\|off` turns hold-Space-to-talk on or off (on by default) |
 | `/speak [stop]` | Read the latest reply aloud (`/say` too; `Ctrl+P`); `stop` stops it (so does `Esc`) |
 | `/dictate` | Record from this computer's microphone and put the transcript in the composer (`/mic` too; `Ctrl+R` starts, `Ctrl+R` again transcribes, `Esc` cancels) |
+| `/docs` | Open the Docs assistant drawer: a separate conversation grounded in the Gateway documentation corpus |
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran. When the gateway keeps your account's **Default for new conversations** (AbstractGateway 0.13.1+; see [Settings panels](#settings-panels-settings)), this picks THIS conversation's workflow only and saves nothing on this computer; with an older gateway the pick is also saved on this computer for new conversations, as before |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
@@ -81,7 +82,7 @@ abstractcode --help | --version
 | `/stream [on\|off\|default]` | "Stream replies" (`/streaming` alias). Bare opens the picker: **Gateway default** (names the gateway's current setting), **On**, **Off**. Saved in `prefs.json` as `stream_replies`; see "Streamed replies" below |
 | `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
 | `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
-| `/tools` | One switch per gateway tool (`[x]` on, `[ ]` off, `[-] name — reason` when the gateway disables it; `Space` switches; the "on" set = the run's exact allowlist; untouched = workflow defaults). In-modal: `p` cycles a per-tool approval pin, `t` cycles the tier — see the modal keys below |
+| `/tools` | Tool and category modes: **Off** excludes, **Ask** requires approval, **Auto** skips approval. Select a tool or category, then use the named buttons or Space/Enter to cycle. Category changes affect currently listed available tools; Gateway-disabled members stay unavailable. Descriptions are the Gateway inventory text. Changes apply to future runs; workflow and Gateway limits still apply |
 | `/permissions [read\|write\|all]` | THE tool-permission surface (bare = report): batches classifying at-or-below the level auto-approve. `read` = proven read-only tools only; `write` adds workspace file mutations; `all` auto-approves everything, **including arbitrary shell and network egress** — deliberate use only. Per-tool `ask` pins and gateway-disabled tools still gate. Sticky per session (`/tools tier` remains a spelling alias) |
 | `/workspace` | This conversation's workspaces: the Workspace panel (Use my default, posture, Read-only / Read & write / Refused per workspace, Add a workspace path, the effective line, My default workspaces), see [Workspaces](#workspaces-workspace). Stored on the conversation by the gateway |
 | `/skills` | Attach gateway skills to your runs (`Space` toggles; sent as `input_data.skills`). An empty shelf shows where the shelf is on the gateway host, how it was chosen, and the gateway's warnings |
@@ -90,7 +91,7 @@ abstractcode --help | --version
 | `/resources` | Gateway-host resources (`/host` is an alias): memory (RAM/device meter bars, GPU utilization when the host supports it, the gateway's process RSS, host name), resident models (modality label, tri-state residency — an unreported residency reads `unknown`, never "no" — size, `ctx N` with `*` = calibrated, 🔒 = residency lock, `default`), session prompt caches, totals. Admin actions on the selected model: `u` unload (two-step confirm; a 409 `model_locked` refusal offers `f` force), `k` lock/unlock, `e` context estimate, `r` refresh — keys under "Modal keys" below. Data is fetched at open, on `r`, and after a mutation — never polled; a failed refresh keeps the last snapshot marked STALE. Requires the gateway's declared `host_state` contract (`/discovery/capabilities`) — older gateways get an honest "not supported". Feeds the footer's `mem NN%` segment |
 | `/history [n\|all]` | Stream the PREVIOUS bloc of this session's turns from the gateway ledgers, prepended in full detail. Boot replays only the last bloc (`--replay-turns` sizes it, default 5); a stub line names how many earlier turns exist. **Scrolling to the top of the transcript auto-loads the previous bloc** — the stub becomes a live progress line and holding at the top cascades bloc-by-bloc until the session is fully loaded (Esc returns to the tail and stops the cascade). Failures name their cause — never a silent hole |
 | `/status` | The status card: workflow, route, workspace, session, connection, client phase + run id + last outcome, and a LIVE gateway run-status probe — the one place client view vs server truth is inspectable (wrapper roots legitimately stay `waiting` after your turn concluded) |
-| `/sessions` | The conversations board, as the Code web's list: each conversation is its title (the opening prompt, else `Conversation <id>`) with its live state at the right while it wants something, then `Oct 2 · 2 turns · 7 tools` (the day of the newest turn in local time; turns = root runs; tools = the gateway's per-turn `tool_calls` summed, shown when above zero). `Enter` continues one · `a` Archive (asks inline: "Archive this conversation? It stays searchable and auditable; it just leaves this list." `y` archives through `POST /sessions/{id}/archive`, `n`/`Esc` cancels; archiving the open conversation opens the next one, else the previous, else a new one) · the quiet **Archived · N** line (N = the gateway's `archived_sessions`) opens the archived ones inline, `Enter`/`u` unarchives · `n` new conversation · `r` refresh · `/` **Search conversations**: typing filters the cards on the title and the id, like the Code web (the opening prompt and the session id, case-insensitive; `<query> · N of M`, "No conversations match your search."); letters type into the search while it is open, `Backspace` narrows back, `Enter` continues the selected one, `Esc` clears the search before closing. Nothing is ever deleted |
+| `/sessions` | The conversations board, as the Code web's list: each conversation is its title (the opening prompt, else `Conversation <id>`) with its live state at the right while it wants something, then `Oct 2 · 2 turns · 7 tools` (the day of the newest turn in local time; turns = root runs; tool counts appear only when supplied by the Gateway; discovery omits ledger metrics to stay responsive). `Enter` continues one · `a` Archive (asks inline: "Archive this conversation? It stays searchable and auditable; it just leaves this list." `y` archives through `POST /sessions/{id}/archive`, `n`/`Esc` cancels; archiving the open conversation opens the next one, else the previous, else a new one) · the quiet **Archived · N** line (N = the gateway's `archived_sessions`) opens the archived ones inline, `Enter`/`u` unarchives · `n` new conversation · `r` refresh · `/` **Search conversations**: typing filters the cards on the title and the id, like the Code web (the opening prompt and the session id, case-insensitive; `<query> · N of M`, "No conversations match your search."); letters type into the search while it is open, `Backspace` narrows back, `Enter` continues the selected one, `Esc` clears the search before closing. Nothing is ever deleted |
 | `/archive` | Archive this conversation: the board opens with the question asked (`y` archives, `n` keeps it) |
 | `/settings [panel]` | The settings panels (`/panels`, `/rail` too), see [Settings panels](#settings-panels-settings). `panel` = `activity`, `files`, `model`, `workflow`, `workspace`, `tools`, `skills` or `voice` |
 | `/activity` | The settings panels on **Activity**: this conversation's work in foldable groups, one per model step |
@@ -310,6 +311,11 @@ computer.
   could not be asked ("The gateway's default voice routes could not be
   read. Requests still use them."). `Enter` on a row offers Gateway default
   or an override for this app from `GET /voice/voices?compact=true`.
+- **Interrupting speech.** Submitting a new message stops current speech and clears
+  queued narration before starting the next run or buffering guidance. This includes
+  paused/preparing speech; late chunks/completions cannot resume the old reply.
+  `/new`, `/clear` and switching conversations also stop current/queued speech.
+  Typing alone and opening settings do not interrupt it.
 - **Speaking a reply** (`Ctrl+P`, `/speak`, the `▶` at the top right of
   any message, or **Read aloud**): `POST
   /api/gateway/runs/{run_id}/voice/tts/stream` (before the first run, the
@@ -335,7 +341,9 @@ computer.
   cycle's words is read once; a restored history is never read.
 - **Hold Space to talk** (on by default; `/voice space off` turns it
   off): on an EMPTY prompt, hold `Space`, speak, release — the words are
-  transcribed and SENT, exactly as `Enter` would send them (a task when
+  transcribed and sent by default. Set **Voice messages → Review before sending**
+  in `/voice`, or use `/voice auto-send off`, to place them in the editable prompt
+  instead. With automatic sending on, they go exactly as `Enter` would (a task when
   idle, guidance while a run streams, a message under entity focus).
   Recording starts on the press itself (nothing is typed), and the row
   above the prompt shows a live histogram of your voice (its spectrum,
@@ -363,14 +371,17 @@ computer.
   first use; Code web and Observer use the same run), so the first message
   can be spoken. Only a session id outside the gateway's run-id alphabet
   still answers "Start a conversation to enable dictation."
-- **The screen** (`/voice`): Output device (this computer's speakers, from
+- **The screen** (`/voice`): Text → speech (choose a catalog voice, saved with its
+  human label for this app), Speech → text, Voice messages (Send automatically /
+  Review before sending; Ctrl+R always dictates into the draft), Output device (this computer's speakers, from
   AbstractVoice) + Test speaker (a short chime), Reply volume (`←`/`→`),
   Input device + Test microphone (3 s recorded with a live level meter,
   then played back), Spoken language (naming it skips detection:
   transcription is faster), Input level, `[x] Read aloud — Speak each new
   reply.`, Voice latency (`quality_preset`), and the last reply's
   `first audio 0.41 s · engine on cpu`. Saved in `prefs.json` under `voice`
-  with the kit's `VoiceClientPreferences` keys.
+  with the kit's `VoiceClientPreferences` keys. The client-only `voice_label` and
+  `auto_send_voice` fields are never sent as synthesis parameters.
   The devices are this client's settings: a saved speaker or microphone that
   is not connected (or no longer opens) is replaced by the system default
   automatically, and the screen says so (`System default · saved speaker not
@@ -582,11 +593,18 @@ recovers it.
 | `Ctrl+T` | anywhere | Cycle theme |
 | click on the workflow name | header | Workflow picker (as `/workflow`) |
 | click on the provider/model | header | Model picker (as `/model`) |
-| click on the gateway / connection light | header | Connection status modal (as `/status`) |
+| click on the user / connection light | header, right | Account menu: signed-in identity, Gateway, connection status (as `/status`), copy user id, and confirmed disconnect of this terminal |
 | click on the workspace path (`⌂ …`) | status bar, middle | The conversation's authorised workspaces (as `/workspace`) |
 | click on the session id | status bar, middle | Sessions modal (as `/sessions`) |
+| click on the workspace mode | header | The conversation's authorised workspaces (as `/workspace`) |
+| click on **Tools** | header | Grouped Tools, Skills and MCP server choices; opens the same panels as `/tools`, `/skills`, `/mcp` |
+| click on **Docs** / **About** | header, right | Documentation assistant drawer / version and framework links |
+| click on **Menu** | narrow header | Workflow, Model, Docs assistant, Theme, About and Connection status |
+| click on context or token counts | status bar | Prompt-cache and context metrics for the latest call, run and session (as `/cache`) |
+| click on GPU or memory meters | status bar | Gateway host resources (as `/resources`); opening the panel does not unload or change a model |
+| click on `? keys + commands` | status bar | Keys and commands reference (as `/help`) |
 | `Tab` to the header or the status bar, then `←`/`→`, `Enter`/`Space` | header, status bar | Moves between that bar's widgets and opens the one highlighted (reverse video) |
-| click / `Tab`+`→`+`Enter` on the theme name | status bar, right | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores |
+| click / `Tab`+`→`+`Enter` on **Theme** | header, right (or **Menu**) | Theme dropdown: every theme grouped Dark / Light; arrows, Page Up/Down and the mouse wheel preview LIVE; `Enter` or a click keeps it (saved like `Ctrl+T`); `Esc` restores |
 | `Ctrl+P` | anywhere | Read the latest reply aloud; while it plays = pause; paused = resume (`/speak`; `Esc` stops). In one automation (`/automations <id>`): the selected run's reply; again = stop |
 | `Space` (held) | empty prompt | Hold to talk: speak, release to SEND (`/voice space off` turns it off) |
 | `Enter` | empty composer, the status line shows the attention chip (**N waiting for you**, **Automations · M new**, or **Automations · N waiting** on an older gateway) | Open the automation that waits for you (a pending approval or question first, else unseen results); a click on the chip does the same |
@@ -598,6 +616,7 @@ recovers it.
 | `?` + Enter | empty composer | Open the keys + commands reference (the footer's `? keys + commands`) |
 | `Ctrl+Q` | anywhere | Quit |
 | `Ctrl+C` | anywhere | Clear the current prompt (if any) and arm quit — a second Ctrl+C within 2s quits (with a live run, the quit gate opens; a third press = leave & quit) |
+| click outside | ordinary dialogs | Close without activating the control underneath; approval and user-question steps remain open |
 | `↑↓` + `Enter`/`Space` | pickers | Move + choose — Space confirms too, single-select semantics (theme picker previews live) |
 | `Tab` | anywhere | Move focus (composer ↔ transcript ↔ modal fields) |
 | any character | transcript focused | Return focus to the composer and keep the character — typing is never dropped because focus wandered. `/` opens the command dropdown the same way |
@@ -614,7 +633,7 @@ recovers it.
 | ask (agent question) | `Enter` send the answer · `Esc` keeps the run waiting |
 | `/review [on\|off\|rounds N]` | The verifier the agent must pass before it may conclude (`/verify` too); same as `--review` / `--review-rounds` |
 | `/iterations [n\|off]` | Iteration budget requested for new runs (`_limits.max_iterations`; `/iters` too). Bare reports what is in force and where it came from; `off` takes the server's own. Applies to the next run; persisted |
-| `/tools` | `Space` switch · `a` all on · `n` all off · `p` cycle the per-tool pin (none → auto → ask → none; a pin beats the tier both ways) · `t` cycle the approval tier (read → write → all, persisted) · `Enter`/`Esc` close |
+| `/tools` | Arrows / Page Up/Down / mouse wheel browse · Space/Enter cycles Off → Ask → Auto · `c` cycles the current category (Mixed starts at Ask) · named Off/Ask/Auto buttons apply to the selected row · Esc closes |
 | `/queue` | `↑↓` select · `x` remove · `u`/`d` move up/down · `c` clear all · `r` resume a paused queue · `e` pop the prompt into the composer for editing · `Enter`/`Esc` close |
 | chips row | click a staged file's name to preview it · click its `×` to unstage it |
 | `/attach` manager | `↑↓` select · `Enter`/`p` preview · `x` remove · `c` clear · `b` browse (file picker) · `Esc` close |
@@ -626,6 +645,35 @@ recovers it.
 | `/settings` | `←`/`→`/`Tab`/`1`–`8` panel (an automation's Edit: `1`–`5`, or a click on a section) · `↑↓` move · `PgUp`/`PgDn`/`Home`/`End` · wheel scrolls · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close (an automation's Edit: back to the automation) |
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
 | `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
+
+## Selected content
+
+Click a mapped assistant passage to highlight a word, then choose **Explain**,
+**Use as context** or **Change** in the action row above the composer. The action
+adds quoted content to the existing draft; review it and press the normal Send
+key when ready. Sending uses the same new-run or active-run steering behavior as
+other coding prompts. Selection itself never sends, executes tools or approves work.
+
+A second click selects a sentence and a third selects its paragraph. Dragging
+selects a source span across wraps. Table cells include their header, row and
+column in the quoted context; code includes language and source lines. Local
+context excerpts surround the selected passage and label omitted earlier/later
+text. **Word**, **Sentence** and **Paragraph**, **Cell** or **Code block** change
+units. Narrow windows use **More** or **Actions** for the same choices.
+
+The controls reuse the existing one-row spacer, so selecting does not move the
+transcript under the pointer. Tab reaches the action host; Left/Right choose a
+visible action, Enter or Space activates it, and overflow menus use Up/Down and
+Enter. Esc cancels selection and any active voice capture/playback while preserving
+the coding draft. **Cancel** also preserves the draft. Finish or clear a slash-command
+draft before adding selected context; the app refuses to append context to a command.
+
+Mapped selection covers assistant Markdown prose, tables, code, plain/rich Feed
+blocks and streamed replies. User cards, custom tool previews and custom JSON
+blocks retain screen-copy selection until their producers supply source geometry;
+these regions do not offer semantic context actions. Links, scrollbars, disclosure
+controls and playback buttons keep their normal behavior. Source replacement or a
+session/conversation change clears stale selection.
 
 ## Transcript vocabulary
 
@@ -676,7 +724,7 @@ one-line row with its own `▸ N lines` disclosure.
 The bottom line of the window (the status bar) shows the instruments on
 the left, the folder this session was launched for (`⌂ ~/…`; the
 `--workspace` root, else the current directory) and the session id in the
-middle, the theme on the right, and the
+middle, and the
 `hold Space to talk` hint (`Ctrl+R speak` with the gesture off), and — when a turn's answer came from an
 agent subrun while the wrapper root run was still open on the gateway —
 the discreet `◌ root finalizes on gateway` marker (nothing to do: the
@@ -822,15 +870,147 @@ in an automation's Edit panel marks the row being saved with `…` next to
   (when the `/gpu` meter is on) · `mem N%` (host RAM from the last
   `/resources` fetch — graded on the rounded percent, warn ≥75% / error
   ≥90%; `mem N%*` marks a stale snapshot after a failed refresh; absent
-  when no percent is known) · `skills N` · `mcp N` ·
-  `? keys + commands`, plus theme + gateway host (+ error detail when
-  the connection drops). The key legend lives behind `?` (bare `?` +
+  when no percent is known) ·
+  `? keys + commands` (+ error detail when the connection drops). Tools,
+  Skills and MCP share the header Tools menu; Theme and the signed-in
+  identity/connection menu live at the header's right. The key legend lives behind `?` (bare `?` +
   Enter) and `/help`; the phase/focus teachings live in the composer
   placeholder. When the row is too narrow for every instrument,
   segments drop WHOLE from the right — never `…` fragments.
 - **Screen recovery**: `Ctrl+L` / `/redraw` force-repaints the whole
   frame — recovery from an external terminal clear (Cmd+K), which a
   damage-tracked renderer cannot detect on its own.
+
+## Assistant drawer
+
+Open **Docs** (under **Menu** on narrow terminals) or run `/docs`. The drawer
+uses message bubbles with a separate composer, Markdown answers and scrolling.
+**Documentation** answers questions about AbstractCode documentation and the main
+conversation. **Companion**, opened by the avatar or account menu, answers questions
+about the conversation and run state currently loaded in this client. These have
+separate titles, conversations and drafts; there are no scope tabs.
+Closing the drawer preserves them and your coding draft.
+
+Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
+Both modes receive a fresh, explicitly labelled snapshot of user requests, guidance
+and assistant replies from the main conversation, including visible streaming content.
+Tool payloads and hidden reasoning are excluded. The snapshot retains up to 24,000
+characters of recent message text and labels any omitted or shortened history.
+Docs additionally supplies the corpus from `/docs/corpus?app=code`, cached separately
+from conversation context. The snapshot includes session/run identity and state, and says when earlier records are
+not loaded. These questions do not steer, approve or execute tools in the coding
+run. Switching coding conversations starts a separate run-question history.
+
+Missing documentation or failed runs display an error. **Retry** submits the
+question again; temporary connection errors follow the existing run. **New
+conversation** clears the selected scope after the current answer finishes.
+A genuine approval or user-question step takes priority over the drawer.
+
+The terminal displays completed answers and keeps native history while the
+process is open. It has no native history selector or attachments; Gateway
+assistant sessions remain durable independently.
+
+### Companion and side-conversation controls
+
+The action row uses ↑ Send, ＋ New conversation, ● Record / ■ Stop recording,
+⚙ Companion settings, and ↻ Retry after failure. Icon controls have accessible
+labels and hover/focus explanations. The microphone destination is the selected
+side conversation, with editable transcription before sending. Esc cancels it;
+changing the main session or resetting that side conversation discards late input.
+
+Open Companion settings from the account menu or drawer gear. It offers:
+
+| Setting | Default | Effect |
+|---|---|---|
+| Enable companion | Off | Show the activity avatar and enable companion interaction preferences |
+| Appearance | Halo orb | Preview all 44 catalog designs and activity phases before saving |
+| Animate activity | On | Activity motion; off gives reduced motion |
+| Offer comments | Off | Short change-driven observations through Gateway |
+| Read side replies | Off | Narrate new side replies and accepted comments through the shared speaker queue |
+| Speaking voice | Main assistant voice | Independent Gateway catalog voice; main device and volume settings remain in force |
+| Position | Top right | Top right or Bottom right within the transcript, clear of composer and audio rows |
+
+The avatar floats below the right header controls or at the bottom right, with its caption and action
+row centred together. Empty artwork cells leave the transcript visible; only
+the shape, caption and controls paint above it. Occupied terminal cells replace
+the underlying glyph, including soft edges and glow. It does not reserve a sidebar
+or reduce transcript width. Controls elsewhere
+continue to use the normal keyboard/mouse focus path.
+
+The avatar reflects observed activity: ready, thinking, executing tools, waiting,
+recording, speaking or error. Paused speech is static. Below 120 columns or 22 rows
+it becomes a compact control. The full avatar yields to drawers, modals and entity
+focus. It does not load a model or initiate microphone capture.
+Hover visibly leans with a raised hand while listening, rests lower with a dimmed
+downward gaze and sequential pulsing indicators while waiting, and bobs with
+thruster sparks while working. Ready breathes at2fps, Waiting uses6fps and active
+phases use up to12fps; Error stays still. Halo intake/emission rings distinguish
+Listening and Speaking even at a fixed audio level. Reduced motion stops clocks.
+Ready eyes follow actual terminal pointer movement or clicks and center after two seconds of
+inactivity. Abstract orbs turn subtly; tracking samples at up to12fps. It stops
+outside Ready, in reduced motion and when hidden. Error is static with red X eyes
+for Hover/Rover, or one central X for Eye. A terminal failure stays in Error until
+a new run or higher-priority activity. New live tool/run failures hold Error for at
+least one second, including during speech or an immediate recovery; each new failure
+restarts that second. Replayed history never triggers the transient cue, and leaving
+the session or hiding the companion clears it. Pointer movement never starts a task.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+include ‖ Pause / ▶ Resume for that current audio. The bottom control sits directly
+beside the live histogram at narrow and wide terminal sizes. They never select a different
+message or start a reply. Message-level play/pause controls remain available.
+
+Appearance opens a silent preview with all 44 catalog styles and Ready, Listening, Thinking,
+Working, Speaking, Waiting and Error phases. A selected phase is held; **Auto cycle**
+advances phases about every 3.5 seconds. **Pause motion** freezes the demonstration.
+Keyboard controls are 1–7 for phases, left/right to step and c to cycle/hold.
+The preview labels the saved appearance **In use** and another choice **Not applied**.
+The saved design is initially focused and a ● marks the selected design even when
+keyboard focus moves. **Enter** on a focused design applies it and closes the
+preview. Clicking a design only previews it; **Apply avatar** also saves and closes
+the preview to show the new avatar immediately; Cancel/Esc discards it. Preview playback can be
+started explicitly with reduced motion enabled, without changing that preference.
+The preview has no inference, recording or speech side effects. Choose **Watch Halo**,
+**Watch Wave**, **Watch Hover**, **Watch Rings** or **Watch Eye** for the enhanced
+reference procedures; similarly named original shaded styles retain their identities.
+
+Automatic comments use a dedicated grounded-QA conversation, separate from manual
+Documentation/Companion history and coding commands. They require a new meaningful visible
+conversation revision, allow one request at a time and enforce at least 60 seconds
+between attempts, including failures. Restoring/loading earlier history establishes
+a baseline; tool payload/hidden-reasoning changes do not trigger a request. Changes
+coalesce and stale, duplicate or NO_ADVICE responses are not displayed. The cap is
+per running TUI process; shared multi-client ownership is not implemented here.
+
+Only recent loaded requests/replies are supplied (the 24,000-character context bound
+above applies). The side assistant has no history-browsing tool. Older history can
+be loaded into the client before asking again; omission markers remain explicit.
+
+Preferences live under `companion` in the client's prefs.json. They do not change
+Gateway defaults or entity-owned appearance/voice. Device preferences stay local.
+Queued automatic side speech respects current opt-out settings, source session and
+side-conversation identity, waits behind active speech/recording, and shares Stop.
+Side speech failures notify without modifying the coding transcript.
+
+
+## Final-answer recovery
+
+A completed answer is displayed as the normal assistant response, outside collapsed
+reasoning cycles. Reconnect terminal checks drain the last ledger page and reconcile
+readable canonical run output before declaring an answer missing. Late canonical
+completion can replace the current provisional missing-answer notice and summary;
+helper outputs, arbitrary cycle text and failed/cancelled/previous turns cannot.
+The existing message playback and historical read-aloud suppression remain in force.
+
+## Session-list discovery
+
+The conversations board first requests up to 200 turn-root summaries, then a
+larger metadata-only listing when older roots exist. It never requests ledger
+lengths or ledger-derived metrics to discover conversations. The board labels
+partial results; turn counts on a partial listing are floors. Opening prompts
+are filled in progressively. Refresh keeps the last Gateway snapshot and known
+titles visible, and a refresh error leaves them available. Repeated refreshes
+while a listing is in flight are coalesced.
 
 ## Caching and context
 

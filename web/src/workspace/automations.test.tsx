@@ -259,53 +259,32 @@ describe("the sidebar section", () => {
   };
   const state = (items: AutomationSummary[]) => ({ ...new AutomationsController(stubClient(), vi.fn()).state, items, loaded: true });
 
-  it("round 5 cards: name, the waiting badge, `every · last` then `next` + the Active switch on the second line", () => {
+  it("uses shared Watch cards: run count, compact cadence, next run, attention and no Active switch", () => {
     const html = renderToStaticMarkup(<AutomationsSection {...base} state={state(list())} />);
-    const card = (title: string) => {
-      const id = list().find((s) => s.title === title)!.automation_id;
-      const at = html.indexOf(`data-automation-id="${id}"`);
-      expect(at, title).toBeGreaterThan(-1);
-      return html.slice(at, html.indexOf('</div>', html.indexOf('role="switch"', at)));
-    };
-    const field = (name: string) => (c: string) => new RegExp(`data-field="${name}">([\\s\\S]*?)<\\/small>`).exec(c)?.[1].replace(/<[^>]+>/g, "");
-    const line1 = field("timing");
-    const line2 = field("next");
-    const timing = (c: string) => [line1(c), line2(c)].filter(Boolean).join(" / ");
-    // The operator's line, from the gateway's facts only (NOW = 2026-09-27 06:35 UTC).
-    // Run #7 waits for an approval: "waiting since", never "running now" beside the badge.
-    expect(timing(card("Inbox triage"))).toBe("Every 30 minutes (UTC) · waiting since 4 min / next in 25 min");
-    // Line 1 starts with the ↻ icon for a schedule; line 2 holds `next` and the Active switch, in that order.
-    expect(card("Inbox triage")).toMatch(/data-field="timing"><svg[^>]*code-card-cadence-icon/);
-    expect(card("Inbox triage")).toMatch(/<div class="code-card-line2"><small class="code-card-meta" data-field="next">next in 25 min<\/small><button[^>]*role="switch"/);
+    expect(html).toContain('af-session-card af-automation-card');
+    expect(html).toContain('data-field="runs"');
+    expect(html).toContain('data-field="cadence"');
+    expect(html).toContain('aria-label="Next run in 25m"');
+    expect(html).toContain('aria-label="Every 30 minutes (UTC)"');
+    expect(html).toContain('Needs you');
+    expect(html).toContain('data-attention="true"');
+    expect(html).not.toContain('role="switch"');
+    expect(html).not.toContain('<strong');
+    expect(html).toContain('Paused');
     const executing = { ...list()[0], attention: { ...list()[0].attention, pending_waits: 0, unseen_count: 0 } };
     const run = renderToStaticMarkup(<AutomationsSection {...base} state={state([executing])} />);
-    expect(timing(run)).toBe("Every 30 minutes (UTC) · running now / next in 25 min");
-    expect(timing(card("AI news monitor"))).toBe("Every 8 hours (UTC) · last 6 h ago / next in 1 h");
-    // Nothing scheduled (paused): line 2 keeps only the switch.
-    expect(timing(card("Weekly journal monitor"))).toBe(`${"Every 7 days (UTC) \u00b7 12 runs max"} · last 6 d ago`);
-    expect(card("Weekly journal monitor")).toContain('data-field="next"></small>');
-    // An approval is pending only on Inbox triage (pending_waits 2): the badge there and nowhere else.
-    expect(card("Inbox triage")).toContain('data-field="waiting">waiting for you<');
-    expect(card("AI news monitor")).not.toContain("waiting for you");
-    // The state is a switch labelled by the feature: on = active, off = paused (never a verb).
-    // Icon-only in the card (the name keeps its full row): "Active" is the accessible name and tooltip.
-    expect(card("AI news monitor")).toMatch(/role="switch" class="af-switch af-switch--sm code-card-switch code-switch-icon-only" data-action="active" aria-checked="true" aria-label="Active"[^>]*title="Active\n/);
-    expect(card("AI news monitor")).toContain('<span class="code-visually-hidden">Active</span>');
-    expect(card("Weekly journal monitor")).toMatch(/data-action="active" aria-checked="false"/);
-    expect(html).not.toMatch(/>(Pause|Resume)</);
-    // No year and no seconds anywhere on the cards.
-    for (const line of html.matchAll(/data-field="timing">([\s\S]*?)<\/small>/g)) expect(line[1].replace(/<[^>]+>/g, "")).not.toMatch(/20\d\d|\bsec|\d+ ?s\b/);
-    // The legacy row's switch is unavailable, with the kit's reason as its tooltip.
-    expect(card("echo")).toMatch(/aria-disabled="true"[^>]*title="Legacy schedule/);
+    expect(run).toContain('data-working="true"');
+    expect(run).toContain('Running');
   });
 
-  it("the card body selects and the switch flips Active through the controller (never nested buttons)", () => {
+  it("opens the right automation and delegates archive confirmation to its card", async () => {
     const onSelect = vi.fn();
-    const onToggleActive = vi.fn();
+    const onArchive = vi.fn(async () => ({}));
     const items = list();
-    const html = renderToStaticMarkup(<AutomationsSection {...base} onSelect={onSelect} onToggleActive={onToggleActive} state={state(items)} />);
+    const html = renderToStaticMarkup(<AutomationsSection {...base} onSelect={onSelect} onArchive={onArchive} state={state(items)} />);
     expect(html).not.toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*<button/);
-    const tree = AutomationsSection({ ...base, onSelect, onToggleActive, state: state(items) } as any);
+    expect(html).toContain('Archive AI news monitor');
+    const tree = AutomationsSection({ ...base, onSelect, onArchive, state: state(items) } as any);
     const cards: any[] = [];
     const visit = (n: any) => {
       if (Array.isArray(n)) return n.forEach(visit);
@@ -315,10 +294,10 @@ describe("the sidebar section", () => {
     };
     visit(tree);
     expect(cards).toHaveLength(items.length);
-    (cards[1].props as any).onSelect();
+    cards[1].props.onSelect();
     expect(onSelect).toHaveBeenCalledWith(items[1].automation_id);
-    (cards[1].props as any).onToggleActive();
-    expect(onToggleActive).toHaveBeenCalledWith(items[1]);
+    await cards[1].props.onArchive();
+    expect(onArchive).toHaveBeenCalledWith(items[1]);
   });
 
   it("toggleActive pauses an active automation, resumes a paused one, and keeps a refusal for the card", async () => {
@@ -507,9 +486,9 @@ describe("a pre-round-16 gateway row (served fields optional)", () => {
     expect(ctl.state.items.map((s) => [s.title, s.time_zone, s.schedule_rule_text])).toEqual([["Daily price watch", "UTC", "—"]]);
     await ctl.select(raw.automation_id);
     expect(ctl.state.detail?.summary.next_run_at).toBe(raw.next_fire_at);
-    const html = renderToStaticMarkup(<AutomationCard summary={ctl.state.items[0]} selected={false} busy={false} nowMs={LEGACY_NOW} onSelect={() => {}} onToggleActive={() => {}} />);
+    const html = renderToStaticMarkup(<AutomationCard summary={ctl.state.items[0]} selected={false} busy={false} nowMs={LEGACY_NOW} onSelect={() => {}} />);
     expect(html).toContain("Daily price watch");
-    expect(html).toContain("—");
-    expect(html).toContain("next in 3 h");
+    expect(html).toContain('data-field="cadence"');
+    expect(html).toContain('aria-label="Next run in 3h"');
   });
 });

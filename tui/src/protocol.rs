@@ -869,6 +869,9 @@ pub fn extract_flow_output(rec: &Value) -> Option<FlowOutput> {
     for key in [
         "$artifact",
         "artifact",
+        "attachments",
+        "files",
+        "artifacts",
         "image_artifact",
         "video_artifact",
         "audio_artifact",

@@ -1,0 +1,13 @@
+
+> @abstractframework/assistant@0.0.1 test
+> vitest run
+
+
+ RUN  v5.0.4 /Users/albou/tmp/abstractframework/abstractassistant/web
+
+
+ Test Files  9 passed (9)
+      Tests  57 passed (57)
+   Start at  01:43:43
+   Duration  2.46s (transform 53%, import 41%, tests 4%, worker 2%)
+

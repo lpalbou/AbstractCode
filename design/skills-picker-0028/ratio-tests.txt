@@ -1,0 +1,14 @@
+   Compiling abstractcode v0.12.0 (/tmp/code-skills-0028-clean/tui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.74s
+     Running tests/headless_ui.rs (/tmp/code-skills-0028-target/debug/deps/headless_ui-4a068e3ef1c7d1df)
+
+running 6 tests
+test empty_skills_shelf_shows_the_gateways_warnings ... ok
+test skills_picker_readability::skills_picker_scrollbar_pointer_actions_and_blocked_skill ... ok
+test skills_picker_readability::skills_picker_wheel_scrolls_both_ways_without_toggling_or_prior_hover ... ok
+test skills_picker_readability::skills_picker_paging_stable_identity_and_description_scroll ... ok
+test skills_selector_attaches_and_start_carries_skills ... ok
+test skills_picker_readability::skills_picker_larger_layout_and_selected_description_in_both_themes ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 233 filtered out; finished in 0.09s
+

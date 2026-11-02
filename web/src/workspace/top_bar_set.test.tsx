@@ -34,7 +34,7 @@ describe("the shared top-bar set", () => {
   const bar = jsxProps(appSource, "AfTopBarActions");
 
   it("passes the four kit pieces to AfTopBarActions", () => {
-    expect(bar).toMatch(/\bdocs=\{\{ open: railPanel === "docs",/);
+    expect(bar).toMatch(/\bdocs=\{\{ open: docsOpen,/);
     // {value, onChange}: the kit owns and renders AfAppearanceDialog.
     expect(bar).toMatch(/\bappearance=\{\{ value: appearance, onChange: setAppearance \}\}/);
     expect(bar).toMatch(/\babout=\{\{ identity: APP_IDENTITY,/);
@@ -45,8 +45,8 @@ describe("the shared top-bar set", () => {
   });
 
   it("the docs drawer is panel-chat's, and no piece is a local copy", () => {
-    expect(assistantSource).toMatch(/import \{ docsAssistantPanel[^}]*\} from "@abstractframework\/panel-chat"/);
-    expect(appSource).toMatch(/docs=\{codeDocsPanel\(connection\.connected\)\}/);
+    expect(assistantSource).toMatch(/import \{ DocsAssistantDrawer[^}]*\} from "\.\.\/vendor\/abstractdocs\/docs_assistant\.js"/);
+    expect(appSource).toMatch(/<CodeDocsAssistant/);
     for (const local of [/function \w*About\w*Dialog/, /function \w*Appearance\w*Dialog/, /Signed in as/, /af-topbar__/]) expect(appSource).not.toMatch(local);
   });
 

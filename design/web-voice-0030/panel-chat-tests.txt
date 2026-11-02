@@ -1,0 +1,109 @@
+
+> @abstractframework/panel-chat@0.6.6 test
+> npm run build && tsc --noEmit --noUnusedLocals --noUnusedParameters -p . && node scripts/extract_transcript_slice.mjs --check && node scripts/check_panel_chat.mjs && node scripts/check_chat_media.mjs && node scripts/check_workflow_runtime.mjs && node scripts/check_workflow_evidence.mjs && node scripts/check_event_target.mjs && node scripts/check_tool_supervision.mjs && node scripts/check_tool_presentation.mjs && node scripts/check_stop_states.mjs && node scripts/check_file_drop.mjs && node scripts/check_live_replies.mjs && node scripts/check_automation_badges.mjs && node scripts/check_automation_markdown.mjs && node scripts/check_present_interaction.mjs && node scripts/check_workspace_browser.mjs && node scripts/check_approval_sync.mjs && node scripts/check_responsive.mjs && node scripts/check_secure_context.mjs && node scripts/check_docs_assistant.mjs && node scripts/check_docs_voice.mjs && node scripts/check_tool_sandbox.mjs && node scripts/check_chat_surface.mjs && node scripts/check_docs_panel.mjs && node scripts/check_session_policy.mjs && node scripts/check_replay_view.mjs && node scripts/check_replay_view_session.mjs && node scripts/check_polish.mjs && node scripts/check_voice_playback.mjs && node scripts/check_message_footer.mjs && node scripts/check_read_aloud.mjs && tsc -p scripts/types/tsconfig.json
+
+
+> @abstractframework/panel-chat@0.6.6 build
+> tsc
+
+transcript slice: OK (in parity with panel_chat.css; 100 classes, 41 tokens)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at StatChip (file:///Users/albou/tmp/abstractframework/abstractuic/panel-chat/dist/stat_detail.js:370:52)
+    at div
+    at div
+    at ChatMessageCard (file:///Users/albou/tmp/abstractframework/abstractuic/panel-chat/dist/chat_message_card.js:138:21)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at StatChip (file:///Users/albou/tmp/abstractframework/abstractuic/panel-chat/dist/stat_detail.js:370:52)
+    at div
+    at div
+    at ChatMessageCard (file:///Users/albou/tmp/abstractframework/abstractuic/panel-chat/dist/chat_message_card.js:138:21)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at StatChip (file:///Users/albou/tmp/abstractframework/abstractuic/panel-chat/dist/stat_detail.js:370:52)
+    at div
+    at div
+    at ChatMessageCard (file:///Users/albou/tmp/abstractframework/abstractuic/panel-chat/dist/chat_message_card.js:138:21)
+Warning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.
+    at StatChip (file:///Users/albou/tmp/abstractframework/abstractuic/panel-chat/dist/stat_detail.js:370:52)
+panel-chat rig: OK (markdown tables/lists/fences, JsonViewer collapseAfterDepth contract, message card guards)
+check_chat_media: OK (media inline + link, unsafe/unknown refused, finished reasoning, per-message stats, pending label; files in the shared viewer, STT transcript caption, artifact kinds, video previews)
+workflow runtime checks passed
+workflow evidence: tool lifecycle, partial failure, replay, child usage, final dedupe OK
+event target checks passed
+✔ an approval is bound to the displayed child and exact wait, not the replacement request (3.7065ms)
+✔ host permission-all never enables unchecked, missing or served-disabled tools (3.746083ms)
+✔ permissions preserve explicit Ask and repeated wait-key occurrences (4.170208ms)
+✔ host permissions survive reload but never answer questions (4.208ms)
+✔ permission refresh cannot undo Stop while its command is pending (1.654083ms)
+✔ remembered permissions change only after accepted consent, then supervise the next occurrence (2.930625ms)
+✔ auth-reset prevents a delayed approval acknowledgement from persisting permissions (1.6035ms)
+✔ auth-error prevents a delayed approval acknowledgement from persisting permissions (2.941833ms)
+✔ revoke prevents a delayed approval acknowledgement from persisting permissions (1.507917ms)
+✔ stop prevents a delayed approval acknowledgement from persisting permissions (1.623834ms)
+✔ terminal prevents a delayed approval acknowledgement from persisting permissions (3.216959ms)
+✔ rejected remembered consent does not call the persistence callback (1.524291ms)
+✔ new occurrences of the same wait key retain distinct commands while prior acknowledgements are pending (4.140375ms)
+✔ Allow once authorizes the current whole batch but no subsequent batch (2.846042ms)
+✔ run consent approves future root/child tool waits exactly once and retains keyed Gateway commands (2.945042ms)
+✔ run consent never answers a question, event wait, or unidentified wait (2.897292ms)
+✔ a failed initial grant grants nothing; retry preserves the exact command identity (1.521791ms)
+✔ an explicitly rejected grant is not consent (1.48725ms)
+✔ a failed automatic approval revokes the grant and does not enter a retry loop (4.199ms)
+✔ explicit revocation leaves future batches pending for review (2.802334ms)
+✔ revocation wins over a delayed acknowledgement of the initial run grant (1.482042ms)
+✔ Stop intent expires active consent before Gateway cancellation converges (2.893542ms)
+✔ Stop intent expires in-flight consent before Gateway cancellation converges (2.699125ms)
+✔ a late grant completion cannot cross reset/new-run boundaries (2.865792ms)
+✔ reloading even the same run does not restore browser-local consent (2.780333ms)
+✔ a paused root cannot automatically approve a newly arrived child request (4.2605ms)
+✔ authentication failure expires run consent even if the host has not reset yet (4.1055ms)
+✔ authentication failure also invalidates an initial grant still in flight (2.87475ms)
+✔ authoritative completed expires consent and ignores late approval records (2.963875ms)
+✔ authoritative failed expires consent and ignores late approval records (2.9005ms)
+✔ authoritative cancelled expires consent and ignores late approval records (2.908334ms)
+✔ helper completed/Done cannot claim that a parent waiting on its active LLM is finished (0.282958ms)
+✔ a completed ledger step is not a completed run; replayed LLM STARTED cannot resurrect thinking (0.17325ms)
+✔ helper lifecycle text cannot contradict active root state between observable steps (0.204208ms)
+✔ terminal root authority dominates pending tools, stale waits, and lost streams (0.071958ms)
+✔ progress distinguishes approval, questions, optional event triggers, pause, and disconnection (0.053375ms)
+✔ active tool progress identifies the actual tool without invented usage (0.070792ms)
+✔ abstract.status accepts canonical value payloads and explicit empty clears (1.602542ms)
+✔ older child status replay cannot replace newer progress; late helpers cannot overwrite terminal status (2.875583ms)
+✔ a batch covered by the standing permission is never presented as a question, in any published snapshot (3.041459ms)
+✔ a covered batch replayed while the run is still loading is not flashed as a question (1.826834ms)
+✔ batches outside the permission still ask exactly as before (8.325458ms)
+✔ revocation: the dispatched batch stays running, the next batch asks (1.369167ms)
+✔ a failed automatic approval brings the question back (3.176709ms)
+✔ an accepted Allow once runs the batch; a Deny keeps the question until the ledger resumes (1.541167ms)
+✔ a question is never marked granted, even under the standing permission (1.49275ms)
+✔ progress: a granted approval reads as running tools, an ungranted one as Approval needed (0.17875ms)
+ℹ tests 47
+ℹ suites 0
+ℹ pass 47
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 117.832125
+tool presentation: compact grouping, escaped full evidence, keyboard-native disclosure and host copy policy OK
+check_stop_states: ok
+check_file_drop: ok
+check_live_replies: ok (171 checks)
+check_automation_badges: OK
+check_automation_markdown: OK
+check_present_interaction: OK (+ 0032 wording set, session/defer/skip only when injected, neutral scope, card variant, replay input)
+check_workspace_browser: OK
+approval sync checks passed
+check_responsive (panel-chat): OK (containers, desktop-safe thresholds, 44px touch targets, 16px composer, auto-grow, safe area)
+check_secure_context: ok (10000 v4 command ids without randomUUID; copyText reports the execCommand result)
+check_docs_assistant: OK (59 checks)
+check_docs_voice: availability, authenticated run/artifact transport, overrides, abort/error paths and shared speakers for8 app identities PASS
+check_tool_sandbox: OK
+check_chat_surface: OK (67 checks: steer/queue + honest queued text, typed chips + upload queue, toolbar only when injected, renderFooter/hint slots, onCancel(signal))
+check_docs_panel: 25/25 checks passed
+check_session_policy: OK (98 checks: write-then-answer order, kinds/denials, labeled local fallback, clamped surfaced, kinds only for toolsets present, policy record = activity, parser locality)
+check_replay_view: 53 groups OK (15 cases, 283 steps byte-equal to GET /view, 268/268 skipped deltas caught, 74 reconnects)
+check_replay_view_session: 12 groups OK
+check_polish: OK (14 checks: one duration format, approval wait labeled, Allow once primary)
+check_voice_playback: 25 checks green
+check_message_footer: 56 checks green (stamp with date, permanent speaker, structured chips)
+check_read_aloud: ok (A-F)

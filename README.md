@@ -12,6 +12,10 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
+What's new: browser 0.14.0 adds the Avatar conversation view and compact settings;
+terminal 0.13.0 adds six shared companion designs and a larger Skills picker. See
+[CHANGELOG.md](CHANGELOG.md).
+
 ## The two clients
 
 | | Terminal | Browser |
@@ -35,7 +39,8 @@ abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.
 ```
 
 Archiving conversations, the **Archived · N** lists and the gateway's default
-voice routes need AbstractGateway 0.13.0 or later.
+voice routes need AbstractGateway 0.13.0 or later; the browser client 0.14.0
+(shared unread markers, the Avatar view's public updates) needs 0.19.0 or later.
 
 Then start whichever client you prefer:
 
@@ -115,3 +120,8 @@ commands for each client. Security reports go through [`SECURITY.md`](SECURITY.m
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+## For AI agents
+
+Register [skills/abstractcode/SKILL.md](skills/abstractcode/SKILL.md) with your agent
+host for connection, session, permissions, assistant and voice workflows.

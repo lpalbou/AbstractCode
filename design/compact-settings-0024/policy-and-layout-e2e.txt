@@ -1,0 +1,11 @@
+
+Running 4 tests using 1 worker
+
+(node:94088) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 e2e/compact_settings.spec.ts:8:3 › compact settings and shared docs layout (dark) (6.7s)
+  ✓  2 e2e/compact_settings.spec.ts:8:3 › compact settings and shared docs layout (light) (4.7s)
+  ✓  3 e2e/workspace.spec.ts:930:3 › AbstractCode isolated gateway workspace › a tool set to Off is never offered to the run, and is offered again when set back (2.9s)
+  ✓  4 e2e/workspace.spec.ts:968:3 › AbstractCode isolated gateway workspace › an Auto tool runs with no gate (the gateway holds it); an Ask tool waits for the person (3.0s)
+
+  4 passed (18.7s)

@@ -1,0 +1,87 @@
+{
+  "source_sha256": "a125e97b03fa512c21ab40ec33383c016decc0e5d178f95c318ef60edbfe866e",
+  "request_count": 19275,
+  "run_starts": 0,
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/gateway/accounts/me/preferences",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/automations?limit=50",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/bundles?all_versions=false&include_deprecated=false",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/config/capability-defaults",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/discovery/capabilities",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/discovery/providers?include_models=true",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/discovery/tools",
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/entities",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/mcp/servers",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/me",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/me/events/stream?heartbeat_s=15",
+      "count": 9629
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/me/events?after=0&limit=1000",
+      "count": 9630
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/ping",
+      "count": 2
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/runs?limit=200&session_id=tools-native-fixture&root_only=true&include_ledger_len=false",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/skills",
+      "count": 1
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/workspace/policy",
+      "count": 1
+    }
+  ]
+}

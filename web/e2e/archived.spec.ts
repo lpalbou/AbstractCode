@@ -72,7 +72,7 @@ test("automations: Archived · N footer, inline list, Unarchive brings it back (
   const section = page.locator(".code-automations");
   await expect(section.getByText(/Show archived/)).toHaveCount(0);
   await expect(section.locator('[data-action="show-archived"]')).toHaveCount(0);
-  await expect(section.locator(".code-auto-card", { hasText: title })).toHaveCount(0);
+  await expect(section.locator(".code-automation-item", { hasText: title })).toHaveCount(0);
   const footer = section.locator('.code-archived[data-list="automations"]');
   const toggle = footer.locator(".code-archived-toggle");
   await expect(toggle).toHaveText(`Archived · ${n}`);
@@ -86,9 +86,9 @@ test("automations: Archived · N footer, inline list, Unarchive brings it back (
   await expect(page.locator('.code-archived[data-list="automations"] .code-archived-toggle')).toHaveAttribute("aria-expanded", "true");
   await page.locator(`.code-archived[data-list="automations"] .code-archived-row[data-id="${id}"] [data-action="unarchive"]`).click();
   // Back in the list (paused: the Active switch is off), gone from the archived ones.
-  const card = section.locator(".code-auto-card", { hasText: title });
+  const card = section.locator(".code-automation-item", { hasText: title });
   await expect(card).toBeVisible();
-  await expect(card.getByRole("switch", { name: "Active" })).toHaveAttribute("aria-checked", "false");
+  await expect(card.locator('[data-field="cadence"]')).toHaveText("Paused");
   await expect(page.locator(`.code-archived-row[data-id="${id}"]`)).toHaveCount(0);
   expect((await api(`automations/${encodeURIComponent(id)}`)).summary.status).toBe("paused");
   // A count of 0 leaves no footer at all.

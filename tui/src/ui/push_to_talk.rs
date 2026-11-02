@@ -8,7 +8,8 @@
 //! guidance while a run streams, an entity message under entity focus).
 //! A single tap still types a space; Space in a non-empty draft is
 //! ordinary typing. Ctrl+R stays the hands-free toggle that only fills
-//! the draft. `/voice space off` turns the gesture off.
+//! the draft. `/voice auto-send off` also lets held messages be reviewed
+//! before sending. `/voice space off` turns the gesture off.
 //!
 //! ## How a hold is seen
 //!

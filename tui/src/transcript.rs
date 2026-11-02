@@ -19,6 +19,8 @@ use crate::protocol::{self, UsageDelta};
 const ARGS_PREVIEW_MAX: usize = 200;
 /// Strip-rendered cycle-intent one-liner (visibility review P2-1).
 const CYCLE_PREVIEW_MAX: usize = 48;
+const MISSING_FINAL: &str = "the run completed without a readable final answer — /status shows the run; /history replays this session";
+const MISSING_AGENT_FINAL: &str = "the agent run completed without a readable final answer — /status shows the run; /history replays this session";
 pub const MAX_ITEMS: usize = 500;
 /// Truncation hysteresis: items float in [MAX_ITEMS, MAX_ITEMS +
 /// TRUNCATE_CHUNK] and each drain cuts back to MAX_ITEMS (see
@@ -597,10 +599,70 @@ fn envelope_rest(v: Option<&Value>) -> String {
 fn value_block(v: Option<&Value>) -> String {
     match v {
         None => String::new(),
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
+            Ok(value @ (Value::Object(_) | Value::Array(_))) => {
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| s.clone())
+            }
+            _ => s.clone(),
+        },
         Some(Value::Null) => String::new(),
         Some(other) => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
     }
+}
+
+/// Named files explicitly attached to an answer, excluding internal scratchpad refs.
+fn attached_output_names(meta: &Value) -> Vec<String> {
+    fn collect(value: &Value, names: &mut Vec<String>, seen: &mut HashSet<String>, depth: usize) {
+        if depth > 8 {
+            return;
+        }
+        if let Some(items) = value.as_array() {
+            for item in items {
+                collect(item, names, seen, depth + 1);
+            }
+        } else if let Some(object) = value.as_object() {
+            if let Some(id) = object
+                .get("$artifact")
+                .or_else(|| object.get("artifact_id"))
+                .and_then(Value::as_str)
+            {
+                if seen.insert(id.to_string()) {
+                    names.push(
+                        object
+                            .get("filename")
+                            .or_else(|| object.get("name"))
+                            .and_then(Value::as_str)
+                            .unwrap_or(id)
+                            .to_string(),
+                    );
+                }
+            } else {
+                for child in object.values() {
+                    collect(child, names, seen, depth + 1);
+                }
+            }
+        }
+    }
+    let mut names = Vec::new();
+    let mut seen = HashSet::new();
+    for key in [
+        "attachments",
+        "files",
+        "artifacts",
+        "video_artifact",
+        "audio_artifact",
+        "music_artifact",
+    ] {
+        if let Some(value) = meta.get(key) {
+            collect(value, &mut names, &mut seen, 0);
+        }
+    }
+    if meta.get("image_artifact").is_none() {
+        if let Some(value) = meta.get("artifact") {
+            collect(value, &mut names, &mut seen, 0);
+        }
+    }
+    names
 }
 
 /// The turn's verdict AS THE SERVER WORDED IT (`output.stop_reason`).
@@ -623,6 +685,11 @@ pub struct StopVerdict {
     pub headline: String,
     /// What to do about it (may be empty).
     pub remedy: String,
+}
+
+struct ProvisionalConclusion {
+    notice: String,
+    summary: String,
 }
 
 #[derive(Default)]
@@ -804,6 +871,10 @@ pub struct Fold {
     /// Lane B verified the incident's root held the words the artifact
     /// fetch lost to one transport blip).
     unresolved_offload: Option<String>,
+    /// A status-only completion can race its output observation. A later own
+    /// completion may correct this turn's provisional notice, never a prior turn
+    /// or a failed/cancelled run. The exact note identifies its existing card.
+    unresolved_terminal: Option<ProvisionalConclusion>,
 }
 
 /// The attributed form of the newest reasoning gist — see
@@ -857,6 +928,7 @@ impl Fold {
         // A prior turn's unresolved answer card is history — the new
         // turn must not reconcile into it.
         self.unresolved_offload = None;
+        self.unresolved_terminal = None;
         // F9: a prior run/turn that died mid-LLM-call must not arm the
         // "model call Nm — provider may be slow" hint on the new run.
         self.clear_llm_inflight();
@@ -1628,7 +1700,9 @@ impl Fold {
         let answer_source = rec_run == self.root_run_id
             || (!self.agent_run_id.is_empty() && rec_run == self.agent_run_id);
         if answer_source
-            && !self.finished
+            && (!self.finished
+                || (self.unresolved_terminal.is_some()
+                    && (!self.finish_on_root_only || rec_run == self.root_run_id)))
             && status == "completed"
             && protocol::is_run_output_record(rec)
         {
@@ -1647,6 +1721,7 @@ impl Fold {
                     ]
                     .iter()
                     .any(|k| m.get(*k).is_some())
+                        || !attached_output_names(m).is_empty()
                 })
                 .unwrap_or(false);
             let usable = out
@@ -1679,6 +1754,9 @@ impl Fold {
                 // end concludes. Images still fetch (interim artifacts
                 // are real output either way).
                 let concludes = !self.finish_on_root_only || rec_run == self.root_run_id;
+                if concludes {
+                    self.clear_missing_final();
+                }
                 // When the model answered without a tool call, the last
                 // cycle's words ARE the answer: show them once, as the
                 // answer, not as a "cycle N" row and again below it
@@ -1708,6 +1786,12 @@ impl Fold {
                     });
                 }
                 if let Some(meta) = &out.meta {
+                    let files = attached_output_names(meta);
+                    if !files.is_empty() {
+                        self.push_item(Item::Info {
+                            text: format!("📎 {}", files.join(" · ")),
+                        });
+                    }
                     if let Some(artifact) = meta.get("image_artifact") {
                         let aid = artifact
                             .get("$artifact")
@@ -1755,7 +1839,7 @@ impl Fold {
                     // there is folded by no one).
                     self.steer_run_id.clear();
                 }
-            } else if protocol::is_flow_end_record(rec) {
+            } else if !self.finished && protocol::is_flow_end_record(rec) {
                 // The answer-lane run's own COMPLETION record
                 // (`result.completed == true` — written only by the
                 // runtime's terminal appenders) with NO readable output:
@@ -1766,9 +1850,7 @@ impl Fold {
                 // poller — the composer-captured-for-hours shape.
                 let concludes = !self.finish_on_root_only || rec_run == self.root_run_id;
                 if concludes {
-                    self.push_item(Item::Info {
-                        text: "the run completed without a readable final answer — /status shows the run; /history replays this session".into(),
-                    });
+                    self.note_missing_final(MISSING_FINAL);
                     self.finished = true;
                     self.activity.clear();
                     self.pending_wait = None;
@@ -1813,6 +1895,7 @@ impl Fold {
             let err = protocol::error_from_record(rec);
             self.push_item(Item::Error { text: err });
             if rec_run == self.root_run_id {
+                self.unresolved_terminal = None;
                 self.finished = true;
                 // `failed` was declared but never set (exec's exit code and
                 // the queue's pause-on-failure both read it).
@@ -1977,13 +2060,68 @@ impl Fold {
         };
         let note = format!("{word}{tail}");
         self.done_note = note.clone();
-        self.push_item(Item::Info {
-            text: format!("{glyph} {note}"),
+        let summary = format!("{glyph} {note}");
+        if let Some(provisional) = self.unresolved_terminal.as_mut() {
+            provisional.summary = summary.clone();
+        }
+        self.push_item(Item::Info { text: summary });
+    }
+
+    fn note_missing_final(&mut self, note: &str) {
+        self.unresolved_terminal = Some(ProvisionalConclusion {
+            notice: note.to_owned(),
+            summary: String::new(),
         });
+        self.push_item(Item::Info { text: note.into() });
+    }
+
+    /// Replace only this turn's provisional conclusion before normal final-output
+    /// handling. Searching backward tolerates transcript truncation; a new turn
+    /// clears the gate, and a received answer clears it before any duplicate end.
+    fn clear_missing_final(&mut self) {
+        let Some(provisional) = self.unresolved_terminal.take() else {
+            return;
+        };
+        // The provisional verdict belongs to the same replaceable conclusion,
+        // even if bounded scrollback already evicted its visible markers.
+        self.stopped_short = None;
+        self.stop = None;
+        let notice_index = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, Item::Info { text } if text == &provisional.notice));
+        let summary_index = self
+            .items
+            .iter()
+            .rposition(|item| matches!(item, Item::Info { text } if text == &provisional.summary));
+        match (notice_index, summary_index) {
+            (Some(start), Some(end)) if end >= start => {
+                // Verdict warnings/notices between these markers belong to
+                // the provisional completion too, regardless of summary glyph.
+                self.items.drain(start..=end);
+            }
+            (None, Some(end)) => {
+                // Prefix eviction can split the conclusion. If its notice was
+                // evicted, surviving verdict rows are necessarily the oldest
+                // non-standing rows. Anchor on the exact owned summary; retain
+                // the standing truncation notice at index zero.
+                let start = if self.truncated_notice_added { 1 } else { end };
+                if start <= end {
+                    self.items.drain(start..=end);
+                }
+            }
+            (Some(index), _) => {
+                self.items.remove(index);
+            }
+            (None, None) => {}
+        }
     }
 
     /// The runner observed the root run reach a terminal status.
     pub fn run_terminal(&mut self, status: &str) {
+        if matches!(status, "failed" | "cancelled") {
+            self.unresolved_terminal = None;
+        }
         self.activity.clear();
         self.pending_wait = None;
         self.clear_llm_inflight();
@@ -2001,7 +2139,7 @@ impl Fold {
         }
         if !self.finished {
             match status {
-                "completed" => {}
+                "completed" => self.note_missing_final(MISSING_FINAL),
                 "cancelled" => self.push_item(Item::Info {
                     text: "run cancelled".into(),
                 }),
@@ -2058,6 +2196,9 @@ impl Fold {
         if status == "unknown" {
             return;
         }
+        if run_id == self.agent_run_id && status != "completed" {
+            self.unresolved_terminal = None;
+        }
         // A terminal subrun can never be mid-call again: drop ITS inflight
         // clock entries BEFORE the remaining early returns — a cancelled
         // lane (or a goal iteration under finish_on_root_only) whose
@@ -2088,9 +2229,7 @@ impl Fold {
             // ended without ANY readable conclusion record. Say so and
             // free the composer (the alternative is the forever-spinner).
             "completed" => {
-                self.push_item(Item::Info {
-                    text: "the agent run completed without a readable final answer — /status shows the run; /history replays this session".into(),
-                });
+                self.note_missing_final(MISSING_AGENT_FINAL);
             }
             "cancelled" => {
                 self.push_item(Item::Info {
@@ -2629,6 +2768,30 @@ impl Fold {
 /// `finish_tool` covers id-less providers.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn attached_output_files_and_json_strings_remain_readable() {
+        let files = serde_json::json!({"attachments":[{"$artifact":"file","filename":"report.pdf"}],"scratchpad":{"$artifact":"internal"}});
+        assert_eq!(super::attached_output_names(&files), vec!["report.pdf"]);
+        let mut fold = super::Fold::new();
+        fold.begin_run("root");
+        fold.apply("root", &serde_json::json!({"run_id":"root","status":"completed","result":{"completed":true,"output":files}}));
+        assert!(fold.finished, "a file-only answer concludes");
+        assert!(
+            fold.items
+                .iter()
+                .any(|item| matches!(item,super::Item::Info{text} if text.contains("report.pdf"))),
+            "file appears beside answer"
+        );
+
+        let raw = serde_json::json!("{\"results\":[{\"url\":\"https://example.org\"}]}");
+        let formatted = super::value_block(Some(&raw));
+        assert!(formatted.contains('\n'));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&formatted).unwrap()["results"][0]["url"],
+            "https://example.org"
+        );
+    }
+
     use super::*;
 
     /// Two distinct calls must never collapse onto one card.
@@ -4349,6 +4512,241 @@ mod tests {
             crate::exec::exit_code_for_status_with_verdict("cancelled", true),
             130
         );
+    }
+
+    #[test]
+    fn late_canonical_answer_repairs_a_status_only_completion_exactly_once() {
+        for source in ["root", "agent1"] {
+            let mut fold = Fold::new();
+            fold.begin_run("root");
+            wire_agent_subrun(&mut fold, "root", "agent1");
+            fold.apply("agent1", &json!({"run_id":"agent1", "step_id":"last-cycle",
+                "node_id":"reason", "status":"completed", "effect":{"type":"llm_call"},
+                "result":{"content":"The actual answer.", "usage":{"input_tokens":10,"output_tokens":3}}}));
+            if source == "root" {
+                fold.run_terminal("completed");
+            } else {
+                fold.subrun_terminal(source, "completed");
+            }
+            assert!(fold.finished);
+            assert!(fold.items.iter().any(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer"))));
+            let done = json!({"run_id":source,"node_id":"done","status":"completed",
+                "result":{"completed":true,"output":{"answer":"The actual answer."}}});
+            fold.apply(source, &done);
+            fold.apply(source, &done);
+            fold.apply(
+                "root",
+                &json!({"run_id":"root","node_id":"end","status":"completed",
+                "result":{"completed":true,"output":{"response":"The actual answer."}}}),
+            );
+            assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Assistant { text, final_answer:true } if text == "The actual answer.")).count(),1);
+            assert!(!fold.items.iter().any(
+                |i| matches!(i, Item::Thinking { content, .. } if content == "The actual answer.")
+            ));
+            assert!(!fold.items.iter().any(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer"))));
+            assert_eq!(
+                fold.items
+                    .iter()
+                    .filter(|i| matches!(i, Item::Info { text } if text.starts_with("✓ done")))
+                    .count(),
+                1
+            );
+            assert_eq!(fold.stats.llm_calls, 1);
+        }
+    }
+
+    #[test]
+    fn late_final_replaces_provisional_budget_verdict_and_summary_once() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        let output = json!({"outcome":"iteration_budget","iterations":2,
+            "notices":[{"severity":"warning","text":"Stopped for budget."}]});
+        fold.apply(
+            "root",
+            &json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":output}}),
+        );
+        assert!(fold.stopped_short.is_some());
+        let mut answer = output;
+        answer["answer"] = json!("Partial answer.");
+        let completed = json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":answer}});
+        fold.apply("root", &completed);
+        fold.apply("root", &completed);
+        assert_eq!(
+            fold.items
+                .iter()
+                .filter(|i| matches!(i,Item::Info{text} if text.starts_with("⚠ ")))
+                .count(),
+            1
+        );
+        assert_eq!(
+            fold.items
+                .iter()
+                .filter(|i| matches!(i,Item::Info{text} if text=="Stopped for budget."))
+                .count(),
+            1
+        );
+        assert_eq!(fold.items.iter().filter(|i|matches!(i,Item::Assistant{text,final_answer:true} if text=="Partial answer.")).count(),1);
+        assert!(!fold.items.iter().any(
+            |i| matches!(i,Item::Info{text} if text.contains("without a readable final answer"))
+        ));
+        assert_eq!(fold.stopped_short, Some(2));
+    }
+
+    #[test]
+    fn late_final_replaces_provisional_verdict_after_scrollback_eviction() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.apply(
+            "root",
+            &json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":{"outcome":"iteration_budget","iterations":2,
+                "stop_reason":{"code":"iteration_budget","finished":false,"budget_exhausted":true,
+                    "label":"Budget stop","headline":"Budget exhausted","remedy":"Continue"}}}}),
+        );
+        assert_eq!(fold.stopped_short, Some(2));
+        assert!(fold.stop.is_some());
+        for n in 0..MAX_ITEMS + TRUNCATE_CHUNK + 20 {
+            fold.push_item(Item::Info {
+                text: format!("Late detail {n}"),
+            });
+        }
+        assert!(fold.truncated());
+        assert!(!fold.items.iter().any(|item| matches!(item, Item::Info { text } if text.contains("without a readable final answer"))));
+        fold.apply("root", &json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":{"answer":"Canonical answer","outcome":"final_answer"}}}));
+        assert!(fold.finished);
+        assert_eq!(fold.stopped_short, None);
+        assert_eq!(fold.stop, None);
+        assert!(fold.done_note.starts_with("done"));
+        assert_eq!(fold.items.iter().filter(|item| matches!(item, Item::Assistant { text, final_answer:true } if text=="Canonical answer")).count(),1);
+    }
+
+    #[test]
+    fn late_final_removes_a_partially_evicted_provisional_conclusion() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        for n in 0..TRUNCATE_CHUNK {
+            fold.push_item(Item::Info {
+                text: format!("Earlier detail {n}"),
+            });
+        }
+        fold.apply(
+            "root",
+            &json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":{"outcome":"iteration_budget","iterations":2,
+                "notices":[{"severity":"warn","text":"Provisional budget warning"}],
+                "stop_reason":{"code":"iteration_budget","finished":false,"budget_exhausted":true,
+                    "label":"Budget stop","headline":"Budget exhausted","remedy":"Continue"}}}}),
+        );
+        let old_summary = fold.unresolved_terminal.as_ref().unwrap().summary.clone();
+        for n in 0..MAX_ITEMS + TRUNCATE_CHUNK {
+            fold.push_item(Item::Info {
+                text: format!("Later detail {n}"),
+            });
+            if fold.truncated() {
+                break;
+            }
+        }
+        assert!(fold.truncated());
+        assert!(!fold.items.iter().any(|item| matches!(item, Item::Info { text } if text.contains("without a readable final answer"))));
+        assert!(fold
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Info { text } if text==&old_summary)));
+        assert!(fold
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Info { text } if text=="Provisional budget warning")));
+        fold.apply("root", &json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":{"answer":"Canonical answer","outcome":"final_answer"}}}));
+        assert_eq!(fold.stopped_short, None);
+        assert_eq!(fold.stop, None);
+        assert!(!fold.items.iter().any(|item| matches!(item, Item::Info { text } if text==&old_summary || text=="Provisional budget warning")));
+        assert!(
+            matches!(fold.items.first(),Some(Item::Info { text }) if text.starts_with("[#TRUNCATION]"))
+        );
+        assert_eq!(
+            fold.items
+                .iter()
+                .filter(|item| matches!(item, Item::Info { text } if text.starts_with("✓ done")))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn provisional_completion_does_not_promote_cycles_helpers_or_cancelled_answers() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        wire_agent_subrun(&mut fold, "root", "agent1");
+        fold.subrun_terminal("agent1", "completed");
+        let empty = json!({"run_id":"agent1","status":"completed",
+            "result":{"completed":true,"output":{"unknown":"no answer"}}});
+        fold.apply("agent1", &empty);
+        fold.apply("agent1", &empty);
+        assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer"))).count(),1);
+        fold.apply(
+            "helper",
+            &json!({"run_id":"helper","status":"completed",
+            "result":{"completed":true,"output":{"answer":"Helper words"}}}),
+        );
+        assert!(!fold
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Assistant { .. })));
+        for status in ["cancelled", "failed"] {
+            let mut blocked = Fold::new();
+            blocked.begin_run("root");
+            wire_agent_subrun(&mut blocked, "root", "agent1");
+            blocked.subrun_terminal("agent1", "completed");
+            blocked.run_terminal(status);
+            blocked.apply(
+                "agent1",
+                &json!({"run_id":"agent1","status":"completed",
+                "result":{"completed":true,"output":{"answer":"Do not resurrect"}}}),
+            );
+            assert!(!blocked
+                .items
+                .iter()
+                .any(|i| matches!(i, Item::Assistant { .. })));
+        }
+        fold.begin_run("next-root");
+        fold.apply(
+            "agent1",
+            &json!({"run_id":"agent1","status":"completed",
+            "result":{"completed":true,"output":{"answer":"Stale previous turn"}}}),
+        );
+        assert!(!fold
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Assistant { .. })));
+    }
+
+    #[test]
+    fn late_offloaded_completion_uses_the_existing_fetch_lane() {
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        wire_agent_subrun(&mut fold, "root", "agent1");
+        fold.subrun_terminal("agent1", "completed");
+        let effects = fold.apply(
+            "root",
+            &json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":{"$artifact":"answer-artifact"}}}),
+        );
+        assert!(
+            matches!(effects.as_slice(), [FoldEffect::FetchAnswer { artifact_id, .. }] if artifact_id == "answer-artifact")
+        );
+        assert!(!fold.items.iter().any(
+            |i| matches!(i, Item::Info { text } if text.contains("without a readable final answer"))
+        ));
+        fold.apply(
+            "root",
+            &json!({"run_id":"root","status":"completed",
+            "result":{"completed":true,"output":{"response":"Recovered answer"}}}),
+        );
+        assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Assistant { text, final_answer:true } if text == "Recovered answer")).count(),1);
     }
 
     #[test]

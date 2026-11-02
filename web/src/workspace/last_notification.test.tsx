@@ -22,7 +22,7 @@ const withNotice = (n: unknown): AutomationSummary => ({ ...base(), last_notific
 const FAILED_TEXT = NOTICES.failed.text;
 
 const card = (s: AutomationSummary) =>
-  renderToStaticMarkup(<AutomationCard summary={s} selected={false} busy={false} nowMs={NOW} onSelect={() => {}} onToggleActive={() => {}} />);
+  renderToStaticMarkup(<AutomationCard summary={s} selected={false} busy={false} nowMs={NOW} onSelect={() => {}} />);
 const header = (s: AutomationSummary) =>
   renderToStaticMarkup(
     <AutomationHeaderBar

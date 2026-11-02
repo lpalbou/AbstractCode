@@ -1,0 +1,37 @@
+/* Session facts are controlled by the host; opening never clears attention. */
+.af-session-card { --af-session-bg: color-mix(in srgb, var(--bg-primary) 88%, #000); --af-session-fg: var(--text-primary); --af-session-muted: color-mix(in srgb, var(--text-secondary) 75%, var(--text-primary)); --af-session-new: #28c5dc; display: flex; align-items: center; gap: 2px; min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid transparent; border-radius: 16px; background: var(--af-session-bg); color: var(--af-session-fg); }
+:root:is(.theme-light, .theme-solarized-light, .theme-catppuccin-latte, .theme-rose-pine-dawn, .theme-one-light, .theme-everforest-light) .af-session-card { --af-session-new: #087f94; --af-session-fg: color-mix(in srgb, var(--text-primary) 75%, #000); --af-session-muted: color-mix(in srgb, var(--text-secondary) 75%, #000); }
+.af-session-card[data-selected] { background: color-mix(in srgb, var(--accent) 4%, var(--af-session-bg)); box-shadow: inset 0 0 0 1px var(--ui-border-2); }
+.af-session-card[data-unread] { border-color: var(--af-session-new); background: color-mix(in srgb, var(--af-session-new) 6%, var(--af-session-bg)); }
+.af-session-card[data-attention] { border-color: var(--warning); background: color-mix(in srgb, var(--warning) 6%, var(--af-session-bg)); }
+.af-session-card__open { flex: 1; min-width: 0; min-height: 64px; padding: 9px 10px; border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.af-session-card__open:focus-visible, .af-session-card__archive:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.af-session-card__heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.af-session-card__title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: max(13px, var(--font-size-sm, 13px)); font-weight: 400; line-height: 1.35; }
+.af-session-card__marker { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--af-session-new); }
+.af-session-card__marker.is-attention { background: var(--warning); border-radius: 1px; transform: rotate(45deg); }
+.af-session-card__marker.is-failed { background: var(--error); }
+.af-session-card__marker.is-working { background: transparent; border: 2px solid var(--af-session-new); border-right-color: transparent; box-sizing: border-box; width: 9px; height: 9px; flex-basis: 9px; animation: af-session-working 1s linear infinite; }
+.af-session-card__meta { display: flex; align-items: center; gap: 9px; margin-top: 4px; color: var(--af-session-muted); font-size: var(--font-size-xs, 12px); line-height: 1.3; min-width: 0; }
+.af-session-card__meta > span { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+.af-session-card__meta svg { flex-shrink: 0; }
+.af-session-card__time { overflow: hidden; }
+.af-session-card__time > span { overflow: hidden; text-overflow: ellipsis; }
+.af-session-card__attention { color: color-mix(in srgb, var(--warning) 75%, var(--af-session-fg)); font-weight: 400; }
+.af-session-card__archive { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; border: 0; border-radius: 6px; margin-right: 6px; background: transparent; color: var(--error); cursor: pointer; opacity: 0; pointer-events: none; }
+.af-session-card:hover .af-session-card__archive, .af-session-card__open:focus-visible + .af-session-card__archive, .af-session-card__archive:focus-visible { opacity: 1; visibility: visible; pointer-events: auto; }
+.af-session-card__archive:hover { background: color-mix(in srgb, var(--error) 10%, transparent); }
+@media (hover: none), (pointer: coarse) { .af-session-card__archive { flex-basis: 44px; width: 44px; height: 44px; opacity: 1; visibility: visible; pointer-events: auto; } }
+.af-session-card button:disabled { opacity: .5; cursor: not-allowed; }
+.af-session-card .af-session-card__archive:disabled { opacity: 0; }
+.af-session-card:hover .af-session-card__archive:disabled, .af-session-card__open:focus-visible + .af-session-card__archive:disabled { opacity: .5; }
+@media (hover: none), (pointer: coarse) { .af-session-card .af-session-card__archive:disabled { opacity: .5; } }
+@keyframes af-session-working { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .af-session-card__marker.is-working { animation: none; } }
+
+@media (pointer: coarse) { .af-session-card__meta { font-size: max(14px, var(--font-size-xs, 12px)); } }
+:root .af-session-card.af-automation-card { --af-session-new: var(--warning); }
+.af-automation-card .af-session-card__meta { flex-wrap: wrap; row-gap: 4px; }
+.af-automation-card__schedule { flex-shrink: 1; overflow: hidden; }
+.af-automation-card__schedule > span { overflow: hidden; text-overflow: ellipsis; }
+.af-session-card__meta > .af-automation-card__unseen { margin-left: auto; justify-content: center; min-width: 18px; box-sizing: border-box; padding: 1px 5px; border-radius: 9px; background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); font-weight: 400; }

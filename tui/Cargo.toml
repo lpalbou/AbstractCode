@@ -1,6 +1,6 @@
 [package]
 name = "abstractcode"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2021"
 license = "MIT"
 # MSRV floor comes from the locked dependency set (abstracttui 0.6.0
@@ -111,7 +111,7 @@ path = "src/main.rs"
 # header's workflow/model/gateway widgets and the status bar's
 # workspace/session/theme widgets are action spans: the engine hit-tests
 # them, so the chrome stores no cell coordinate.
-abstracttui = "0.7.0"
+abstracttui = { version = "0.7.1", features = ["avatar"] }
 # HTTP client (blocking, small): gateway calls + SSE ledger streaming.
 # The explicit feature set = ureq's defaults, pinned deliberately: "tls" is
 # rustls (remote HTTPS gateways work with zero system OpenSSL — the

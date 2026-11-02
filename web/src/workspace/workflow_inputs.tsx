@@ -16,6 +16,7 @@ type WorkflowInputsProps = {
   onEditorError?: (error: string) => void;
   defaultModel?: { provider: string; model: string };
   promptProperty?: string;
+  concise?: boolean;
 };
 
 /** Chat owns prompt/context; Settings owns the common agent overrides. Other
@@ -63,7 +64,7 @@ export function AgentWorkflowInputs(
       group.forEach((name) => advancedFields.add(name));
   return (
     <>
-      <section
+      {!props.concise || requiredFields.size ? <section
         className="code-settings-section"
         aria-label="Automatic agent configuration"
       >
@@ -75,7 +76,7 @@ export function AgentWorkflowInputs(
           Optional values use workflow and Gateway defaults. Use Settings for
           model, workspace and tool permission overrides.
         </p>
-      </section>
+      </section> : null}
       {requiredFields.size ? (
         <WorkflowInputs
           {...props}

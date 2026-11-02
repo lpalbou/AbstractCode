@@ -9,8 +9,8 @@ use crate::store::{Conn, Phase, Store};
 use crate::ui::UiCtx;
 
 /// Semantic hit targets of the chrome (abstracttui 0187 action ids):
-/// the header's workflow, route and gateway widgets, the status bar's
-/// workspace, session and theme widgets, and the attention chip. The
+/// the header's workflow, route, capability and account widgets, the
+/// status bar's workspace/session instruments, and the attention chip. The
 /// engine hit-tests the spans these tag at draw time; the chrome never
 /// stores a cell coordinate. `ui::chrome_action` maps each to the modal
 /// its slash command opens.
@@ -23,10 +23,26 @@ pub const ACT_GATEWAY: &str = "chrome.gateway";
 pub const ACT_WORKSPACE: &str = "chrome.workspace";
 /// The session id → the Sessions modal (`/sessions`).
 pub const ACT_SESSION: &str = "chrome.session";
-/// The theme name → the theme dropdown.
+/// The top-bar Theme control → the theme dropdown.
 pub const ACT_THEME: &str = "chrome.theme";
 /// "Automations · N waiting" → the automation that waits.
 pub const ACT_WAITING: &str = "chrome.waiting";
+/// Attached skills → the skills picker (`/skills`).
+pub const ACT_SKILLS: &str = "chrome.skills";
+/// MCP server count → the gateway registry (`/mcp`).
+pub const ACT_MCP: &str = "chrome.mcp";
+/// Context and token meters → prompt-cache and usage details (`/cache`).
+pub const ACT_CACHE: &str = "chrome.cache";
+/// GPU and memory meters → gateway host resources (`/resources`).
+pub const ACT_RESOURCES: &str = "chrome.resources";
+/// The keys pointer → the keys and commands reference (`/help`).
+pub const ACT_HELP: &str = "chrome.help";
+pub const ACT_TOOLS: &str = "chrome.tools";
+pub const ACT_DOCS: &str = "chrome.docs";
+pub const ACT_ABOUT: &str = "chrome.about";
+pub const ACT_ACCOUNT: &str = "chrome.account";
+pub const ACT_MENU: &str = "chrome.menu";
+pub const ACT_CONNECTION: &str = "chrome.connection";
 
 /// Focus of the two chrome action hosts (header, status bar). Root scope:
 /// it outlives the chrome's rebuilds. The root's type-to-prompt capture
@@ -88,6 +104,10 @@ impl ChromeFocus {
 /// defaults" resolution shared by the header and the idle fact card
 /// (IDLE-1). Reads signals: call inside a reactive scope.
 pub fn route_label(store: Store) -> String {
+    route_label_for_header(store, false)
+}
+
+fn route_label_for_header(store: Store, compact: bool) -> String {
     let provider = store.provider.get();
     let model = store.model.get();
     let base = match (provider.is_empty(), model.is_empty()) {
@@ -119,7 +139,11 @@ pub fn route_label(store: Store) -> String {
             if resolved.is_empty() {
                 "gateway defaults".to_string()
             } else {
-                format!("gateway defaults ({resolved})")
+                if compact {
+                    format!("{resolved} (default)")
+                } else {
+                    format!("gateway defaults ({resolved})")
+                }
             }
         }
         (false, true) => provider,
@@ -158,42 +182,22 @@ pub fn route_label(store: Store) -> String {
 
 /// The header's middle-span facts (HDR-1): workspace mode (the folder is
 /// the status bar's middle widget since 0.12.0),
-/// `skills N · mcp N` when nonzero, session token total at rest. Pure
-/// over its inputs so the fill rule is testable; the ~180 blank columns
-/// at wide widths were the literal screenshot complaint.
-pub fn header_facts(
-    workspace_mode: &str,
-    skills: usize,
-    mcp: usize,
-    idle: bool,
-    session_tokens: u64,
-) -> Vec<String> {
-    let mut facts: Vec<String> = Vec::new();
-    facts.push(if workspace_mode.trim().is_empty() {
-        "server-managed".to_string()
+/// independent of the capability menu and footer meters. Pure over its
+/// inputs so width allocation stays testable.
+pub fn header_facts(workspace_mode: &str) -> Vec<(String, &'static str)> {
+    let label = if workspace_mode.trim().is_empty() {
+        "server-managed"
     } else {
-        workspace_mode.trim().to_string()
-    });
-    if skills > 0 {
-        facts.push(format!("skills {skills}"));
-    }
-    if mcp > 0 {
-        facts.push(format!("mcp {mcp}"));
-    }
-    // Session token total AT REST only: during a run the activity strip
-    // carries the live numbers — a second live counter would just race it.
-    if idle && session_tokens > 0 {
-        facts.push(format!("{} tk", fmt_tokens(session_tokens)));
-    }
-    facts
+        workspace_mode.trim()
+    };
+    vec![(label.to_string(), ACT_WORKSPACE)]
 }
 
 /// Header: wordmark · workflow · provider/model · entity chips · facts on
-/// the left; the gateway beside its connection light on the right. The
-/// workflow, provider/model and gateway+light are WIDGETS (abstracttui
-/// 0187 action spans): a click, or Tab to the header then ←/→ and
-/// Enter/Space, opens the workflow picker, the model picker and the
-/// `/status` connection modal. Chips render only when ≥1 conversation
+/// the left; Docs, Theme, About and identity/status on the right (Menu
+/// at narrow widths). Semantic action spans handle mouse and keyboard
+/// activation. Tools groups the capability panels; workspace mode opens
+/// Workspace. Chips render only when ≥1 conversation
 /// exists; the focused chip is highlighted; a running turn's chip
 /// carries elapsed.
 pub fn header(
@@ -208,7 +212,6 @@ pub fn header(
     ChromeFocus::clear_on_teardown(scx, focus.header);
     let tokens = *t;
     // Owned before the 'static render closure: `ctx` is only borrowed.
-    let gateway = ctx.gateway_label.clone();
     let action_ctx = ctx.clone();
     // The ACTION HOST is this stable element; the line below it re-renders
     // every tick while a run is live, so the focus lives one level up and
@@ -229,7 +232,7 @@ pub fn header(
             }
         });
         let conn = store.conn.get();
-        let gateway = gateway.clone();
+        let account = store.account.get();
         // Entity chips (inside this same line — no CHROME_ROWS change).
         // spin is read ONLY while a turn/run is active, so the elapsed
         // repaints without waking the header every frame otherwise.
@@ -257,17 +260,12 @@ pub fn header(
                 .collect()
         });
         let route = route_label(store);
+        let compact_route = route_label_for_header(store, true);
         // HDR-1: cockpit facts fill the middle (dim, clipped whole-run,
         // painted AFTER chips so chips keep priority when space is tight).
         // The folder is the status bar's middle widget (its click opens
         // the authorised workspaces), so the header facts start at the mode.
-        let facts = header_facts(
-            &store.workspace_mode.get(),
-            store.selected_skills.with(|s| s.len()),
-            store.mcp_servers.with(|m| m.len()),
-            phase == Phase::Idle,
-            store.totals.with(|s| s.total_tokens),
-        );
+        let facts = header_facts(&store.workspace_mode.get());
         Element::new()
             .style(LayoutStyle::line(1))
             .draw(move |canvas, rect| {
@@ -275,19 +273,19 @@ pub fn header(
                 // Right side measured FIRST so the left run clips under it
                 // (overprint at narrow widths was a live finding).
                 // Distinct glyphs, not just color (color-blind honesty).
-                let (orb, orb_ink) = match &conn {
+                let (_orb, orb_ink) = match &conn {
                     Conn::Ok => ("●", t.ok),
-                    Conn::Unknown => ("◌", t.text_faint),
+                    Conn::Unknown => ("◌", t.text_muted),
                     Conn::Down(..) => ("✗", t.error),
                 };
                 // The gateway is a connection fact, so it sits beside its
                 // status indicator at the top right.
-                let right = format!("{} ", text::truncate_ellipsis(&gateway, 28));
-                let right_w = text::width(&right) + 2;
-                let rx = (rect.right() - right_w).max(rect.x);
-
+                let actions = super::top_bar::right_plan(rect, &account, &conn);
+                let rx = actions.first().map(|a| a.rect.x).unwrap_or(rect.right());
+                let tools_w = text::width("Tools ▾");
+                let tools_x = (rx - 3 - tools_w).max(rect.x);
                 let mut x = rect.x + 1;
-                let clip_to = (rx - 1).max(rect.x);
+                let clip_to = (tools_x - 3).max(rect.x);
                 let print_clipped = |canvas: &mut dyn StyledCanvas, x: &mut i32, s: &str, ink| {
                     let avail = (clip_to - *x).max(0);
                     if avail <= 0 {
@@ -314,23 +312,50 @@ pub fn header(
                             &abstracttui::ui::ActionId::new(id),
                         );
                     };
-                print_clipped(canvas, &mut x, "▲ AbstractCode", t.accent);
-                print_clipped(canvas, &mut x, "  ", t.text);
-                print_action(canvas, &mut x, &workflow, t.text, ACT_WORKFLOW);
-                print_clipped(canvas, &mut x, "  ·  ", t.text_faint);
-                print_action(canvas, &mut x, &route, t.text_muted, ACT_MODEL);
-                // Chips render WHOLE or not at all; the tail collapses to
-                // an honest "+N" instead of a mangled fragment ("◆eph…" —
-                // cycle-2 UX review at 100 cols with 3 conversations).
-                // The FOCUSED chip always paints (first, when it would
-                // otherwise fall into the tail) — PAINT order only: the
-                // Alt+E cycle order is the convos vec order and never
-                // follows this reordering (see `convo::chip_paint_plan`).
+                print_clipped(
+                    canvas,
+                    &mut x,
+                    if rect.w < 80 {
+                        "▲ Code"
+                    } else {
+                        "▲ AbstractCode"
+                    },
+                    t.accent,
+                );
+                print_clipped(canvas, &mut x, "   ", t.text);
+                let shown_route = if rect.w < 140 { &compact_route } else { &route };
                 let widths: Vec<usize> = chips
                     .iter()
                     .map(|(c, _)| text::width(c).max(0) as usize)
                     .collect();
-                let focused_ix = chips.iter().position(|(_, f)| *f);
+                let focused_ix = chips.iter().position(|(_, focused)| *focused);
+                // Reserve the focused conversation (or first chip) before
+                // fitting route labels. Hidden conversations keep an honest
+                // count; adding app controls must not hide the active visit.
+                let chip_reserve = widths
+                    .get(focused_ix.unwrap_or(0))
+                    .map(|width| {
+                        *width as i32
+                            + 2
+                            + if widths.len() > 1 {
+                                text::width(&format!("  +{}", widths.len() - 1))
+                            } else {
+                                0
+                            }
+                    })
+                    .unwrap_or(0);
+                let label_end = (clip_to - chip_reserve).max(x);
+                let separator = if chip_reserve > 0 { " · " } else { "   ·   " };
+                let available = (label_end - x - text::width(separator)).max(0);
+                let route_min = text::width(shown_route).min(18).min(available / 2);
+                let wf_budget = (available - route_min).min(32);
+                let wf = text::truncate_ellipsis(&workflow, wf_budget);
+                print_action(canvas, &mut x, &wf, t.text, ACT_WORKFLOW);
+                if label_end > x && wf_budget > 0 {
+                    print_clipped(canvas, &mut x, separator, t.text_faint);
+                }
+                let route = text::truncate_ellipsis(shown_route, (label_end - x).max(0));
+                print_action(canvas, &mut x, &route, t.text_muted, ACT_MODEL);
                 let avail = (clip_to - x).max(0) as usize;
                 let (paint, hidden) = crate::convo::chip_paint_plan(&widths, focused_ix, avail);
                 for ix in paint {
@@ -355,52 +380,95 @@ pub fn header(
                 // already gives workflow/route/chips priority over them.
                 let fact_widths: Vec<usize> = facts
                     .iter()
-                    .map(|f| text::width(f).max(0) as usize)
+                    .map(|(label, _)| text::width(label).max(0) as usize)
                     .collect();
-                let fit = prefix_fit(&fact_widths, 5, 3, (clip_to - x).max(0) as usize);
-                for (i, fact) in facts.iter().take(fit).enumerate() {
-                    let sep = if i == 0 { "  ·  " } else { " · " };
+                let fit = prefix_fit(&fact_widths, 7, 5, (clip_to - x).max(0) as usize);
+                for (i, (fact, action)) in facts.iter().take(fit).enumerate() {
+                    let sep = if i == 0 { "   ·   " } else { "  ·  " };
                     x += canvas.print(Point::new(x, rect.y), sep, t.text_faint, t.surface);
-                    x += canvas.print(Point::new(x, rect.y), fact, t.text_muted, t.surface);
+                    let style = abstracttui::render::Style::new()
+                        .fg(t.text_muted)
+                        .bg(t.surface);
+                    x += canvas.print_action(
+                        Point::new(x, rect.y),
+                        fact,
+                        &style,
+                        &abstracttui::ui::ActionId::new(*action),
+                    );
                 }
-                let mut x2 = rx;
-                // The gateway in MUTED ink: the faint tier measured 2.77:1
-                // on the default theme — below the 3:1 UI floor (review-
-                // current-state §3). Gateway + light are ONE widget: one
-                // tagged rect over both, its own focus ring when it is
-                // the keyboard cursor.
-                let ring = canvas.mark_action(
-                    Rect::new(rx, rect.y, (rect.right() - 1 - rx).max(0), 1),
-                    &abstracttui::ui::ActionId::new(ACT_GATEWAY),
-                );
-                let style = |ink| {
-                    let s = abstracttui::render::Style::new().fg(ink).bg(t.surface);
-                    if ring {
-                        s.reverse()
+                if tools_x + tools_w < rect.right() {
+                    canvas.print_action(
+                        Point::new(tools_x, rect.y),
+                        "Tools ▾",
+                        &abstracttui::render::Style::new().fg(t.text).bg(t.surface),
+                        &abstracttui::ui::ActionId::new(ACT_TOOLS),
+                    );
+                }
+                for action in actions {
+                    let ink = if action.id == ACT_ACCOUNT {
+                        orb_ink
                     } else {
-                        s
-                    }
-                };
-                let label = right.trim_end();
-                x2 += canvas.print_styled(Point::new(x2, rect.y), label, &style(t.text_muted));
-                x2 += canvas.print_styled(Point::new(x2, rect.y), " ", &style(t.text_muted));
-                canvas.print_styled(Point::new(x2, rect.y), orb, &style(orb_ink));
+                        t.text_muted
+                    };
+                    canvas.print_action(
+                        action.rect.origin(),
+                        &action.label,
+                        &abstracttui::render::Style::new().fg(ink).bg(t.surface),
+                        &abstracttui::ui::ActionId::new(action.id),
+                    );
+                }
             })
             .build()
     });
     Element::new()
         .style(LayoutStyle::line(1))
         .role(abstracttui::ui::Role::Region)
-        .access_label("header: workflow, model, gateway")
+        .access_label(
+            "header: workflow, model, workspace, Tools, Docs, Theme, About, account and connection",
+        )
         .focusable()
         .focus_signal(focus.header)
         .on_action({
             let focus = focus.clone();
             move |ectx, id| {
-                if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
-                    ectx.stop_propagation();
-                    focus.activated(ectx);
+                let rect = ectx.current_rect_screen();
+                let plan = super::top_bar::right_plan(
+                    rect,
+                    &store.account.get_untracked(),
+                    &store.conn.get_untracked(),
+                );
+                let anchor = plan
+                    .iter()
+                    .find(|a| a.id == id.as_str())
+                    .map(|a| a.rect)
+                    .unwrap_or_else(|| {
+                        Rect::new(
+                            (plan.first().map(|a| a.rect.x).unwrap_or(rect.right())
+                                - 3
+                                - text::width("Tools ▾"))
+                            .max(rect.x),
+                            rect.y,
+                            text::width("Tools ▾"),
+                            1,
+                        )
+                    });
+                match id.as_str() {
+                    ACT_TOOLS => super::top_bar::open_tools(root, store, &action_ctx, anchor),
+                    ACT_ACCOUNT => super::top_bar::open_account(root, store, &action_ctx, anchor),
+                    ACT_MENU => {
+                        super::top_bar::open_menu(root, store, &action_ctx, anchor, focus.theme)
+                    }
+                    ACT_THEME => {
+                        crate::ui::theme_menu::open(root, &action_ctx, focus.theme, anchor)
+                    }
+                    other => {
+                        if !crate::ui::chrome_action(root, store, &action_ctx, other) {
+                            return;
+                        }
+                    }
                 }
+                ectx.stop_propagation();
+                focus.activated(ectx);
             }
         })
         .child(line)
@@ -1008,6 +1076,7 @@ pub fn composer(
     let anchor = anchor.clone();
     let area = abstracttui::widgets::TextArea::new()
         .state(state)
+        .inset(1, 1)
         // The chat convention: Enter sends, Shift+Enter inserts a newline.
         // Shift+Enter is only REPORTABLE where the kitty keyboard
         // protocol is live (probe-upgraded mid-session since 0.2.2:
@@ -1307,19 +1376,10 @@ pub(crate) fn mem_segment(state: &crate::store::HostState) -> Option<(String, u8
     Some((format!("mem {shown:.0}%{mark}"), sev))
 }
 
-/// Status bar: the always-visible instrument row (REST-1) —
-/// `ctx used/window (%) · session tokens · gpu · skills · mcp · ? help`
-/// — in the LEFT slot, the workspace path + session id in the MIDDLE and
-/// the theme selector on the RIGHT (operator layout 2026-10-28; an
-/// abstracttui 1260 `StatusBar`). The three are widgets: a click, or Tab
-/// to the bar then ←/→ and Enter/Space, opens the authorised workspaces
-/// (`/workspace`), the Sessions modal and the theme dropdown. The key legend moved behind `?`
-/// (and /help): the Python predecessor's law, written after its own
-/// adversary review, is "the footer is the only always-visible surface"
-/// — it must carry NUMBERS, not a legend that is useful once and then
-/// permanent dead weight (it truncated itself at 120 cols carrying
-/// zero facts). Segments render when KNOWN; absence is omission, never
-/// a fabricated zero.
+/// Status bar: context, session token and host resource meters plus Help
+/// on the left; workspace/session in the middle; voice hints on the right.
+/// Semantic widgets open the existing command panels. Unknown metrics are
+/// omitted, never rendered as fabricated zeroes.
 pub fn status_bar(
     t: &TokenSet,
     store: Store,
@@ -1329,13 +1389,11 @@ pub fn status_bar(
     workspace: String,
     focus: ChromeFocus,
 ) -> View {
-    let theme_st = focus.theme;
     ChromeFocus::clear_on_teardown(scx, focus.bar);
     let tokens = *t;
     // abstracttui 1260: a StatusBar with named slots. LEFT = the
-    // instruments (ctx meter, tokens, gpu, mem, skills, mcp, keys pointer),
-    // CENTER = the workspace path + session id, RIGHT = the markers + the
-    // theme. The bar owns the truncation priority (higher survives longer,
+    // instruments (ctx meter, tokens, gpu, mem, keys pointer),
+    // CENTER = the workspace path + session id, RIGHT = voice/phase markers. The bar owns the truncation priority (higher survives longer,
     // whole items never fragment) and the hit targets (0187): no cell
     // coordinate lives here.
     let action_ctx = ctx.clone();
@@ -1361,24 +1419,13 @@ pub fn status_bar(
                 .height(Dimension::Cells(1)),
         )
         .role(abstracttui::ui::Role::Region)
-        .access_label("status bar: workspace, session, theme")
+        .access_label("status bar: instruments, help, workspace, session")
         .focusable()
         .focus_signal(focus.bar)
         .on_action({
             let focus = focus.clone();
             move |ectx, id| {
-                if id.as_str() == ACT_THEME {
-                    // The theme dropdown anchors on the bar's right end, where
-                    // the theme item is flush (the bar's padding is 1 cell).
-                    let bar = ectx.current_rect_screen();
-                    let w = text::width(&crate::ui::theme_menu::trigger_text(
-                        abstracttui::app::current_theme().label,
-                    ));
-                    let anchor = Rect::new((bar.right() - 1 - w).max(bar.x), bar.y, w, 1);
-                    crate::ui::theme_menu::open(root, &action_ctx, theme_st, anchor);
-                    ectx.stop_propagation();
-                    focus.activated(ectx);
-                } else if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
+                if crate::ui::chrome_action(root, store, &action_ctx, id.as_str()) {
                     ectx.stop_propagation();
                     focus.activated(ectx);
                 }
@@ -1389,11 +1436,10 @@ pub fn status_bar(
 }
 
 /// Item priorities of the status bar (higher survives longer). The
-/// session id and the theme are the last to go, then the attention chip,
+/// session id is the last to go, then the attention chip,
 /// the workspace path and the ctx meter; the keys pointer yields first.
 pub mod bar_priority {
     pub const SESSION: i32 = 100;
-    pub const THEME: i32 = 98;
     /// "Automations · N waiting" needs you (R17.1): it outlives the
     /// workspace path, which first tail-truncates, then drops.
     pub const WAITING: i32 = 96;
@@ -1407,8 +1453,6 @@ pub mod bar_priority {
     pub const TOKENS: i32 = 50;
     pub const GPU: i32 = 40;
     pub const MEM: i32 = 35;
-    pub const SKILLS: i32 = 30;
-    pub const MCP: i32 = 25;
     pub const VOICE_HINT: i32 = 15;
     pub const KEYS: i32 = 0;
 }
@@ -1440,7 +1484,12 @@ pub fn status_bar_model(
             1 => t.warn,
             _ => t.text_muted,
         };
-        bar = bar.left(BarItem::new().run(seg, ink).priority(bar_priority::CTX));
+        bar = bar.left(
+            BarItem::new()
+                .run(seg, ink)
+                .priority(bar_priority::CTX)
+                .action(ACT_CACHE),
+        );
     }
     // Session tokens: the in/out split when the provider reports one;
     // splitless providers show the honest total (never fabricated zeros).
@@ -1457,22 +1506,34 @@ pub fn status_bar_model(
         None
     };
     if let Some(s) = tokens {
-        bar = bar.left(BarItem::text(s).priority(bar_priority::TOKENS));
+        bar = bar.left(
+            BarItem::text(s)
+                .priority(bar_priority::TOKENS)
+                .action(ACT_CACHE),
+        );
     }
     // The /gpu meter (OBS-6 seam). Off/Unsupported = omitted.
     match store.gpu.get() {
         crate::store::GpuMeter::Ready(s) => {
-            bar = bar
-                .left(BarItem::text(format!("gpu {:.0}%", s.util_pct)).priority(bar_priority::GPU));
+            bar = bar.left(
+                BarItem::text(format!("gpu {:.0}%", s.util_pct))
+                    .priority(bar_priority::GPU)
+                    .action(ACT_RESOURCES),
+            );
         }
         crate::store::GpuMeter::Pending => {
-            bar = bar.left(BarItem::text("gpu …").priority(bar_priority::GPU));
+            bar = bar.left(
+                BarItem::text("gpu …")
+                    .priority(bar_priority::GPU)
+                    .action(ACT_RESOURCES),
+            );
         }
         crate::store::GpuMeter::Error(_) => {
             bar = bar.left(
                 BarItem::new()
                     .run("gpu err", t.warn)
-                    .priority(bar_priority::GPU),
+                    .priority(bar_priority::GPU)
+                    .action(ACT_RESOURCES),
             );
         }
         crate::store::GpuMeter::Off | crate::store::GpuMeter::Unsupported(_) => {}
@@ -1480,22 +1541,20 @@ pub fn status_bar_model(
     // Host RAM from the LAST /resources fetch (see `mem_segment`).
     if let Some((seg, sev)) = mem_segment(&store.host_state.get()) {
         let ink = if sev == 0 { t.text_muted } else { t.warn };
-        bar = bar.left(BarItem::new().run(seg, ink).priority(bar_priority::MEM));
-    }
-    let skills = store.selected_skills.with(|s| s.len());
-    if skills > 0 {
-        bar = bar.left(BarItem::text(format!("skills {skills}")).priority(bar_priority::SKILLS));
-    }
-    let mcp = store.mcp_servers.with(|m| m.len());
-    if mcp > 0 {
-        bar = bar.left(BarItem::text(format!("mcp {mcp}")).priority(bar_priority::MCP));
+        bar = bar.left(
+            BarItem::new()
+                .run(seg, ink)
+                .priority(bar_priority::MEM)
+                .action(ACT_RESOURCES),
+        );
     }
     // The keys pointer — the whole legend lives behind it; first to yield.
     bar = bar.left(
         BarItem::new()
             .run("?", t.accent)
             .run(" keys + commands", t.text_muted)
-            .priority(bar_priority::KEYS),
+            .priority(bar_priority::KEYS)
+            .action(ACT_HELP),
     );
     // CENTER — where you work and which session this is. The path keeps
     // its TAIL (the basename names it); the session id keeps its tail too
@@ -1528,7 +1587,7 @@ pub fn status_bar_model(
                 .action(ACT_GATEWAY),
         );
     }
-    // RIGHT — the markers, then the theme selector (flush right).
+    // RIGHT — phase and voice markers.
     if store.fold.with(|f| f.root_open_at_conclusion) {
         bar = bar.right(
             BarItem::new()
@@ -1543,15 +1602,7 @@ pub fn status_bar_model(
                 .priority(bar_priority::VOICE_HINT),
         );
     }
-    bar.right(
-        BarItem::new()
-            .run(
-                crate::ui::theme_menu::trigger_text(abstracttui::app::current_theme().label),
-                t.text,
-            )
-            .priority(bar_priority::THEME)
-            .action(ACT_THEME),
-    )
+    bar
 }
 
 /// The folder shown on the bottom line: home-relative (`~/…`) when it
@@ -1734,26 +1785,13 @@ mod tests {
 
     #[test]
     fn header_facts_fill_rule() {
-        // Full house at rest.
         assert_eq!(
-            header_facts("workspace_or_allowed", 2, 1, true, 128_000),
-            vec![
-                "workspace_or_allowed".to_string(),
-                "skills 2".to_string(),
-                "mcp 1".to_string(),
-                "128k tk".to_string(),
-            ]
+            header_facts("workspace_or_allowed"),
+            vec![("workspace_or_allowed".to_string(), ACT_WORKSPACE)]
         );
-        // Empty mode reads server-managed; zero counts are OMITTED (not
-        // "skills 0" noise); tokens only at rest and only when nonzero.
         assert_eq!(
-            header_facts("", 0, 0, true, 0),
-            vec!["server-managed".to_string()]
-        );
-        // During a run the strip owns live numbers — no token fact.
-        assert_eq!(
-            header_facts("", 0, 0, false, 999_999),
-            vec!["server-managed".to_string()]
+            header_facts(""),
+            vec![("server-managed".to_string(), ACT_WORKSPACE)]
         );
     }
 

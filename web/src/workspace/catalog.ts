@@ -1,3 +1,4 @@
+import { isConversationTurn } from "../vendor/abstractsessions/session_cards.js";
 import type { SpeculationValue } from "@abstractframework/ui-kit";
 import {
   streamRepliesRuntime,
@@ -597,7 +598,7 @@ export function normalizeSessionSummaries(
   const groups = new Map<string, Array<{ run: JsonObject; index: number }>>();
   runs.forEach((rawRun, index) => {
     const run = record(rawRun);
-    if (!run || text(run.parent_run_id ?? run.parentRunId)) return;
+    if (!run || !isConversationTurn(run)) return;
     const sessionId = text(run.session_id ?? run.sessionId);
     const runId = text(run.run_id ?? run.runId ?? run.id);
     if (!sessionId || !runId) return;

@@ -1,0 +1,63 @@
+[
+  {
+    "app": "continuum",
+    "speakerVisible": true,
+    "errors": [],
+    "writes": [
+      "/api/connection/gateway"
+    ],
+    "modelRunsStarted": 0
+  },
+  {
+    "app": "code",
+    "speakerVisible": true,
+    "errors": [],
+    "writes": [
+      "/api/connection/gateway"
+    ],
+    "modelRunsStarted": 0
+  },
+  {
+    "app": "entity",
+    "speakerVisible": true,
+    "errors": [],
+    "writes": [
+      "/api/connection/gateway"
+    ],
+    "modelRunsStarted": 0
+  },
+  {
+    "app": "flow",
+    "speakerVisible": true,
+    "errors": [],
+    "writes": [
+      "/api/connection/gateway"
+    ],
+    "modelRunsStarted": 0
+  },
+  {
+    "app": "note",
+    "speakerVisible": true,
+    "errors": [],
+    "writes": [
+      "/api/connection/gateway"
+    ],
+    "modelRunsStarted": 0
+  },
+  {
+    "app": "gateway",
+    "speakerVisible": true,
+    "errors": [],
+    "writes": [],
+    "modelRunsStarted": 0
+  },
+  {
+    "app": "observer",
+    "speakerVisible": true,
+    "errors": [],
+    "writes": [
+      "/api/connection/gateway"
+    ],
+    "modelRunsStarted": 0
+  }
+]

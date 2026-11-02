@@ -1,0 +1,8 @@
+{
+  "version": "0.12.0",
+  "installed_sha256": "3448fc7adeccfb0bfd3c8f6e2675662797216169d1cb885e49359b6f7b995926",
+  "previous_sha256": "94d0f5f9badcc961a074428cb76ba8948fec02c20b4f85566bc8238755d65ad9",
+  "rollback": "/tmp/code-skills-0028-rollback/abstractcode-94d0f5f9badcc961a074428cb76ba8948fec02c20b4f85566bc8238755d65ad9",
+  "code": "c0d6b7d",
+  "engine": "205b55541887441cffd42fb5b6cb1366978b5bf9"
+}

@@ -12,9 +12,10 @@ transcript's source of truth is the gateway's ledger, never client memory.
 flowchart LR
   subgraph terminal [abstractcode process]
     UI[UI thread<br/>AbstractTUI app<br/>signals + views]
-    W[gateway-runner thread<br/>owns all HTTP]
+    W[gateway-runner thread<br/>coding commands + discovery]
     S1[ledger stream thread<br/>root run SSE<br/>+ live reply deltas]
     S2[ledger stream threads<br/>subruns SSE]
+    D[docs worker<br/>separate docs session]
     V[voice threads<br/>TTS stream · dictation]
   end
   BR[voice_bridge.py<br/>Python child process<br/>AbstractVoice: speaker + mic]
@@ -30,6 +31,9 @@ flowchart LR
   W -- "runs/start · commands · discovery<br/>workspace files · about" --> API
   S1 -- "GET ledger/stream (SSE)<br/>step + llm.delta frames" --> API
   S2 -- "GET ledger/stream (SSE)" --> API
+  UI -- "AssistantAsk" --> D
+  D -- "docs/corpus · runs/start<br/>follow docs run" --> API
+  D -- "guarded answer/state posts" --> UI
   V -- "voice/defaults · voice/tts/stream<br/>audio/transcribe" --> API
   V -- "JSON lines: play segment, record" --> BR
   V -- "speaking / recording state (post)" --> UI
@@ -50,6 +54,24 @@ One rule, enforced everywhere: **the UI thread owns every reactive signal**.
   new run flips every previous flag; posted closures additionally re-check
   that their records belong to the fold's current run tree
   (`Fold::is_following`), so a stale stream can never contaminate a new run.
+- Terminal observations drain the final ledger tail before concluding. A completed
+  run snapshot's own output goes through the same final-output parser/source guard
+  as ledger records; status alone cannot discard a readable answer. A late canonical
+  completion can repair this turn's provisional missing-answer conclusion without
+  promoting a reasoning cycle or resurrecting cancelled/failed/previous turns.
+
+## Assistant conversations
+
+The reusable engine ChatPanel owns message layout, scrolling and the composer.
+The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
+the Code corpus; Companion captures an explicitly labelled snapshot of the loaded
+conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
+a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded; bounded history is labelled. A separate worker
+follows that run, keeping coding commands and approval responses responsive.
+Temporary polling errors back off on the existing run; only an explicit retry
+after failure starts another inference. UI posts check both session and operation
+generation before changing the drawer. This client starts no provider process
+and loads no model.
 
 ## Attention follower
 
@@ -239,3 +261,26 @@ when the gateway advertises live replies. See
 - Images render as unicode mosaic in the transcript; pixel-protocol
   placement (kitty, iTerm2) is not used.
 - Windows is unverified for this crate end-to-end.
+
+## Companion ownership
+
+```mermaid
+flowchart LR
+  Ledger["Observed conversation + run state"] --> Host["Code companion adapter"]
+  Audio["Shared voice state and level"] --> Host
+  Host --> Avatar["AbstractTUI Avatar: drawing only"]
+  Host --> Gate["Change + cooldown gate"]
+  Gate --> QA["Existing Gateway grounded QA / resource pool"]
+  QA --> Side["Isolated advice state / Companion notice"]
+  Side --> Queue["Existing ordered narration queue"]
+```
+
+The generic avatar receives explicit pose/level/visibility/motion signals. The
+host maps ledger and audio state and collapses the view on resize. Advice is
+opt-in and gated by meaningful loaded-conversation revisions, restore state,
+visibility, an in-flight ticket and a monotonic 60-second cooldown. It has no tools,
+workspace or approval commands. Operation/session guards reject stale results;
+manual side questions and automatic comment history remain separate. Speech and
+recording reuse the existing audio owner and narration queue. All companion
+preferences are client-local; existing entity-home voice/appearance authority is
+unchanged. No service, model owner or background microphone is added.

@@ -204,12 +204,18 @@ pub const BOARD_HINTS: &[(&str, &str)] = &[
 ];
 
 fn load(ctx: &UiCtx, store: Store) {
-    if matches!(store.session_index.get_untracked(), SessionIndex::Loading) {
+    if store.session_refreshing.get_untracked() {
         return; // one listing in flight is enough
     }
-    ctx.send(Cmd::LoadSessions {
+    store.session_refreshing.set(true);
+    if !ctx.send(Cmd::LoadSessions {
         limit: SESSION_LIST_LIMIT,
-    });
+    }) {
+        store.session_refreshing.set(false);
+        store
+            .session_refresh_error
+            .set("The Gateway worker is unavailable.".into());
+    }
     ctx.send(Cmd::Rail(RailCmd::LoadArchived));
 }
 
@@ -494,7 +500,19 @@ fn open_board(cx: Scope, store: Store, ctx: &UiCtx, ask: Option<String>) {
             .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
                 let t2 = abstracttui::app::current_theme().tokens;
                 let err = store.rail.with(|r| r.board_error.clone());
-                note_lines(&t2, &[board_hint(&store.session_index.get()), err], 8)
+                {
+                    let mut hint = board_hint(&store.session_index.get());
+                    if store.session_refreshing.get() {
+                        hint.push_str(" · refreshing…");
+                    }
+                    let refresh_error = store.session_refresh_error.get();
+                    if !refresh_error.is_empty() {
+                        hint.push_str(&format!(
+                            " · refresh failed; showing the last Gateway snapshot: {refresh_error}"
+                        ));
+                    }
+                    note_lines(&t2, &[hint, err], 8)
+                }
             }))
             .child(dyn_view(LayoutStyle::column().shrink(0.0), {
                 move || {

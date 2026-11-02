@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import {mkdirSync,readFileSync} from 'node:fs';
+import {chromium} from '@playwright/test';
+import {createCodeServer} from '../bin/server.js';
+const server=createCodeServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
+const fixture=JSON.parse(readFileSync(new URL('../../tui/tests/fixtures/automations/list.json',import.meta.url))).items[0];
+const automations=['Review my notes','Consolidate my notes','Reflect on my notes','Previous run failed','Processing my notes'].map((title,i)=>({...structuredClone(fixture),automation_id:`auto-${i}`,title,status:i===2?'paused':'active',capabilities:['archive','revise','pause','resume'],current_occurrence:i===0||i===4?fixture.current_occurrence:null,last_occurrence:i===3?{status:'failed'}:undefined,next_run_at:new Date(Date.now()+3600000).toISOString(),schedule_rule_text:'Every 30 minutes (UTC)',attention:{...fixture.attention,pending_waits:i===0?1:0,unseen_count:i===1?3:0,unread:i===1}}));
+let archiveCommands=0,refuseArchive=true;
+const rows=[],base=`http://127.0.0.1:${server.address().port}/`,at=()=>new Date().toISOString();
+try{browser=await chromium.launch({channel:"chrome"});const context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[];
+page.on('pageerror',e=>errors.push(e.message));
+await context.route('**/api/**',async route=>{const u=new URL(route.request().url()),path=u.pathname.replace(/^\/api\//,'');let body={items:[],has_more:false};
+if(path==='connection/gateway')body={ok:true,has_session:true,gateway_url:'http://fake',gateway:{ok:true,principal:{user_id:'demo'}}};
+else if(path==='gateway/me')body={ok:true,principal:{user_id:'demo'}};
+else if(path==='gateway/runs')body={items:rows,has_more:false};
+else if(path==='gateway/me/events')body={events:[],head:0,next_after:0,more:false};
+else if(path==='gateway/accounts/me/preferences')body={preferences:{}};
+else if(path==='gateway/bundles')body={items:[],default_agent_workflows:{},default_agent_workflows_unavailable:{}};
+else if(path==='gateway/discovery/capabilities')body={contracts:{common:{automations:{available:true}}}};
+else if(path==='gateway/automations')body={items:automations,next_cursor:null,archived_automations:0};
+else if(path.endsWith('/commands')){archiveCommands++;if(refuseArchive)return route.fulfill({status:403,json:{detail:{reason_code:'forbidden',message:'Archive refused by gateway'}}});automations.splice(automations.findIndex(a=>path.includes(a.automation_id)),1);body={accepted:true};}
+else if(path.endsWith('/input_data'))body={input_data:{prompt:'A compact Code conversation'}};
+else if(path.endsWith('/stream'))return route.fulfill({status:200,contentType:'text/event-stream',body:''});
+await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(body)});});
+await page.goto(base);await page.locator('.code-sidebar').waitFor();await page.waitForTimeout(400);
+rows.push({run_id:'card-a',session_id:'unread-code',session_kind:'chat',status:'completed',created_at:at(),updated_at:at(),tool_calls:115});
+rows.push({run_id:'card-b',session_id:'attention-code',session_kind:'chat',status:'waiting',waiting:{reason:'user'},created_at:at(),updated_at:at(),tool_calls:2});
+rows.push({run_id:'card-c',session_id:'working-code',session_kind:'chat',status:'running',created_at:at(),updated_at:at(),tool_calls:0});
+await page.reload();await page.locator('[data-session-id="unread-code"]').waitFor();
+const card=id=>page.locator('.af-session-card').filter({has:page.locator(`[data-session-id="${id}"]`)});
+assert.equal(await card('unread-code').getAttribute('data-unread'),'true');
+assert.equal(await card('attention-code').getAttribute('data-attention'),'true');
+assert.equal(await card('working-code').getAttribute('data-working'),'true');
+assert.equal(await card('unread-code').getByLabel('115 tool calls',{exact:true}).count(),1);
+assert.equal(await card('unread-code').locator('.af-session-card__archive').count(),1);
+const auto=id=>page.locator(`.code-automation-item[data-automation-id="${id}"]`);
+await auto('auto-0').waitFor();
+if(process.argv[2]){mkdirSync(process.argv[2],{recursive:true});await page.screenshot({path:`${process.argv[2]}/code-automation-cards-before-archive.png`});}
+assert.equal(await auto('auto-0').locator('.af-session-card').getAttribute('data-attention'),'true');
+assert.equal(await auto('auto-1').locator('.af-session-card').getAttribute('data-unread'),'true');
+assert.equal(await auto('auto-1').getByLabel('3 new results',{exact:true}).count(),1);
+assert.equal(await auto('auto-2').locator('[data-field="cadence"]').textContent(),'Paused');
+assert.equal(await auto('auto-2').locator('[data-field="next"]').count(),0);
+assert.equal(await auto('auto-3').locator('.is-failed').count(),1);
+assert.equal(await auto('auto-4').locator('.af-session-card').getAttribute('data-working'),'true');
+assert.equal(await page.locator('.code-automation-item [role="switch"]').count(),0);
+const archive=auto('auto-1').getByRole('button',{name:'Archive Consolidate my notes',exact:true});
+await page.mouse.move(0,0);assert.equal(await archive.evaluate(el=>getComputedStyle(el).opacity),'0');
+await auto('auto-1').hover();assert.equal(await archive.evaluate(el=>getComputedStyle(el).opacity),'1');
+assert.equal(await archive.evaluate(el=>el.getBoundingClientRect().width),28);
+await archive.click();const dialog=page.getByRole('dialog',{name:'Archive automation?'});await dialog.waitFor();assert.equal(archiveCommands,0);
+await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await dialog.waitFor({state:'hidden'});assert.equal(archiveCommands,0);
+assert.equal(await archive.evaluate(el=>document.activeElement===el),true);
+await auto('auto-1').hover();await archive.click();await dialog.getByRole('button',{name:'Archive',exact:true}).click();await dialog.getByRole('alert').waitFor();assert.equal(archiveCommands,1);assert.ok((await dialog.textContent()).includes('Archive refused by gateway'));
+refuseArchive=false;await dialog.getByRole('button',{name:'Archive',exact:true}).click();await dialog.waitFor({state:'hidden'});await auto('auto-1').waitFor({state:'detached'});assert.equal(archiveCommands,2);
+const typography=await auto('auto-0').locator('.af-session-card__title').evaluate(el=>({weight:getComputedStyle(el).fontWeight,size:parseFloat(getComputedStyle(el).fontSize)}));assert.equal(typography.weight,'400');assert.equal(typography.size,13);
+for(const theme of ['dark','light']){await page.evaluate(t=>document.documentElement.className='theme-'+t,theme);for(const width of [230,290,360]){await page.locator('.code-sidebar').evaluate((el,w)=>{el.style.width=w+'px';el.style.minWidth=w+'px';el.style.maxWidth=w+'px';},width);for(const el of await page.locator('.af-automation-card').all()){assert.equal(await el.evaluate(n=>n.scrollWidth<=n.clientWidth),true,`No overflow at ${width}px in ${theme}`);}}}
+await page.locator('.code-sidebar').evaluate(el=>el.removeAttribute('style'));
+await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await auto('auto-4').locator('.is-working').evaluate(el=>getComputedStyle(el).animationName),'none');
+await page.emulateMedia({reducedMotion:'no-preference'});await page.evaluate(()=>document.documentElement.className='theme-dark');
+const order=await page.locator('.code-sidebar-lists > .code-panel').evaluateAll(es=>es.map(e=>e.classList.contains('code-conversations')?'conversations':'automations'));assert.deepEqual(order,['conversations','automations']);
+const themes=[...new Set(['dark',...readFileSync(new URL('../node_modules/@abstractframework/ui-kit/src/theme.css',import.meta.url),'utf8').matchAll(/:root\.theme-([a-z0-9-]+)/g)].map(x=>typeof x==='string'?x:x[1]))];
+for(const theme of themes){await page.evaluate(t=>document.documentElement.className='theme-'+t,theme);const checks=await page.evaluate(()=>{
+const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const ctx=canvas.getContext('2d');
+const rgb=color=>{ctx.clearRect(0,0,1,1);ctx.fillStyle=color;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data].slice(0,3);};
+const lum=rgb=>rgb.map(c=>{c/=255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4}).reduce((n,c,i)=>n+c*[.2126,.7152,.0722][i],0);
+const paint=el=>{ctx.clearRect(0,0,1,1);const nodes=[];for(let p=el;p;p=p.parentElement)nodes.unshift(p);for(const p of nodes){ctx.fillStyle=getComputedStyle(p).backgroundColor;ctx.fillRect(0,0,1,1);}return [...ctx.getImageData(0,0,1,1).data].slice(0,3);};
+return [...document.querySelectorAll('.code-sidebar .af-session-card')].map(card=>{const header=card.closest('.code-panel').querySelector('.code-panel-header');const bg=lum(paint(card)),head=lum(paint(header));return {darker:bg<head,bg,head,contrast:[...card.querySelectorAll('.af-session-card__title,.af-session-card__meta')].map(el=>{const fg=lum(rgb(getComputedStyle(el).color));return (Math.max(fg,bg)+.05)/(Math.min(fg,bg)+.05);})};});});
+for(const c of checks){assert.ok(c.darker,`${theme}: card ${c.bg} must be darker than header ${c.head}`);assert.ok(c.contrast.every(x=>x>=4.5),`${theme}: title/metadata contrast ${c.contrast}`);}}
+await page.evaluate(()=>document.documentElement.className='theme-dark');
+const dir=process.argv[2];if(dir){mkdirSync(dir,{recursive:true});await page.screenshot({path:`${dir}/code-session-cards.png`});}
+assert.deepEqual(errors,[]);console.log('Code session cards: unread, human attention, working, metadata, sibling archive; Watch automation facts, regular typography, hover, archive cancel/refusal/retry, narrow themes, reduced motion, conversation-first order and all-theme card depth/contrast passed');
+}finally{await browser?.close();server.close();}

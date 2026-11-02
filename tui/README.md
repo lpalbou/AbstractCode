@@ -7,8 +7,9 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.12.0**, pre-alpha. Release history is in
-[CHANGELOG.md](CHANGELOG.md).
+Status: **0.13.0**, pre-alpha. What's new in 0.13.0: six companion designs
+shared with the other apps, a larger Skills picker, and speech that stops at
+session boundaries ([CHANGELOG.md](CHANGELOG.md#0130---2026-11-02)).
 
 ## What it looks like
 
@@ -114,7 +115,7 @@ Status: **0.12.0**, pre-alpha. Release history is in
   Workspace, Tools, Skills, Voice — bound to this conversation, or to an
   automation's definition (each change saved as a new revision).
 - **Sessions and memory**: one durable session id per conversation, and a
-  `/sessions` board over them (`Oct 2 · 2 turns · 7 tools`), with
+  `/sessions` board over them (`Oct 2 · 2 turns`), with
   **Search conversations** (`/`, title + id), Archive and **Archived · N** /
   Unarchive — nothing is ever deleted.
   The client carries the live conversation into each run; the gateway
@@ -125,19 +126,23 @@ Status: **0.12.0**, pre-alpha. Release history is in
   prompt and full activity, pending approvals re-surface. `/pause` parks
   the run durably on the gateway (it survives quitting); `/resume`
   continues it.
-- **Capability control**: `/tools` switches gateway tools on/off per run
-  (checked set = the run's exact allowlist), `/skills` attaches gateway
-  skills (an empty shelf shows the gateway's own explanation), `/mcp` shows
-  the gateway's MCP server registry.
-- **About**: `/about` shows the version, the AbstractFramework links
-  (website, source, documentation, issues, feedback), author and licence,
-  and the gateway's package versions.
-- **Honest telemetry**: the header names what "gateway defaults" actually
-  resolves to (and the model that served the last call) plus the working
-  directory, workspace mode, and capability counts; the footer is a
-  persistent instrument row (context meter, session tokens, `/gpu` and
-  host `mem` meters, skills/MCP counts — the key legend lives behind
-  `?`); the activity
+- **Capability control**: the header's **Tools** menu groups Tools, Skills and
+  MCP servers. `/tools` selects Off/Ask/Auto per tool or category, `/skills` attaches gateway skills, and `/mcp`
+  shows the gateway's MCP server registry. Direct commands remain available.
+- **Top-right controls**: **Docs** opens Documentation; the avatar or account menu opens Companion.
+  **Theme** previews appearance choices, **About** shows versions and framework
+  links, and the account/status menu shows your gateway identity, connection
+  details and a confirmed option to disconnect this terminal. Narrow terminals
+  collect the first three controls under **Menu**. Use `/docs` for direct access
+  to the Docs assistant; its answers use the gateway's documentation corpus.
+- **Dialogs**: click outside an ordinary dialog to close it and return to the
+  composer. Approval and user-question steps stay open until you respond.
+- **Honest telemetry**: the header names the workflow, provider/model and
+  workspace mode; the footer keeps context, session token and host resource
+  meters, the workspace, session and keys reference. Click context/tokens for
+  `/cache`, GPU/memory for `/resources`, or `?` for help. Workspace mode opens
+  `/workspace`. Controls also work with Tab, arrows and Enter/Space; closing
+  a panel returns typing to the composer. The activity
   strip shows live context size (`ctx`), cache hits, and the in-flight
   model call with its last-call tok/s; `/cache` is the detail panel:
   prompt-cache posture for the effective route (auto = on when available)
@@ -229,9 +234,11 @@ Inside the app:
 - `@name` talks with a summoned entity when the gateway hosts them
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
-  top right of any message reads that one; streamed sentence by sentence from
+  top right of any message reads that one; bottom-meter and avatar ‖/▶ controls
+  pause/resume the current audio; streamed sentence by sentence from
   the gateway's voice route; `Esc` stops); on an empty prompt, HOLD
-  `Space`, speak and release to send what you said; `Ctrl+R` dictates into
+  `Space`, speak and release to send what you said (choose **Voice messages →
+  Review before sending** in `/voice` to edit it first); `Ctrl+R` dictates into
   the composer with the gateway's default speech-to-text route, `/voice` shows
   the engines ("Gateway default · supertonic / supertonic-3"), this
   computer's speaker and microphone (each with a Test) and **Read aloud**.
@@ -331,3 +338,58 @@ ACODE_GATEWAY_TOKEN=… python3 scripts/pty_live_smoke.py   # live E2E
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Session companion
+
+Open **Companion settings** from the account menu, or use the Companion drawer's
+⚙ button. Enable the companion to show your chosen activity avatar floating beneath
+the top-right header controls, over a bounded part of the transcript. It preserves
+the transcript's full width, and empty cells around the artwork leave text visible.
+**Position** chooses Top right or Bottom right, above
+the composer and audio controls. Clicking it opens **Companion**, a separate side
+conversation from **Documentation**. The account menu also opens Companion when
+the avatar is disabled. Small terminals use a compact
+control; **Animate activity** can be turned off for reduced motion.
+
+Choose **Appearance** to open a large, silent preview of all 44 catalog designs.
+Try **Watch Halo**, **Watch Wave**, **Watch Hover**, **Watch Rings** or **Watch Eye**
+for the new material detail; the original shaded Halo/Hover designs remain separate.
+Watch the activity phases cycle, or choose a phase to hold it. **Auto cycle**
+resumes the demonstration and **Pause motion** freezes it. **Apply avatar** saves the
+appearance; **Cancel** or Esc returns without changing it. Previewing needs no
+inference, microphone or speech playback.
+
+Hover leans toward you while listening, waits in a lower, quiet posture, and
+bobs with brighter thrusters and sparks while working. Ready breathes gently;
+Waiting pulses with sequential indicators. Halo listening rings move inward and
+speaking rings move outward. Error and paused speech remain still.
+
+**Offer comments** is off by default. When enabled, meaningful conversation
+changes can trigger a short observation through the existing Gateway pool, with
+one request at a time and at least 60 seconds between attempts in this TUI process.
+Restored history and unchanged/tool-only updates do not trigger comments. Comments
+appear in Companion and cannot execute tools, steer the coding task or approve it.
+
+The side conversation's ● microphone records a question into its own editable
+draft; press again to transcribe, then ↑ to send. It never submits a coding task.
+**Read side replies** and **Speaking voice** configure automatic side speech and
+an independent speaking preset (default: main assistant voice). Speech shares the
+existing narration queue and device settings. Companion choices are local to this
+terminal; entity-owned appearance and voice remain managed by Gateway.
+
+While speech is playing or paused, the bottom histogram and avatar action row
+show ‖ Pause or ▶ Resume for the current audio. Message-level playback controls
+remain available. These two shared controls never select or start another reply.
+
+## Work with a selected passage
+
+Click assistant text, a table cell or code, then choose **Explain**, **Use as context**
+or **Change** above the composer. The selection is quoted into your existing draft;
+review it before using the normal send action. Dragging spans wrapped text, and
+sentence/paragraph controls refine the selection. Narrow terminals offer **Actions**.
+Esc or **Cancel** keeps your draft. Custom user/tool/JSON cards retain ordinary
+screen-copy selection. See [selected content](docs/api.md#selected-content).
+
+Explicit files attached to an assistant answer are listed beside that answer, including
+file-only results. Tool output containing a serialized JSON object/array is formatted in
+details; URL and path links use terminal OSC-8 support.

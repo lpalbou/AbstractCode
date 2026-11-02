@@ -72,6 +72,8 @@ pub struct VoicePrefs {
     pub provider: String,
     pub model: String,
     pub voice: String,
+    /// Catalog label for display only; never sent to synthesis.
+    pub voice_label: String,
     pub profile: String,
     pub speed: Option<f64>,
     pub quality_preset: String,
@@ -84,6 +86,8 @@ pub struct VoicePrefs {
     pub input_gain: Option<f64>,
     pub reply_volume: Option<f64>,
     pub read_aloud: bool,
+    /// Review held-Space voice messages before sending (existing default sends).
+    pub review_voice: bool,
     /// Hold Space to talk (`ui::push_to_talk`) is ON unless this is set —
     /// stored as `"space_to_talk": false`, so the default needs no key.
     pub space_to_talk_off: bool,
@@ -116,6 +120,7 @@ impl VoicePrefs {
             provider: s("provider"),
             model: s("model"),
             voice: s("voice"),
+            voice_label: s("voice_label"),
             profile: s("profile"),
             speed: f("speed"),
             quality_preset: s("quality_preset"),
@@ -131,6 +136,7 @@ impl VoicePrefs {
                 .get("read_aloud")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            review_voice: v.get("auto_send_voice").and_then(Value::as_bool) == Some(false),
             space_to_talk_off: v.get("space_to_talk").and_then(Value::as_bool) == Some(false),
         }
     }
@@ -146,6 +152,7 @@ impl VoicePrefs {
         put("provider", &self.provider);
         put("model", &self.model);
         put("voice", &self.voice);
+        put("voice_label", &self.voice_label);
         put("profile", &self.profile);
         put("quality_preset", &self.quality_preset);
         put("instructions", &self.instructions);
@@ -165,6 +172,9 @@ impl VoicePrefs {
         }
         if self.read_aloud {
             m.insert("read_aloud".into(), json!(true));
+        }
+        if self.review_voice {
+            m.insert("auto_send_voice".into(), json!(false));
         }
         if self.space_to_talk_off {
             m.insert("space_to_talk".into(), json!(false));
@@ -231,10 +241,17 @@ impl VoicePrefs {
         } else {
             &self.profile
         };
-        [&self.provider, &self.model, voice]
-            .iter()
+        let compact = voice.replace('-', "");
+        let label = if !self.voice_label.is_empty() {
+            self.voice_label.as_str()
+        } else if compact.len() >= 16 && compact.chars().all(|c| c.is_ascii_hexdigit()) {
+            "Selected voice"
+        } else {
+            voice.as_str()
+        };
+        [self.provider.as_str(), self.model.as_str(), label]
+            .into_iter()
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join(" · ")
     }
@@ -479,8 +496,10 @@ pub struct VoiceSignals {
     /// The microphone test is running.
     pub mic_testing: Signal<bool>,
     /// The current dictation was started by HOLDING Space
-    /// (`ui::push_to_talk`): its transcript is sent, not left in the draft.
+    /// (`ui::push_to_talk`); `review_transcript` determines delivery.
     pub hold: Signal<bool>,
+    /// Delivery choice captured when the current recording starts.
+    pub review_transcript: Signal<bool>,
     /// A finished hold-to-talk transcription waiting to be SENT.
     pub hold_send: Signal<Option<String>>,
     /// The microphone's CURRENT spectrum while recording ([`meter_bands`];
@@ -531,6 +550,7 @@ impl VoiceSignals {
             tick: cx.signal(0u64),
             mic_testing: cx.signal(false),
             hold: cx.signal(false),
+            review_transcript: cx.signal(false),
             hold_send: cx.signal(None),
             levels: cx.signal(Vec::new()),
             speak_levels: cx.signal(Vec::new()),
@@ -1141,6 +1161,28 @@ mod tests {
         assert_eq!(back.volume(), 1.0);
         assert_eq!(back.gain(), 0.5);
         assert_eq!(VoicePrefs::default().to_json(), json!({}));
+    }
+
+    #[test]
+    fn voice_display_metadata_and_delivery_preferences_stay_off_the_request_wire() {
+        let p = VoicePrefs {
+            voice: "41576236cd5f4a9a8399f00000000000".into(),
+            voice_label: "Sisko".into(),
+            review_voice: true,
+            ..Default::default()
+        };
+        assert_eq!(VoicePrefs::from_json(Some(&p.to_json())), p);
+        assert_eq!(p.tts_override_summary(), "Sisko");
+        assert_eq!(
+            p.tts_request(),
+            serde_json::from_value::<Map<String, Value>>(json!({"voice":p.voice})).unwrap()
+        );
+        let legacy = VoicePrefs {
+            voice_label: String::new(),
+            ..p
+        };
+        assert_eq!(legacy.tts_override_summary(), "Selected voice");
+        assert!(!VoicePrefs::from_json(Some(&json!({}))).review_voice);
     }
 
     #[test]

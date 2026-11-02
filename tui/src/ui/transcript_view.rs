@@ -2627,6 +2627,7 @@ pub fn pane(
     overlay_open: abstracttui::reactive::Memo<bool>,
 ) -> View {
     let tokens = *t;
+    let selection = cx.use_context::<abstracttui::widgets::ContentSelection>();
     let feed = feed.clone();
     let live_feed = live_feed.clone();
     let gateway_label = ctx.gateway_label.clone();
@@ -2825,11 +2826,23 @@ pub fn pane(
                         store.notify("no room to open the item menu here");
                     }
                 })
-                .child(Feed::new(&feed).gap(0).view(scx))
+                .child({
+                    let mut widget = Feed::new(&feed).gap(0);
+                    if let Some(selection) = selection.clone() {
+                        widget = widget.content_selection(selection);
+                    }
+                    widget.view(scx)
+                })
                 // Live replies (contract S) render BELOW the transcript in
                 // their own feed: a token appends there, never re-laying
                 // out the transcript above it.
-                .child(Feed::new(&live_feed).gap(0).view(scx))
+                .child({
+                    let mut widget = Feed::new(&live_feed).gap(0);
+                    if let Some(selection) = selection.clone() {
+                        widget = widget.content_selection(selection);
+                    }
+                    widget.view(scx)
+                })
                 .build();
             // gap 0: spacing lives INSIDE items (`gap_row`), so tool
             // rows pack under their cycle while sections keep air.

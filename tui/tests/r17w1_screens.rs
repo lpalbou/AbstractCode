@@ -823,9 +823,9 @@ fn enter_continues_the_filtered_conversation() {
     assert_eq!(h.store.session_id.get_untracked(), "acode-7f3a91");
 }
 
-// -- wording: verbatim from the Code web in this repository ------------------------
+// -- shared labels/status wording from the Code web in this repository ------------
 
-/// The terminal's sentences are the Code web's, byte for byte: read from
+/// Shared labels and status messages are the Code web's, byte for byte: read from
 /// `web/src/workspace/` (a missing file fails — the seam is never skipped).
 #[test]
 fn the_wording_is_the_code_webs() {
@@ -835,7 +835,9 @@ fn the_wording_is_the_code_webs() {
             .unwrap_or_else(|e| panic!("the Code web source {name} is missing: {e}"))
     };
     let row = read("account_workflow_default.tsx");
-    for s in [ap::LABEL, ap::HELP, ap::SAVED] {
+    // Shared account labels/status remain identical. Explanatory guidance is
+    // layout-specific: the compact web panel no longer renders the TUI's help.
+    for s in [ap::LABEL, ap::SAVED] {
         assert!(row.contains(s), "{s:?} is not the web's wording");
     }
     assert!(

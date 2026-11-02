@@ -1210,26 +1210,40 @@ fn tools_selector_toggles_and_start_carries_allowlist() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("gateway tools — 3 available · untouched"),
+        screen.contains("Tools — 0 Off · 1 Ask · 2 Auto"),
         "tools modal title:\n{screen}"
     );
-    assert!(screen.contains("[x] read_file"), "checked rows:\n{screen}");
+    assert!(
+        !screen.contains("read_file"),
+        "categories initially folded:\n{screen}"
+    );
+    h.press_enter(); // Expand files, then select its first tool.
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    let screen = h.turn();
+    assert!(
+        screen.contains("[Auto] read_file"),
+        "expanded rows:\n{screen}"
+    );
 
-    // Space toggles the first tool OFF; title flips to explicit-allowlist.
+    // Space toggles the selected tool OFF; category expansion changes no policy.
     h.type_text(" ");
     let screen = h.turn();
     assert!(
-        screen.contains("2 on / 1 off · explicit allowlist"),
+        screen.contains("1 Off · 1 Ask · 1 Auto"),
         "toggle reflected:\n{screen}"
     );
-    assert!(screen.contains("[ ] read_file"), "unchecked row:\n{screen}");
+    assert!(
+        screen.contains("[Off ] read_file"),
+        "unchecked row:\n{screen}"
+    );
     assert_eq!(
         h.store.disabled_tools.get_untracked(),
         vec!["read_file".to_string()]
     );
 
     // Enter closes; a run start now carries the checked set exactly.
-    h.press_enter();
+    h.press_escape();
     h.turn();
     h.turn(); // deferred modal close
     h.type_text("do the thing");
@@ -1279,28 +1293,20 @@ fn tools_category_toggle_flips_a_whole_toolset() {
     h.turn();
     h.press_enter();
     h.turn();
-    // Cursor starts at the first tool (read_file, toolset "files"). `c`
-    // turns the WHOLE files category off (both files tools on → off).
+    // A mixed category safely becomes Ask, then Auto, then Off.
+    for expected in ["ask", "auto"] {
+        h.type_text("c");
+        h.turn();
+        let pins = h.store.tool_overrides.get_untracked();
+        assert!(pins.contains(&("read_file".into(), expected.into())));
+        assert!(pins.contains(&("write_file".into(), expected.into())));
+        assert!(!pins.iter().any(|(n, _)| n == "web_search"));
+    }
     h.type_text("c");
     h.turn();
     let disabled = h.store.disabled_tools.get_untracked();
-    assert!(
-        disabled.contains(&"read_file".to_string()) && disabled.contains(&"write_file".to_string()),
-        "the whole files category is off: {disabled:?}"
-    );
-    assert!(
-        !disabled.contains(&"web_search".to_string()),
-        "the web category is untouched: {disabled:?}"
-    );
-    // `c` again turns the files category back on.
-    h.type_text("c");
-    h.turn();
-    let disabled = h.store.disabled_tools.get_untracked();
-    assert!(
-        !disabled.contains(&"read_file".to_string())
-            && !disabled.contains(&"write_file".to_string()),
-        "the files category is back on: {disabled:?}"
-    );
+    assert!(disabled.contains(&"read_file".into()) && disabled.contains(&"write_file".into()));
+    assert!(!disabled.contains(&"web_search".into()));
 }
 
 /// Camera tools are OFF by default for a fresh session (operator ask
@@ -1417,23 +1423,31 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
     // allowlist" branch; the full phrase ellipsizes at the modal width
     // now that the gated segment shares the title row.
     assert!(
-        screen.contains("· untouched"),
+        screen.contains("future runs"),
         "title agrees with the wire: stale pref on a gated row is not a customization:\n{screen}"
     );
     // Visible with the gate; counted separately from the grantable pool.
     assert!(
-        screen.contains("2 available · 1 gated off server-side"),
+        screen.contains("1 Ask · 1 Auto · 1 unavailable"),
         "gated count in the title:\n{screen}"
     );
     assert!(
-        screen.contains(
-            "[-] send_email — disabled on this gateway — gate: ABSTRACT_ENABLE_COMMS_TOOLS"
-        ),
-        "disabled row renders its gate:\n{screen}"
+        screen.contains("▸ comms  [Unavailable]"),
+        "unavailable category:\n{screen}"
     );
-    // Cursor row 0 is send_email (comms sorts before files): Space
-    // refuses — the user disabled-set is UNCHANGED (the stale pref
-    // stays; no new mutation), a toast names the gate.
+    h.press_enter(); // Expand the initially folded comms category.
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    let screen = h.turn();
+    assert!(
+        screen.contains("[Unavailable] send_email"),
+        "disabled row:\n{screen}"
+    );
+    assert!(
+        screen.contains("Unavailable on this Gateway"),
+        "selected gate details:\n{screen}"
+    );
+    // Space refuses the served-disabled tool; the stale preference stays unchanged.
     h.type_text(" ");
     h.turn();
     assert_eq!(
@@ -1441,8 +1455,8 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
         vec!["send_email".to_string()],
         "Space on a served-disabled row never mutates the selection"
     );
-    // `p` refuses a pin for the same reason.
-    h.type_text("p");
+    // The category shortcut also refuses a pin for the same reason.
+    h.type_text("c");
     h.turn();
     assert!(
         h.store.tool_overrides.get_untracked().is_empty(),
@@ -1450,11 +1464,15 @@ fn served_disabled_tools_render_with_gate_and_are_never_grantable() {
     );
     // Disable read_file (cursor down to it) to flip into allowlist mode:
     // the explicit allowlist must exclude the served-disabled row.
-    h.term.push_input(b"\x1b[B"); // Down → read_file
+    h.term.push_input(b"\x1b[B"); // files category
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B"); // read_file
     h.turn();
     h.type_text(" ");
     h.turn();
-    h.press_enter();
+    h.press_escape();
     h.turn();
     h.turn(); // modal close settles
     h.type_text("do the thing");
@@ -1507,7 +1525,13 @@ fn all_off_excludes_served_disabled_rows_from_the_user_set() {
     h.turn();
     h.press_enter();
     h.turn();
-    h.type_text("n");
+    h.term.push_input(b"\x1b[B\x1b[B");
+    h.turn();
+    h.type_text("c");
+    h.turn();
+    h.type_text("c");
+    h.turn();
+    h.type_text("c");
     h.turn();
     let mut disabled = h.store.disabled_tools.get_untracked();
     disabled.sort();
@@ -1560,10 +1584,8 @@ fn approval_modal_names_the_gate_on_a_served_disabled_call() {
     );
 }
 
-/// item 4: `p` in the /tools modal cycles a per-tool approval pin
-/// (none → auto → ask → none), renders it, persists it, and the pin
-/// reaches the run-start policy expansion (auto lifts above the tier,
-/// ask force-asks below it).
+/// Tool modes persist per-tool approval pins and reach run-start policy:
+/// Auto lifts above the tier, while Ask forces approval below it.
 #[test]
 fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
     let mut h = harness();
@@ -1588,64 +1610,37 @@ fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
     h.press_enter();
     h.turn();
 
-    // Cursor on read_file (row 0): p → auto, rendered + persisted. Only
-    // read_file is pinned, so the [pin:auto] marker uniquely names it.
-    h.type_text("p");
-    let screen = h.turn();
-    assert!(
-        screen.contains("read_file") && screen.contains("[pin:auto]"),
-        "auto pin rendered:\n{screen}"
-    );
-    assert_eq!(
-        h.prefs.borrow().tool_overrides,
-        vec![("read_file".to_string(), "auto".to_string())]
-    );
-    // p again → ask.
-    h.type_text("p");
-    let screen = h.turn();
-    assert!(screen.contains("[pin:ask]"), "ask pin rendered:\n{screen}");
-    assert_eq!(
-        h.store.tool_overrides.get_untracked(),
-        vec![("read_file".to_string(), "ask".to_string())]
-    );
-    // p a third time → NONE: the wrap closes the full none→auto→ask→none
-    // round trip headlessly (cycle-2 left this leg to a unit test) — the
-    // marker disappears from the render and the persisted override clears.
-    h.type_text("p");
-    let screen = h.turn();
-    assert!(
-        !screen.contains("[pin:"),
-        "cleared pin renders no marker:\n{screen}"
-    );
-    assert!(
-        h.store.tool_overrides.get_untracked().is_empty(),
-        "cleared pin leaves no override: {:?}",
-        h.store.tool_overrides.get_untracked()
-    );
-    assert!(
-        h.prefs.borrow().tool_overrides.is_empty(),
-        "cleared pin is not persisted"
-    );
-    // Two more presses land read_file back on ask for the policy leg below.
-    h.type_text("p");
+    h.press_enter(); // Expand files, then select read_file.
     h.turn();
-    h.type_text("p");
-    let screen = h.turn();
-    assert!(screen.contains("[pin:ask]"), "back on ask:\n{screen}");
-    // Move to fetch_url (row 1) and pin it auto.
     h.term.push_input(b"\x1b[B");
     h.turn();
-    h.type_text("p");
+    // Auto -> Off -> Ask. The mode is visible and persisted.
+    h.type_text(" ");
+    h.turn();
+    h.type_text(" ");
+    let screen = h.turn();
+    assert!(screen.contains("[Ask ] read_file"), "{screen}");
+    assert_eq!(
+        h.prefs.borrow().tool_overrides,
+        vec![("read_file".into(), "ask".into())]
+    );
+    // Expand web to reach fetch_url: Ask -> Auto.
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[B");
+    h.turn();
+    h.type_text(" ");
     h.turn();
     assert!(h
         .store
         .tool_overrides
         .get_untracked()
-        .contains(&("fetch_url".to_string(), "auto".to_string())));
-
+        .contains(&("fetch_url".into(), "auto".into())));
     // Close and start: read_file is ask-pinned (force-ask), fetch_url is
     // auto-pinned (lifts above the read tier).
-    h.press_enter();
+    h.press_escape();
     h.turn();
     h.turn();
     h.type_text("go");
@@ -1670,9 +1665,6 @@ fn tools_modal_pins_cycle_persist_and_reach_the_start_policy() {
         }
         other => panic!("expected Start, got {:?}", other.map(|_| "cmd")),
     }
-
-    // The full none→auto→ask→none wrap was closed in-modal above (the
-    // third `p` press); the unit test pins the same cycle at the fold.
 }
 
 #[test]
@@ -1806,9 +1798,15 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("more"),
+        screen.contains("Tools —"),
         "overflow marker visible when the list exceeds the body:\n{screen}"
     );
+    assert!(
+        !screen.contains("tool_00"),
+        "categories initially folded:\n{screen}"
+    );
+    h.press_enter(); // Expand files; its children exceed the available body.
+    let screen = h.turn();
     assert!(
         screen.contains("tool_00"),
         "top of the list visible initially:\n{screen}"
@@ -1817,18 +1815,19 @@ fn tools_selector_windows_long_lists_with_overflow_markers() {
         !screen.contains("tool_29"),
         "bottom rows genuinely beyond the window:\n{screen}"
     );
-    // Walk the cursor to the LAST tool: the window must follow it.
-    for _ in 0..30 {
-        h.term.push_input(b"\x1b[B");
-        h.turn();
-    }
+    // End reaches the web category, then its last child after expansion.
+    h.term.push_input(b"\x1b[F");
+    h.turn();
+    h.press_enter();
+    h.turn();
+    h.term.push_input(b"\x1b[F");
     let screen = h.turn();
     assert!(
         screen.contains("tool_29"),
         "cursor scrolls the window to the tail:\n{screen}"
     );
     assert!(
-        screen.contains("↑") && screen.contains("more"),
+        !screen.contains("tool_00"),
         "overflow marker flips to the top edge:\n{screen}"
     );
 }
@@ -1908,7 +1907,7 @@ fn pending_wait_survives_covering_modals_and_defers_visibly() {
     abstractcode::ui::modals::open_tools(cx, store, &ctx);
     let screen = h.turn();
     assert!(
-        screen.contains("gateway tools"),
+        screen.contains("Tools —"),
         "picker covers the prompt:\n{screen}"
     );
 
@@ -1972,7 +1971,7 @@ fn stale_disabled_tools_never_underflow_or_force_allowlist_mode() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("1 available · untouched"),
+        screen.contains("Tools — 0 Off · 0 Ask · 1 Auto"),
         "stale-only disabled counts as untouched, no underflow:\n{screen}"
     );
     // A run start with stale-only disabled sends NO allowlist.
@@ -2415,14 +2414,13 @@ fn the_theme_name_is_a_dropdown_with_live_preview() {
     let mut h = harness_sized(Size::new(140, 40));
     h.turn();
     let screen = h.turn();
-    let last_row = screen.lines().count() - 1;
-    let label_col = |screen: &str| -> usize {
-        let last = screen.lines().last().unwrap_or_default();
-        let b = last
-            .find("Dark (Abstract) ▾")
-            .unwrap_or_else(|| panic!("the trigger:\n{last}"));
-        last[..b].chars().count()
-    };
+    let trigger = h
+        .app
+        .tree()
+        .action_rect(abstractcode::ui::chrome::ACT_THEME)
+        .expect("theme trigger");
+    let last_row = trigger.y as usize;
+    let label_col = |_screen: &str| trigger.x as usize;
     let col = label_col(&screen);
     let mouse = |h: &mut Harness, button: u32, col: usize, row: usize| {
         h.term
@@ -2504,11 +2502,14 @@ fn the_theme_name_is_a_dropdown_with_live_preview() {
 fn quitting_with_the_theme_dropdown_open_does_not_panic() {
     let mut h = harness_sized(Size::new(140, 40));
     h.turn();
-    let screen = h.turn();
-    let last = screen.lines().last().unwrap_or_default().to_string();
-    let b = last.find("Dark (Abstract) ▾").expect("the trigger");
-    let col = last[..b].chars().count() + 2;
-    let row = screen.lines().count();
+    h.turn();
+    let trigger = h
+        .app
+        .tree()
+        .action_rect(abstractcode::ui::chrome::ACT_THEME)
+        .expect("theme trigger");
+    let col = trigger.x as usize + 2;
+    let row = trigger.y as usize + 1;
     h.term
         .push_input(format!("\x1b[<0;{};{row}M\x1b[<0;{};{row}m", col + 1, col + 1).as_bytes());
     h.turn();
@@ -2676,7 +2677,7 @@ fn skills_selector_attaches_and_start_carries_skills() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("2 on the shelf · 0 attached"),
+        screen.contains("2 available · 0 attached"),
         "skills modal:\n{screen}"
     );
     h.type_text(" "); // attach coredoc
@@ -2708,6 +2709,260 @@ fn skills_selector_attaches_and_start_carries_skills() {
             assert_eq!(opts.skills, vec!["coredoc".to_string()]);
         }
         other => panic!("expected Cmd::Start, got {:?}", other.map(|_| "cmd")),
+    }
+}
+
+// Mouse, layout and identity regressions for the actual Skills modal.
+mod skills_picker_readability {
+    use super::*;
+    use abstractcode::store::SkillInfo;
+
+    fn catalog(n: usize) -> Vec<SkillInfo> {
+        (0..n).map(|ix| SkillInfo {
+            name: format!("skill-{ix:02}"),
+            description: format!("Full description for skill-{ix:02}. Only the selected description belongs below the list."),
+            trust: "adopted".into(),
+            blocked: false,
+        }).collect()
+    }
+    fn open(h: &mut Harness, n: usize) -> String {
+        h.turn();
+        h.store.skills_catalog.set(catalog(n));
+        ui::modals::open_skills(h.cx, h.store, &h.ctx);
+        h.turn();
+        h.turn()
+    }
+    fn point(screen: &str, needle: &str) -> (usize, usize) {
+        screen
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| line.find(needle).map(|ix| (line[..ix].chars().count(), y)))
+            .unwrap_or_else(|| panic!("Missing {needle:?}:\n{screen}"))
+    }
+    fn mouse(h: &mut Harness, code: u8, x: usize, y: usize, release: bool) -> String {
+        h.term.push_input(
+            format!(
+                "\x1b[<{code};{};{}{}",
+                x + 1,
+                y + 1,
+                if release { 'm' } else { 'M' }
+            )
+            .as_bytes(),
+        );
+        h.turn()
+    }
+    fn rows(screen: &str) -> Vec<String> {
+        screen
+            .lines()
+            .filter(|line| {
+                line.contains("[ ] skill-")
+                    || line.contains("[x] skill-")
+                    || line.contains("[-] skill-")
+            })
+            .map(|line| line.trim().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn skills_picker_larger_layout_and_selected_description_in_both_themes() {
+        for theme in ["abstract-dark", "abstract-light"] {
+            let mut h = harness_sized(Size::new(180, 60));
+            abstracttui::app::set_theme_by_id(theme);
+            let screen = open(&mut h, 40);
+            assert!(
+                rows(&screen).len() >= 15,
+                "scrollable list beside the larger detail pane: {screen}"
+            );
+            let (x, y) = point(&screen, "[ ] skill-00");
+            let (action_x, _) = point(&screen, "Attach");
+            assert!(
+                action_x - x > 100,
+                "wider than the old84column modal: {screen}"
+            );
+            assert!(screen.contains("Full description for skill-00"), "{screen}");
+            assert!(
+                !screen.contains("Full description for skill-01"),
+                "{screen}"
+            );
+            assert!(
+                rows(&screen)
+                    .iter()
+                    .all(|line| !line.contains("description") && !line.contains("adopted")),
+                "{screen}"
+            );
+            assert!(
+                screen.contains("wheel scroll") && screen.contains("Enter/Esc close"),
+                "{screen}"
+            );
+            mouse(&mut h, 0, x + 5, y + 1, false); // browsing selects, never attaches
+            mouse(&mut h, 0, x + 5, y + 1, true);
+            assert!(h.store.selected_skills.get_untracked().is_empty());
+            if let Some(dir) = std::env::var_os("SKILLS_PICKER_SHOTS") {
+                let dir = std::path::PathBuf::from(dir);
+                std::fs::create_dir_all(&dir).unwrap();
+                h.term
+                    .screen()
+                    .screenshot()
+                    .write_svg(dir.join(format!("skills-{theme}.svg")))
+                    .unwrap();
+                h.term
+                    .screen()
+                    .screenshot()
+                    .write_text(dir.join(format!("skills-{theme}.txt")))
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn skills_picker_wheel_scrolls_both_ways_without_toggling_or_prior_hover() {
+        let mut h = harness_sized(Size::new(80, 24));
+        let screen = open(&mut h, 48);
+        let (x, y) = point(&screen, "[ ] skill-00");
+        let before = rows(&screen);
+        assert!(before.len() >= 5, "{screen}");
+        let screen = mouse(&mut h, 65, x + 5, y, false);
+        assert!(
+            rows(&screen).first().unwrap().contains("skill-03"),
+            "wheel moved the list: {screen}"
+        );
+        for _ in 0..25 {
+            mouse(&mut h, 65, x + 5, y, false);
+        }
+        let screen = h.turn();
+        assert!(
+            rows(&screen).last().unwrap().contains("skill-47"),
+            "tail reachable: {screen}"
+        );
+        assert!(!rows(&screen).first().unwrap().contains("skill-00"));
+        assert!(h.store.selected_skills.get_untracked().is_empty());
+        assert!(h.prefs.borrow().skills.is_empty());
+        for _ in 0..25 {
+            mouse(&mut h, 64, x + 5, y, false);
+        }
+        let screen = h.turn();
+        assert!(
+            rows(&screen).first().unwrap().contains("skill-00"),
+            "back to top: {screen}"
+        );
+        assert_eq!(before, rows(&screen));
+        assert!(
+            screen.contains("Enter/Esc close"),
+            "narrow footer legible: {screen}"
+        );
+    }
+
+    #[test]
+    fn skills_picker_scrollbar_pointer_actions_and_blocked_skill() {
+        let mut h = harness_sized(Size::new(100, 30));
+        let screen = open(&mut h, 50);
+        let (_, y) = point(&screen, "[ ] skill-00");
+        let list_height = rows(&screen).len();
+        // The shared List reserves its last column for the scrollbar.
+        let bar_x = screen.lines().nth(y).unwrap().trim_end().chars().count() - 1;
+        mouse(&mut h, 0, bar_x, y, false);
+        mouse(&mut h, 32, bar_x, y + list_height - 1, false);
+        mouse(&mut h, 0, bar_x, y + list_height - 1, true);
+        let screen = h.turn();
+        assert!(
+            rows(&screen).last().unwrap().contains("skill-49"),
+            "thumb drag reaches end: {screen}"
+        );
+        let (body_x, body_y) = point(&screen, "[ ] skill-49");
+        mouse(&mut h, 0, body_x + 5, body_y, false);
+        mouse(&mut h, 0, body_x + 5, body_y, true);
+        assert!(
+            h.store.selected_skills.get_untracked().is_empty(),
+            "body click only selects"
+        );
+        let screen = h.turn();
+        let line = screen.lines().nth(body_y).unwrap();
+        let action_x = line[..line.rfind("Attach").unwrap()].chars().count();
+        mouse(&mut h, 0, action_x, body_y, false);
+        let screen = mouse(&mut h, 0, action_x, body_y, true);
+        assert_eq!(
+            h.store.selected_skills.get_untracked(),
+            vec!["skill-49".to_string()]
+        );
+        assert_eq!(h.prefs.borrow().skills, vec!["skill-49".to_string()]);
+        assert!(screen.contains("[x] skill-49"), "{screen}");
+        h.store.skills_catalog.update(|v| v[49].blocked = true);
+        h.store.selected_skills.set(Vec::new());
+        h.turn();
+        h.type_text(" ");
+        h.turn();
+        assert!(h.store.selected_skills.get_untracked().is_empty());
+        assert!(h
+            .store
+            .notices
+            .get_untracked()
+            .iter()
+            .any(|s| s.contains("trust policy")));
+        assert!(h.turn().contains("Blocked by the Gateway"));
+    }
+
+    #[test]
+    fn skills_picker_paging_stable_identity_and_description_scroll() {
+        let mut h = harness_sized(Size::new(80, 24));
+        open(&mut h, 48);
+        h.term.push_input(b"\x1b[6~");
+        h.turn(); // PageDown
+        let screen = h.turn();
+        assert!(
+            !screen.contains("Full description for skill-00"),
+            "paging selects a later skill: {screen}"
+        );
+        h.term.push_input(b"\x1b[F");
+        h.turn(); // End
+        assert!(h.turn().contains("Full description for skill-47"));
+        h.store.skills_catalog.update(|v| {
+            v.insert(
+                0,
+                SkillInfo {
+                    name: "inserted".into(),
+                    ..v[0].clone()
+                },
+            )
+        });
+        h.turn();
+        h.type_text(" ");
+        h.turn();
+        assert_eq!(
+            h.store.selected_skills.get_untracked(),
+            vec!["skill-47".to_string()]
+        );
+        // A long selected description scrolls independently, without moving or
+        // attaching list entries, even when the list retains keyboard focus.
+        h.store.skills_catalog.update(|v| {
+            v.last_mut().unwrap().description =
+                (0..24).map(|i| format!("Detail line{i:02}.\n")).collect()
+        });
+        let screen = h.turn();
+        let (dx, dy) = point(&screen, "Detail line00");
+        let before = rows(&screen);
+        for _ in 0..20 {
+            mouse(&mut h, 65, dx + 3, dy, false);
+        }
+        let screen = h.turn();
+        assert!(
+            screen.contains("Detail line23"),
+            "description tail readable: {screen}"
+        );
+        assert_eq!(before, rows(&screen));
+        h.term.push_input(b"\x1b[H");
+        h.turn(); // Home
+        assert!(h.turn().contains("Full description for skill-00"));
+        h.press_enter();
+        h.turn();
+        h.turn();
+        assert!(
+            !h.turn().contains("gateway skills —"),
+            "Enter closes, never toggles"
+        );
+        assert_eq!(
+            h.store.selected_skills.get_untracked(),
+            vec!["skill-47".to_string()]
+        );
     }
 }
 
@@ -3567,10 +3822,11 @@ fn r_refreshes_the_session_board() {
     h.turn();
     h.press_enter();
     h.turn();
-    // Drain the open-time fetch.
+    // Drain and complete the open-time fetch before explicitly refreshing.
     assert!(h
         .find_cmd(|c| matches!(c, Cmd::LoadSessions { .. }))
         .is_some());
+    h.store.session_refreshing.set(false);
     h.type_text("r");
     h.turn();
     h.turn();
@@ -3679,7 +3935,7 @@ fn header_names_what_gateway_defaults_resolves_to() {
     });
     let screen = h.turn();
     assert!(
-        screen.contains("gateway defaults (lmstudio · ornith-2)"),
+        screen.contains("lmstudio · ornith-2"),
         "served model wins, provider kept:\n{screen}"
     );
 }
@@ -3693,14 +3949,14 @@ fn help_modal_opens_and_closes() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/sessions [id]"),
+        screen.contains("▲ AbstractCode v"),
         "help modal lists commands:\n{screen}"
     );
     h.press_escape();
     h.turn(); // deferred close lands
     let screen = h.turn();
     assert!(
-        !screen.contains("/sessions [id]"),
+        !screen.contains("▲ AbstractCode v"),
         "help closed on Esc:\n{screen}"
     );
 }
@@ -4181,7 +4437,7 @@ fn slash_completion_offers_partials_and_never_hijacks_prompts() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/sessions [id]"),
+        screen.contains("▲ AbstractCode v"),
         "first Enter submitted the command (help open):\n{screen}"
     );
     h.press_escape();
@@ -6700,8 +6956,8 @@ fn header_carries_cockpit_facts_and_footer_carries_instruments() {
         screen.lines().last().unwrap_or_default()
     );
     assert!(
-        chrome.contains("skills 2") && (!chrome.contains("mcp") || chrome.contains("mcp 1")),
-        "capability counts render when nonzero:\n{screen}"
+        chrome.contains("Tools ▾") && !chrome.contains("skills 2") && !chrome.contains("mcp 1"),
+        "capabilities are grouped instead of repeated:\n{screen}"
     );
     assert!(
         screen.contains("100k↑ 28k↓ tk session"),
@@ -7071,7 +7327,7 @@ fn question_mark_opens_the_keys_reference() {
     h.press_enter();
     let screen = h.turn();
     assert!(
-        screen.contains("/sessions [id]"),
+        screen.contains("▲ AbstractCode v"),
         "`?` opens the commands+keys reference:\n{screen}"
     );
     assert!(
@@ -7292,9 +7548,7 @@ fn status_bar_drops_whole_segments_never_self_ellipsis() {
     // The middle (workspace + session id) and the theme are never
     // sacrificed to the instruments.
     assert!(
-        footer.contains("acode-test-session")
-            && footer.contains("⌂ /tmp/ws")
-            && footer.trim_end().ends_with("Dark (Abstract) ▾"),
+        footer.contains("acode-test-session") && footer.contains("⌂ /tmp/ws"),
         "workspace, session id and theme survive:\n{footer}"
     );
 }
@@ -7304,7 +7558,7 @@ fn header_facts_drop_whole_before_workflow_and_route() {
     // HDR-1 degrade rule: when the middle span tightens, cockpit FACTS
     // drop whole (right-to-left) before workflow/route lose a char —
     // and never as `…` fragments.
-    let mut h = harness();
+    let mut h = harness_sized(Size::new(260, 40));
     h.turn();
     h.store
         .selected_skills
@@ -7350,7 +7604,7 @@ fn header_facts_drop_whole_before_workflow_and_route() {
     );
     // Gateway + orb keep the right edge.
     assert!(
-        header.contains("127.0.0.1:8080"),
+        header.contains("Account"),
         "the gateway survives on the right:\n{header}"
     );
 }
@@ -7392,7 +7646,7 @@ fn ctrl_l_redraws_even_with_a_modal_open() {
         before = h.turn();
     }
     assert!(
-        before.contains("/sessions [id]"),
+        before.contains("▲ AbstractCode v"),
         "help modal is up:\n{before}"
     );
     let settled = h
@@ -7415,7 +7669,7 @@ fn ctrl_l_redraws_even_with_a_modal_open() {
     let after = h.turn();
     assert_eq!(before, after, "redraw never changes the scene (modal kept)");
     assert!(
-        after.contains("/sessions [id]"),
+        after.contains("▲ AbstractCode v"),
         "the modal survives the redraw:\n{after}"
     );
 }

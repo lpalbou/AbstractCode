@@ -187,9 +187,10 @@ describe("workspace.css responsive contract", () => {
     expect(lg).toMatch(/\.code-inspector-scrim \{[^}]*display: block;/);
   });
 
-  it("keeps the narrowest composer on two control rows (Stop icon-only, Send may ellipsize)", () => {
+  it("keeps Stop icon-only in the narrowest composer and carries no legacy-composer overrides", () => {
     expect(css).toMatch(/@container pc-composer \(max-width: 359\.98px\) \{[\s\S]*?\.pc-workflow-chat__stop > span \{[^}]*clip-path: inset\(50%\);/);
-    expect(css).toMatch(/@container pc-composer \(max-width: 359\.98px\) \{[\s\S]*?\.pc-composer__row > \.pc-btn \{[^}]*max-width: 45%;/);
+    // panel-chat's rounded multiline composer is the only layout Code renders (no `legacy` variant).
+    expect(css).not.toContain(":not(.pc-composer--compact)");
   });
 
   it("compacts the chrome while the on-screen keyboard is up and caps the composer field", () => {

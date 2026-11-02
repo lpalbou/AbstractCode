@@ -15,6 +15,8 @@ import { createPortal } from "react-dom";
 import { LoadingStatus } from "./loading_status";
 import { ArchivedFooter, ArchivedRow, PanelHeader, panelIds } from "./sidebar_panels";
 import { AutomationCard } from "./sidebar_cards";
+// Canonical consumption-aware panel; the installed UI-kit peer predates visibility receipts.
+import { AutomationPanel } from "../vendor/abstractsessions/automation_panel.js";
 import { AutomationHeaderBar } from "./automation_header";
 import { copy_text } from "../lib/clipboard";
 import { DetailDisclosure, detailPanelIds, useDetailPanels, useTimelineSlot, type DetailPanelsState } from "./detail_panels";
@@ -29,7 +31,7 @@ import {
   type AutomationSummary,
   type DiscussResponse,
 } from "@abstractframework/ui-kit";
-import { AutomationPanelWithMarkdown, WorkspaceBrowser, type AutomationPanelWithMarkdownProps } from "@abstractframework/panel-chat";
+import { automationRenderers, renderAutomationTurn, openGatewayResource, WorkspaceBrowser, type AutomationPanelWithMarkdownProps } from "@abstractframework/panel-chat";
 
 import {
   AUTOMATIONS_POLL_MS,
@@ -58,13 +60,20 @@ export function useAutomations(
   identity: string,
   available: boolean,
   stream: { following: boolean; epoch: number } = { following: false, epoch: 0 },
-): { ctl: AutomationsController; state: AutomationsState } {
+): { ctl: AutomationsController; state: AutomationsState; nowMs: number } {
   const ctl = useMemo(() => new AutomationsController(codeAutomationsClient(), proxyAnswerWait(newId)), [identity]);
   const state = useSyncExternalStore(
     (fn) => ctl.subscribe(fn),
     () => ctl.state,
   );
   const [visible, setVisible] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
+  const [nowMs, setNowMs] = useState(Date.now);
+  useEffect(() => {
+    if (!visible) return;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [visible]);
   useEffect(() => {
     const on = () => setVisible(document.visibilityState !== "hidden");
     document.addEventListener("visibilitychange", on);
@@ -81,7 +90,7 @@ export function useAutomations(
     const t = window.setTimeout(() => void ctl.refresh(), stream.epoch ? 500 : 0);
     return () => window.clearTimeout(t);
   }, [ctl, identity, available, stream.following, stream.epoch]);
-  return { ctl, state };
+  return { ctl, state, nowMs };
 }
 
 /** The badge's words: "1 waiting for you · 2 new" (the terminal's chip). */
@@ -117,8 +126,8 @@ export function AutomationsSection(props: {
   onToggleArchived?(): void;
   /** Unarchive one automation (the gateway's `automation.unarchive`). */
   onUnarchive?(s: AutomationSummary): void;
-  /** The card's Active switch (pause / resume through the gateway). */
-  onToggleActive?(s: AutomationSummary): void;
+  /** Archive confirmation is owned by the host card. */
+  onArchive?(s: AutomationSummary): Promise<unknown>;
   nowMs?: number;
   /** From the person's event stream (backlog 1047): replaces the list's sum when given. */
   attention?: { needsYou: number; newResults: number } | null;
@@ -175,7 +184,7 @@ export function AutomationsSection(props: {
               busy={st.busy}
               nowMs={props.nowMs ?? Date.now()}
               onSelect={() => props.onSelect(s.automation_id)}
-              onToggleActive={() => props.onToggleActive?.(s)}
+              onArchive={props.onArchive ? () => props.onArchive!(s) : undefined}
             />
             {st.rowError?.automationId === s.automation_id ? <ErrorLine error={st.rowError.error} /> : null}
           </React.Fragment>
@@ -373,13 +382,13 @@ export function AutomationMain(props: {
             }}
             onCopyPath={copy_text}
           />
-          {p ? <AutomationPanelWithMarkdown {...p} hideHeader prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} fetchGateway={proxyGatewayFetch} messageProps={{
+          {p ? <AutomationPanel key={d.automationId} {...p} {...automationRenderers} onOpenResource={(r) => openGatewayResource(proxyGatewayFetch, r.url, { name: r.name })} hideHeader prepareTarget={props.prepareTarget} workflowPickerOptions={props.workflowPickerOptions} availableTools={props.availableTools} renderTurn={(turn) => renderAutomationTurn(turn, {
             ...(voice.tts_supported ? { onSpeakToggle: (message) => {
               void voice.toggle_tts(String(message.id || message.content), message.content);
             } } : {}),
             getSpeakState: (message) => voice.tts_playback.key === String(message.id || message.content)
               ? voice.tts_playback.status : "idle",
-          }} /> : null}
+          })} /> : null}
           {timelineSlot
             ? createPortal(
                 <DetailDisclosure
@@ -459,7 +468,7 @@ export function NewAutomationDialog(props: {
       workflowPicker={
         props.workflowPickerOptions && (chosenTarget || props.target) ? <AutomationWorkflowPicker
           target={(chosenTarget || props.target)!} options={props.workflowPickerOptions} onChange={setChosenTarget} /> : <p className="code-field-help" data-field="target">
-          {props.target ? `Initially uses ${props.workflowLabel}. Choose the workflow in this form.` : "Choose a workflow in the Workflow panel first."}
+          {props.target ? `Initially uses ${props.workflowLabel}. Choose the workflow in this form.` : "Choose a workflow in Agent first."}
         </p>
       }
       initialPrompt={props.initialPrompt}

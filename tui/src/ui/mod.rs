@@ -8,7 +8,12 @@ pub mod attention_chip;
 pub mod automations_view;
 pub mod cards;
 pub mod chrome;
+mod companion_preview;
+pub mod companion_view;
+pub mod companion_voice;
+mod content_selection;
 pub mod conversations_view;
+pub mod docs_assistant;
 pub mod entity_actions;
 pub mod entity_modals;
 pub mod goal;
@@ -25,10 +30,13 @@ pub mod queue_modal;
 pub mod quit;
 pub mod rail_view;
 pub mod schedule_view;
+pub mod skills_view;
 pub mod splash;
 pub mod stance;
 pub mod theme_menu;
 pub mod thinking;
+pub mod tools_view;
+pub mod top_bar;
 pub mod transcript_view;
 pub mod voice_view;
 pub mod workspace_view;
@@ -171,6 +179,21 @@ impl UiCtx {
     /// swallowed every key while the new modal painted over it: a
     /// visible, dead picker (live 2026-07-21, /model stage 2).
     pub fn open_modal(&self, cx: Scope, size: Size, build: impl FnOnce(Scope) -> View) {
+        self.open_modal_policy(cx, size, true, build);
+    }
+
+    /// Approval/question steps require an explicit decision or deferral.
+    pub fn open_blocking_modal(&self, cx: Scope, size: Size, build: impl FnOnce(Scope) -> View) {
+        self.open_modal_policy(cx, size, false, build);
+    }
+
+    fn open_modal_policy(
+        &self,
+        cx: Scope,
+        size: Size,
+        dismiss_outside: bool,
+        build: impl FnOnce(Scope) -> View,
+    ) {
         // Take in its own statement (RefMut must not live across retire).
         let replaced = self.modal.borrow_mut().take();
         if let Some(old) = replaced {
@@ -181,6 +204,15 @@ impl UiCtx {
             self.wait_modal_for.borrow_mut().take();
         }
         let modal = Modal::open(&self.overlays, cx, current_viewport(), size, build);
+        if dismiss_outside {
+            let ctx = self.clone();
+            let epoch = self.modal_epoch.get_untracked().wrapping_add(1);
+            self.overlays.on_outside_press(modal.layer(), move || {
+                if ctx.modal_epoch.get_untracked() == epoch {
+                    ctx.close_modal();
+                }
+            });
+        }
         *self.modal.borrow_mut() = Some(modal);
         // Select mode stays ON across modals since abstracttui 0.2.8
         // (our first-app/0285, fixed at the engine): the selection layer
@@ -205,6 +237,11 @@ impl UiCtx {
 }
 
 pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Actions) -> View {
+    let avatar_pointer = AvatarPointer::new(cx);
+    cx.provide_context(avatar_pointer);
+    ctx.overlays.require_pointer_motion();
+    docs_assistant::install(cx, store, &ctx);
+    companion_view::wire(cx, store, &ctx);
     let theme = use_theme(cx);
     let spin = cx.signal(0u64);
     // Engine follow-tail (0.2.0): the Scroll pins to the bottom while
@@ -231,7 +268,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         let ctx = ctx.clone();
         cx.memo(move || {
             let _ = ctx.modal_epoch.get();
-            ctx.modal_open() || stance_mode.get() != stance::OFF
+            ctx.modal_open() || store.docs_open.get() || stance_mode.get() != stance::OFF
         })
     };
     let splash_visible = cx.memo(move || {
@@ -317,6 +354,18 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
     // Durable composer state (draft, caret, input history): lives in root
     // scope so theme rebuilds of the TextArea keep everything.
     let composer = abstracttui::widgets::TextAreaState::new(cx);
+    let content_selection = abstracttui::widgets::ContentSelection::new(cx);
+    cx.provide_context(content_selection.clone());
+    let selection_focus = cx.signal(false);
+    cx.provide_context(content_selection::SelectionFocus(selection_focus));
+    {
+        let selection = content_selection.clone();
+        cx.effect(move || {
+            store.session_id.get();
+            store.focus.get();
+            selection.clear();
+        });
+    }
     // Where the composer currently lives in the tree — the root's
     // type-to-focus handler needs it (see `chrome::ComposerAnchor`).
     let composer_anchor = chrome::ComposerAnchor::default();
@@ -533,6 +582,45 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
             },
         )
         .on(abstracttui::ui::Phase::Capture, {
+            let context = ctx.clone();
+            move |_, event| {
+                if let abstracttui::ui::UiEvent::Mouse(mouse) = event {
+                    if matches!(
+                        mouse.kind,
+                        abstracttui::ui::MouseKind::Move | abstracttui::ui::MouseKind::Down(_)
+                    ) {
+                        companion_view::record_pointer(
+                            store,
+                            &context,
+                            avatar_pointer,
+                            mouse.pos,
+                            matches!(mouse.kind, abstracttui::ui::MouseKind::Down(_)),
+                        );
+                    }
+                }
+            }
+        })
+        .on(abstracttui::ui::Phase::Capture, {
+            let selection = content_selection.clone();
+            let anchor = composer_anchor.clone();
+            move |ectx, event| {
+                if matches!(event, abstracttui::ui::UiEvent::Key(key) if key.key == Key::Escape)
+                    && selection.value().get_untracked().is_some()
+                {
+                    selection.clear();
+                    // Selection cancellation must preserve the urgent voice stop.
+                    // A reviewed draft and run-cancel arm remain untouched.
+                    voice_view::escape(store);
+                    store.last_esc.set(None);
+                    if let Some(id) = anchor.get() {
+                        ectx.request_focus(id);
+                    }
+                    ectx.release_pointer();
+                    ectx.stop_propagation();
+                }
+            }
+        })
+        .on(abstracttui::ui::Phase::Capture, {
             let composer = composer.clone();
             let ctx = ctx.clone();
             let ptt = ptt.clone();
@@ -590,7 +678,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                 // widget under the keyboard cursor: the header's
                 // workflow/model/gateway, the bar's workspace/session/
                 // theme); any other character still goes to the prompt.
-                if chrome_focus.any()
+                if (chrome_focus.any() || selection_focus.get_untracked())
                     && matches!(ev, abstracttui::ui::UiEvent::Key(k) if k.key == Key::Char(' '))
                 {
                     return;
@@ -779,20 +867,26 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                         &ctx,
                         chrome_focus.clone(),
                     ))
-                    .child(transcript_view::pane(
+                    .child(companion_view::wrap(
+                        cx,
                         scx,
-                        &t,
                         store,
                         &ctx,
-                        &feed,
-                        &live_feed,
-                        scroll_offset,
-                        follow,
-                        splash_visible,
-                        splash,
-                        anim_feed.clone(),
-                        anim_frame,
-                        overlay_open,
+                        transcript_view::pane(
+                            scx,
+                            &t,
+                            store,
+                            &ctx,
+                            &feed,
+                            &live_feed,
+                            scroll_offset,
+                            follow,
+                            splash_visible,
+                            splash,
+                            anim_feed.clone(),
+                            anim_frame,
+                            overlay_open,
+                        ),
                     ))
                     // One breathing row between the transcript's last line
                     // and the control panel (operator ask, 2026-07-23). A
@@ -801,11 +895,13 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                     // where the engine believes the visible window ends.
                     // Counted in CHROME_ROWS (5) so the pane-height
                     // estimates stay honest.
-                    .child(
-                        Element::new()
-                            .style(LayoutStyle::line(1).shrink(0.0))
-                            .build(),
-                    )
+                    .child(content_selection::toolbar(
+                        scx,
+                        store,
+                        composer.clone(),
+                        composer_anchor.clone(),
+                        &ctx.overlays,
+                    ))
                     // Pending attachment chips (only while staged — no
                     // reserved blank; CHROME_ROWS estimates deliberately
                     // exclude this sometimes-present row).
@@ -918,6 +1014,9 @@ fn submit(
     }
     match commands::parse(&text) {
         None => {
+            // A newly submitted message takes the speaker lane immediately,
+            // including while the next run is starting or guidance is buffered.
+            voice_view::stop_speaking(store);
             // Commands parsed first (global); then @name routing (leading-@
             // only — a mid-prompt @ is plain text); then the focused
             // conversation decides.
@@ -1199,6 +1298,9 @@ pub(crate) fn send_start(
     opts: StartOpts,
     attachments: Vec<crate::store::PendingAttachment>,
 ) {
+    // Queue/goal/programmatic starts also supersede the previous narration.
+    // Idempotent after a composer submission: no extra host I/O when stopped.
+    voice_view::stop_speaking(store);
     let session_id = store.session_id.get_untracked();
     store.fold.update(|f| {
         f.push_item(Item::User {
@@ -1290,6 +1392,43 @@ fn open_status(cx: Scope, store: Store, ctx: &UiCtx) {
     modals::open_status(cx, store, ctx);
 }
 
+fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
+    // GATED on the gateway's declared host_state contract: with
+    // the contract confirmed, fetch at the gesture (`/host/state`
+    // is slow by contract — open + `r` only, never polled); with
+    // contracts still unanswered, re-probe capabilities so the
+    // open modal can heal live; with the contract known-absent,
+    // fetch nothing — the modal says so honestly.
+    store.host_estimate.set(None);
+    match store.host_contracts.get_untracked() {
+        Some(c) if c.host_state => {
+            // Held facts (fresh or stale) stay visible while the
+            // open-time fetch runs; only a factless state shows
+            // the Pending screen.
+            if !matches!(
+                store.host_state.get_untracked(),
+                crate::store::HostState::Ready(_) | crate::store::HostState::Stale(_)
+            ) {
+                store.host_state.set(crate::store::HostState::Pending);
+            }
+            ctx.send(Cmd::LoadHostState);
+        }
+        None => {
+            ctx.send(Cmd::LoadCapabilities);
+        }
+        Some(_) => {}
+    }
+    modals::open_resources(cx, store, ctx);
+}
+
+fn open_cache(cx: Scope, store: Store, ctx: &UiCtx) {
+    ctx.send(Cmd::LoadCacheInfo {
+        provider: store.provider.get_untracked(),
+        model: store.model.get_untracked(),
+    });
+    modals::open_cache(cx, store, ctx);
+}
+
 /// Run the chrome widget `id` (`chrome::ACT_*`): each opens exactly the
 /// modal its slash command opens. Returns false for an unknown id —
 /// `ACT_THEME` included: the status bar opens the theme DROPDOWN itself,
@@ -1298,11 +1437,32 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
     match id {
         chrome::ACT_WORKFLOW => open_workflow(cx, store, ctx),
         chrome::ACT_MODEL => modals::open_model_picker(cx, store, ctx),
-        chrome::ACT_GATEWAY => open_status(cx, store, ctx),
+        chrome::ACT_GATEWAY | chrome::ACT_CONNECTION => open_status(cx, store, ctx),
+        chrome::ACT_DOCS => {
+            let already_docs = store.docs_open.get_untracked()
+                && store.help_scope.get_untracked() == crate::docs_chat::ChatScope::Docs;
+            store.help_scope.set(crate::docs_chat::ChatScope::Docs);
+            store.docs_open.set(!already_docs);
+        }
+        chrome::ACT_ABOUT => {
+            ctx.send(Cmd::LoadCapabilities);
+            modals::open_about(cx, store, ctx);
+        }
         chrome::ACT_WORKSPACE => {
             rail_view::open_settings(cx, store, ctx, Some(crate::rail::Panel::Workspace))
         }
         chrome::ACT_SESSION => conversations_view::open_sessions(cx, store, ctx),
+        chrome::ACT_SKILLS => {
+            ctx.send(Cmd::LoadSkills);
+            modals::open_skills(cx, store, ctx);
+        }
+        chrome::ACT_MCP => {
+            ctx.send(Cmd::LoadMcp);
+            modals::open_mcp(cx, store, ctx);
+        }
+        chrome::ACT_CACHE => open_cache(cx, store, ctx),
+        chrome::ACT_RESOURCES => open_resources(cx, store, ctx),
+        chrome::ACT_HELP => modals::open_help(cx, ctx),
         chrome::ACT_WAITING => {
             attention_chip::open_waiting(cx, store, ctx);
         }
@@ -1314,6 +1474,7 @@ pub(crate) fn chrome_action(cx: Scope, store: Store, ctx: &UiCtx, id: &str) -> b
 fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_mode: Signal<u8>) {
     match cmd {
         Command::Help => modals::open_help(cx, ctx),
+        Command::Docs => { store.help_scope.set(crate::docs_chat::ChatScope::Docs);store.docs_open.set(true); },
         Command::About => {
             // Gateway package versions come from the capabilities probe;
             // refresh it so the modal fills in live (rows are reactive).
@@ -1346,13 +1507,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
             ctx.send(Cmd::LoadMcp);
             modals::open_mcp(cx, store, ctx);
         }
-        Command::Cache => {
-            ctx.send(Cmd::LoadCacheInfo {
-                provider: store.provider.get_untracked(),
-                model: store.model.get_untracked(),
-            });
-            modals::open_cache(cx, store, ctx);
-        }
+        Command::Cache => open_cache(cx, store, ctx),
         Command::Sessions(None) => conversations_view::open_sessions(cx, store, ctx),
         Command::Sessions(Some(id)) => switch_session(store, ctx, &id),
         Command::Cancel => {
@@ -1394,34 +1549,7 @@ fn dispatch_command(cx: Scope, store: Store, ctx: &UiCtx, cmd: Command, stance_m
         // (carries the dead-worker revert; two concurrent lanes landed
         // an arm each, folded here).
         Command::Gpu => toggle_gpu_meter(store, ctx),
-        Command::Resources => {
-            // GATED on the gateway's declared host_state contract: with
-            // the contract confirmed, fetch at the gesture (`/host/state`
-            // is slow by contract — open + `r` only, never polled); with
-            // contracts still unanswered, re-probe capabilities so the
-            // open modal can heal live; with the contract known-absent,
-            // fetch nothing — the modal says so honestly.
-            store.host_estimate.set(None);
-            match store.host_contracts.get_untracked() {
-                Some(c) if c.host_state => {
-                    // Held facts (fresh or stale) stay visible while the
-                    // open-time fetch runs; only a factless state shows
-                    // the Pending screen.
-                    if !matches!(
-                        store.host_state.get_untracked(),
-                        crate::store::HostState::Ready(_) | crate::store::HostState::Stale(_)
-                    ) {
-                        store.host_state.set(crate::store::HostState::Pending);
-                    }
-                    ctx.send(Cmd::LoadHostState);
-                }
-                None => {
-                    ctx.send(Cmd::LoadCapabilities);
-                }
-                Some(_) => {}
-            }
-            modals::open_resources(cx, store, ctx);
-        }
+        Command::Resources => open_resources(cx, store, ctx),
         Command::Details(arg) => match arg.as_deref().map(str::trim) {
             None | Some("") => toggle_details(store, ctx),
             Some("full") | Some("expand") | Some("on") => {
@@ -1829,6 +1957,9 @@ pub(crate) fn new_session(store: Store, ctx: &UiCtx) {
 /// bounded artifact-image cache (keyed by artifact id; a wiped fold
 /// references none of it).
 fn reset_session_state(store: Store, ctx: &UiCtx, old_sid: &str, new_sid: &str, note: String) {
+    // Session-owned speech cannot follow the user into another conversation.
+    // Stop the host, discard queued narration and fence late audio callbacks.
+    voice_view::stop_speaking(store);
     store.fold.update(|f| {
         // Catalog state SURVIVES the wipe (adversary P2-7): the agent-
         // workflow declarations came from the catalog load, not from the
@@ -2950,6 +3081,7 @@ fn wire_wait_modals(cx: Scope, store: Store, ctx: UiCtx) {
 /// `open_modal` starts by closing the previous modal, which clears the
 /// marker (write-before-open would be undone immediately).
 pub fn open_wait_modal(cx: Scope, store: Store, ctx: &UiCtx, wait: PendingWait) {
+    store.docs_open.set(false);
     match &wait.kind {
         WaitKind::Approval { .. } => modals::open_approval(cx, store, ctx, wait.clone()),
         WaitKind::Ask { .. } => modals::open_ask(cx, store, ctx, wait.clone()),

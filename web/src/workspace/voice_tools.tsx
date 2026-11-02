@@ -138,6 +138,7 @@ export function CodeVoiceSettings({
 }) {
   return (
     <AfVoiceSection
+      compact
       value={value}
       onChange={onChange}
       fetchCatalog={fetchVoiceCatalog}

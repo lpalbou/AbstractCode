@@ -1,0 +1,7 @@
+{
+  "code": "ffc12be",
+  "description_height": "40% of modal content height",
+  "installed_sha256": "3dc06b68c0e02a144a04bdc7973366057964c131a27e07c81cb48ee4defd34e6",
+  "previous_sha256": "3448fc7adeccfb0bfd3c8f6e2675662797216169d1cb885e49359b6f7b995926",
+  "rollback": "/tmp/code-skills-0028-ratio-rollback/abstractcode-3448fc7adeccfb0bfd3c8f6e2675662797216169d1cb885e49359b6f7b995926"
+}

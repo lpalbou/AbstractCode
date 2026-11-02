@@ -3,6 +3,7 @@
 //! All signals are written on the UI thread only — worker threads post
 //! closures through `WakeHandle` (the engine rule).
 
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -86,6 +87,31 @@ impl Workflow {
             format!("{} (gateway default)", self.versioned_label())
         } else {
             self.label()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AccountIdentity {
+    pub user_id: String,
+    pub tenant_id: String,
+    pub error: String,
+}
+impl AccountIdentity {
+    pub fn from_response(v: &Value) -> Self {
+        let p = v.get("principal").unwrap_or(v);
+        Self {
+            user_id: p
+                .get("user_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into(),
+            tenant_id: p
+                .get("tenant_id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .into(),
+            error: String::new(),
         }
     }
 }
@@ -897,6 +923,19 @@ pub struct SessionTotals {
 
 #[derive(Clone, Copy)]
 pub struct Store {
+    pub account: Signal<AccountIdentity>,
+    pub docs_chat: Signal<crate::docs_chat::DocsChat>,
+    pub advice_chat: Signal<crate::docs_chat::DocsChat>,
+    pub advice_draft: Signal<String>,
+    pub companion_tick: Signal<u64>,
+    /// UI-only live error indication; never a run verdict or persisted setting.
+    pub companion_error_active: Signal<bool>,
+    pub companion_advice: Signal<Option<(String, String)>>,
+    pub docs_open: Signal<bool>,
+    pub docs_draft: Signal<String>,
+    pub help_scope: Signal<crate::docs_chat::ChatScope>,
+    pub run_chat: Signal<crate::docs_chat::DocsChat>,
+    pub run_question_draft: Signal<String>,
     pub fold: Signal<Fold>,
     pub phase: Signal<Phase>,
     pub conn: Signal<Conn>,
@@ -1113,6 +1152,8 @@ pub struct Store {
     /// and on `r` — never polled (the `/resources` rule). See
     /// [`SessionIndex`] for why absence is its own state.
     pub session_index: Signal<SessionIndex>,
+    pub session_refreshing: Signal<bool>,
+    pub session_refresh_error: Signal<String>,
     /// The active run tree is PAUSED on the gateway (durable /pause).
     pub paused: Signal<bool>,
     /// Files staged for the NEXT plain-prompt send (chips above the
@@ -1279,6 +1320,18 @@ pub struct Store {
 impl Store {
     pub fn create(cx: Scope) -> Store {
         Store {
+            account: cx.signal(Default::default()),
+            docs_chat: cx.signal(Default::default()),
+            advice_chat: cx.signal(Default::default()),
+            advice_draft: cx.signal(String::new()),
+            companion_tick: cx.signal(0),
+            companion_error_active: cx.signal(false),
+            companion_advice: cx.signal(None),
+            docs_open: cx.signal(false),
+            docs_draft: cx.signal(String::new()),
+            help_scope: cx.signal(Default::default()),
+            run_chat: cx.signal(Default::default()),
+            run_question_draft: cx.signal(String::new()),
             fold: cx.signal(Fold::new()),
             phase: cx.signal(Phase::Idle),
             animation: cx.signal(0u8),
@@ -1350,6 +1403,8 @@ impl Store {
             expanded_tools: cx.signal(Vec::new()),
             expanded_cycles: cx.signal(Vec::new()),
             session_index: cx.signal(SessionIndex::Unfetched),
+            session_refreshing: cx.signal(false),
+            session_refresh_error: cx.signal(String::new()),
             paused: cx.signal(false),
             quit_state: cx.signal(QuitState::None),
             verb_ack: cx.signal(None),

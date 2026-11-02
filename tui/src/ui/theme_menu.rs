@@ -1,17 +1,15 @@
-//! The status bar's theme control (operator ask 2026-10-10: "the theme
+//! The top bar's theme control (operator ask 2026-10-10: "the theme
 //! [name] clickable, to show a dropdown list with all the available
 //! themes that we could rapidly scroll to see how the global UI looks
 //! with it … accessible through tab and mouse click/scroll").
 //!
-//! - The TRIGGER is the theme's name in the status bar, `Tokyo Night ▾`:
-//!   since 0.12.0 an action span of the bar (`chrome::ACT_THEME`,
-//!   abstracttui 0187) — a click opens, and Tab to the bar, → to the
-//!   name, Enter or Space opens. (The wheel over the CLOSED name no
+//! - The TRIGGER is Theme in the header (or compact Menu), a semantic
+//!   action span (`chrome::ACT_THEME`, abstracttui 0187). A click opens;
+//!   Tab to the header, arrows, Enter or Space opens. (The wheel over the CLOSED name no
 //!   longer steps the theme: the engine does not say which span a wheel
 //!   lands on.)
 //! - The DROPDOWN lists every theme grouped Dark / Light (the engine's
-//!   `themes_by_mode` order), anchored at the trigger (it opens upward
-//!   from the bottom bar). Moving the highlight — arrows, Page Up/Down,
+//!   `themes_by_mode` order), anchored at the trigger with engine placement. Moving the highlight — arrows, Page Up/Down,
 //!   Home/End, or the WHEEL — applies that theme LIVE to the whole UI,
 //!   the dropdown included. Enter or a click keeps it; Escape restores
 //!   the theme that was active at open; a press outside keeps what is
@@ -40,7 +38,7 @@ use super::UiCtx;
 /// Rows shown at once before the list windows around the highlight.
 pub const MAX_VISIBLE: usize = 14;
 
-/// The dropdown's state, created ONCE in the root (the status bar is
+/// The dropdown's state, created ONCE in the root (the chrome is
 /// rebuilt often; it must survive it): whether the dropdown is open.
 #[derive(Copy, Clone)]
 pub struct TriggerState {

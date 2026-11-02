@@ -44,3 +44,5 @@ The terminal client keeps its reference documentation beside its source:
 [`../llms.txt`](../llms.txt) is a concise index of this corpus, and
 [`../llms-full.txt`](../llms-full.txt) is the expanded aggregate, both for
 language models and tooling.
+
+- [Agent skill](../skills/abstractcode/SKILL.md): operate sessions, tool choices, the assistant drawer and voice.

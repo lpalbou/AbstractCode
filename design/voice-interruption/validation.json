@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-31",
+  "tests": {
+    "passed": 1231,
+    "failed": 0,
+    "ignored": 23
+  },
+  "voice_tests": {
+    "passed": 44,
+    "ignored": 6
+  },
+  "submission_cases": [
+    "Idle new run",
+    "Starting buffered guidance",
+    "Running guidance",
+    "Playing",
+    "Paused",
+    "Preparing",
+    "typing does not interrupt",
+    "old queue discarded",
+    "late chunks blocked",
+    "stale completion cannot replace new speech identity"
+  ],
+  "control_checks": {
+    "widths": [
+      40,
+      80,
+      220
+    ],
+    "distance_from_last_bar_cells": "1..4",
+    "pause_resume_same_generation": true,
+    "spectrum_updates_between_mouse_down_up": true,
+    "hidden_when_idle_preparing_recording": true
+  },
+  "installed_binary_sha256": "c8240896295d56d8a675affce44eeabf6cf214948cd775efebdad3d5525c9953",
+  "checks": [
+    "all-target tests",
+    "all-target Clippy with warnings denied",
+    "cargo fmt --check",
+    "actual bridge Stop operation and streaming request boundaries through fake host/gateway"
+  ],
+  "physical_audio": "Existing stop/pause bridge reused; no physical audio playback in this check.",
+  "scope": "Code terminal only; local installation, no process restart, release or push; unrelated concurrent web edits preserved"
+}

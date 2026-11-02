@@ -6,10 +6,75 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-02
+
+Needs AbstractTUI 0.7.1 with its `avatar` feature (the companion's designs come
+from AbstractAvatar 0.1.0, resolved from crates.io).
+
+### Added
+
+- **Six companion designs** shared with the other AbstractFramework apps
+  (Halo, Hover, Vortex, Eclipse, Eye, Rover). Ready looks at you and Error
+  has a clear face, held for one second so a short failure stays visible.
+  In Appearance, Enter applies the focused design.
+- Files attached to an assistant answer (`attachments`, `files`,
+  `artifacts`) are listed beside that answer, including file-only results.
+
 ### Changed
 
+- The Skills picker is larger, uses the engine List (mouse wheel, scrollbar,
+  keyboard) and gives the selected skill's full description forty percent
+  of the dialog.
+- Starting a new session or switching sessions stops current and queued
+  speech; sending a new message interrupts the previous narration. The
+  playback control sits beside the speaking meter.
+- Select assistant prose, table cells or code and stage Explain, Use as context or
+  Change in the existing draft. Unicode word/sentence/paragraph units and wrapped
+  drags retain source provenance. The action row keeps transcript height stable;
+  keyboard navigation and narrow-window menus expose the same choices. Selection
+  never sends automatically; Esc/Cancel preserves drafts and voice stop remains available.
+- Companion floats beneath the right header controls without narrowing the
+  transcript. Art and actions align together; Listening, Waiting and Working
+  have distinct poses, with working thruster particles.
+- Companion artwork uses larger shaded Halo/Hover visuals. Appearance opens a
+  silent live phase preview with automatic cycling, manual hold and explicit save.
+- Add optional Halo/Hover session companion, observed activity poses, reduced
+  motion, change-driven comments and independent side speech preferences. Side
+  microphone input stays in the selected question draft; speech shares the existing
+  queue. Companion settings are available in the account menu and side drawer.
+- Catalog pickers allocate their full modal height so voice choices remain visible.
+- Both assistant scopes include fresh main-conversation requests and replies without
+  tool payloads or hidden reasoning. Send/new/retry use labelled icons on one row.
+- Voice settings let held-Space messages be reviewed in the prompt before sending
+  (`/voice auto-send off`); automatic delivery remains the existing default.
+  Selected voices retain their human catalog label across restarts.
+- The Tools dialog fills most of the viewport and uses the engine List for mouse-wheel,
+  keyboard and scrollbar navigation. Off/Ask/Auto is visible for each tool and category;
+  Gateway-disabled tools remain unavailable. Selected details retain the Gateway text.
+- The composer has a one-cell inner inset. Assistant messages use the shared engine
+  ChatPanel with measured bubbles; This run adds isolated, read-only snapshot questions.
+- Session discovery omits expensive ledger metrics, publishes a small metadata page first,
+  retains cached rows/titles during refresh and keeps them on errors. `/sessions` rows
+  show the date and turn count, no longer the tool count.
+- **The header groups Tools, Skills and MCP under one Tools menu**, with more spacing
+  between actions and no duplicate capability counts in the footer. Context/tokens
+  still open Cache, GPU/memory open Resources, workspace mode opens Workspace and
+  the keys pointer opens Help. Mouse and keyboard activation share the command panels.
+- **Docs, Theme, About and the account/status menu** occupy the header's right end.
+  Narrow terminals use Menu. Docs uses the existing Gateway documentation workflow in
+  a separate conversation; the account menu uses the Gateway identity and offers
+  connection status, copy user id and confirmed disconnection of this terminal.
+- Ordinary dialogs close on outside click without click-through. Approval and
+  user-question steps remain protected. Focused entity chips remain visible at narrow widths.
 - `assets/automation_controls.json` is the kit's file again, byte-identical. AbstractUIC 0067 adds the attention
   badge's glyph and words, which this crate does not draw yet. The `.sha256` pin is updated.
+
+### Fixed
+
+- The companion's artwork no longer hides transcript text outside its shape.
+- After a reconnect, the final ledger records are read to the end and the
+  canonical output is reconciled, so a completed answer is never left hidden
+  inside a reasoning cycle.
 
 ## [0.12.0] - 2026-10-28
 

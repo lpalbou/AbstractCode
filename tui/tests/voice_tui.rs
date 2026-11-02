@@ -76,6 +76,7 @@ struct GatewayScript {
     segments: Vec<i16>,
     /// `Some((status, detail))` = the TTS route refuses.
     tts_refusal: Option<(u16, String)>,
+    transcription_delay: Duration,
     defaults: Value,
 }
 
@@ -85,6 +86,7 @@ impl Default for GatewayScript {
             segment_delay: Duration::from_millis(20),
             segments: vec![1, 2, 3],
             tts_refusal: None,
+            transcription_delay: Duration::ZERO,
             defaults: json!({
                 "tts": {"route": "output.voice", "configured": true, "provider": "supertonic", "model": "supertonic-3", "voice": "M3"},
                 "stt": {"route": "input.voice", "configured": true, "provider": "faster-whisper", "model": "large-v3"},
@@ -184,6 +186,7 @@ fn serve(script: GatewayScript) -> FakeGateway {
                         &json!({"attachment": {"$artifact": "att-1", "artifact_id": "att-1", "content_type": "audio/wav"}}).to_string(),
                     );
                 } else if p.ends_with("/audio/transcribe") {
+                    std::thread::sleep(script.transcription_delay);
                     respond(
                         &mut stream,
                         200,
@@ -653,6 +656,8 @@ struct Harness {
     driver: Driver,
     store: Store,
     prefs: Rc<RefCell<Prefs>>,
+    ctx: UiCtx,
+    scope: Scope,
     _rx: mpsc::Receiver<Cmd>,
 }
 
@@ -673,6 +678,10 @@ fn harness_with(gateway_url: &str, kitty: bool) -> Harness {
     let store_out = store_slot.clone();
     let prefs = Rc::new(RefCell::new(Prefs::default()));
     let prefs_for_ctx = prefs.clone();
+    let ctx_slot: Rc<RefCell<Option<UiCtx>>> = Rc::new(RefCell::new(None));
+    let ctx_out = ctx_slot.clone();
+    let scope_slot = Rc::new(RefCell::new(None));
+    let scope_out = scope_slot.clone();
     let actions = app.actions();
     let url = gateway_url.to_string();
     app.mount(move |cx| {
@@ -697,6 +706,8 @@ fn harness_with(gateway_url: &str, kitty: bool) -> Harness {
             dismissed_wait: Rc::new(RefCell::new(None)),
             wait_modal_for: Rc::new(RefCell::new(None)),
         };
+        *ctx_out.borrow_mut() = Some(ctx.clone());
+        *scope_out.borrow_mut() = Some(cx);
         ui::root(cx, store, ctx, &actions)
     })
     .expect("mount");
@@ -713,12 +724,16 @@ fn harness_with(gateway_url: &str, kitty: bool) -> Harness {
     };
     let driver = Driver::new(&mut app, &mut term, cfg).expect("driver");
     let store = store_slot.borrow().expect("store");
+    let ctx = ctx_slot.borrow().as_ref().expect("ctx").clone();
+    let scope = scope_slot.borrow().expect("scope");
     Harness {
         app,
         term,
         driver,
         store,
         prefs,
+        ctx,
+        scope,
         _rx: rx,
     }
 }
@@ -1982,4 +1997,914 @@ fn a_saved_microphone_that_is_gone_records_from_the_system_default() {
          one plugged in since start and one that works are used"
     );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn held_voice_can_be_reviewed_and_edited_before_any_task_is_sent() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness_with(&gw.url, true);
+    h.with_reply("ready");
+    with_workflow(&mut h);
+    h.type_text("/voice auto-send off\r");
+    h.until("review preference", |s| s.contains("review and edit"));
+    assert_eq!(
+        h.prefs.borrow().voice.as_ref().unwrap()["auto_send_voice"],
+        false
+    );
+    h.term.push_input(b"\x1b[32u");
+    h.until("review recording hint", |s| {
+        s.contains("release Space to review")
+    });
+    std::thread::sleep(Duration::from_millis(700));
+    h.term.push_input(b"\x1b[32;1:3u");
+    let store = h.store;
+    h.until("editable transcription", |s| {
+        s.contains("hello from the microphone")
+            && matches!(
+                store.voice.dictation.get_untracked(),
+                voice::Dictation::Idle
+            )
+    });
+    assert!(store.voice.hold_send.get_untracked().is_none());
+    assert!(
+        !h._rx.try_iter().any(|cmd| matches!(
+            cmd,
+            Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. }
+        )),
+        "review must not run, steer or approve"
+    );
+    h.type_text(" corrected\r");
+    h.turn();
+    assert_eq!(
+        started_prompt(&h).as_deref(),
+        Some("hello from the microphone corrected")
+    );
+}
+
+#[test]
+fn voice_catalog_choice_retains_its_label_without_changing_its_identity() {
+    let choices = ui::voice_view::engine_choices(
+        &json!({"items":[{"id":"41576236cd5f4a9a8399f00000000000","label":"Sisko","provider":"piper","model":"voice-model","voice_kind":"profile"}]}),
+        true,
+        None,
+    );
+    let (label, selected) = &choices[1];
+    assert!(label.starts_with("Sisko"));
+    assert_eq!(selected.profile, "41576236cd5f4a9a8399f00000000000");
+    assert_eq!(selected.voice_label, "Sisko");
+    assert!(!selected.tts_override_summary().contains("41576236"));
+    assert!(!selected.tts_request().contains_key("voice_label"));
+}
+
+#[test]
+fn assistant_microphone_only_fills_its_captured_side_draft() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    with_workflow(&mut h);
+    h.type_text("Keep this coding draft");
+    h.turn();
+    h.store.run_question_draft.set("Side draft:".into());
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+    );
+    h.until("side recording", |_| ops(&log).contains(&"record".into()));
+    assert!(ui::voice_view::is_assistant_recording(
+        h.store,
+        abstractcode::docs_chat::ChatScope::Run
+    ));
+    assert!(!ui::voice_view::is_assistant_recording(
+        h.store,
+        abstractcode::docs_chat::ChatScope::Docs
+    ));
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+    );
+    let store = h.store;
+    let screen = h.until("side transcript", |_| {
+        store
+            .run_question_draft
+            .get_untracked()
+            .contains("hello from the microphone")
+    });
+    assert_eq!(
+        store.run_question_draft.get_untracked(),
+        "Side draft: hello from the microphone"
+    );
+    assert!(store.docs_draft.get_untracked().is_empty());
+    assert!(screen.contains("Keep this coding draft"), "{screen}");
+    assert!(
+        store.voice.transcript.get_untracked().is_none()
+            && store.voice.hold_send.get_untracked().is_none()
+    );
+    assert!(!h._rx.try_iter().any(|cmd| matches!(
+        cmd,
+        Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. } | Cmd::AssistantAsk { .. }
+    )));
+}
+
+#[test]
+fn assistant_microphone_discards_output_after_source_session_or_conversation_changes() {
+    let _g = serial();
+    for reset_side in [false, true] {
+        let gw = serve(GatewayScript::default());
+        let (_host, log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("ready");
+        ui::voice_view::toggle_assistant_dictation(
+            h.store,
+            &h.ctx,
+            abstractcode::docs_chat::ChatScope::Run,
+        );
+        h.until("record", |_| ops(&log).contains(&"record".into()));
+        ui::voice_view::toggle_assistant_dictation(
+            h.store,
+            &h.ctx,
+            abstractcode::docs_chat::ChatScope::Run,
+        );
+        if reset_side {
+            h.store.run_chat.set(Default::default());
+        } else {
+            h.store.session_id.set("different-session".into());
+        }
+        let store = h.store;
+        h.until("discard stale output", |_| {
+            matches!(
+                store.voice.dictation.get_untracked(),
+                voice::Dictation::Idle
+            )
+        });
+        assert!(store.run_question_draft.get_untracked().is_empty());
+        assert!(store.voice.transcript.get_untracked().is_none());
+        assert!(!h._rx.try_iter().any(|cmd| matches!(
+            cmd,
+            Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. } | Cmd::AssistantAsk { .. }
+        )));
+    }
+}
+
+#[test]
+fn cancelling_assistant_microphone_never_delivers_text_or_starts_inference() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Docs,
+    );
+    h.until("record", |_| ops(&log).contains(&"record".into()));
+    assert!(ui::voice_view::escape(h.store));
+    for _ in 0..6 {
+        h.turn();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(h.store.docs_draft.get_untracked().is_empty());
+    assert!(gw.requests("/audio/transcribe").is_empty());
+    assert!(!h._rx.try_iter().any(|cmd| matches!(
+        cmd,
+        Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. } | Cmd::AssistantAsk { .. }
+    )));
+}
+
+#[test]
+fn companion_synthesis_override_keeps_local_audio_settings_and_default_inherits_main_voice() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    h.prefs.borrow_mut().voice = Some(
+        json!({"provider":"piper","model":"main-model","voice":"main-voice","output_device":"uid-speakers","reply_volume":0.4}),
+    );
+    ui::voice_view::speak_text_with_prefs(
+        h.store,
+        &h.ctx,
+        "companion text".into(),
+        &VoicePrefs {
+            provider: "supertonic".into(),
+            model: "supertonic-3".into(),
+            voice: "M2".into(),
+            ..Default::default()
+        },
+    );
+    let store = h.store;
+    h.until("override spoken", |_| {
+        !played(&log).is_empty()
+            && matches!(store.voice.speaking.get_untracked(), voice::Speaking::Idle)
+    });
+    ui::voice_view::speak_text_with_prefs(
+        h.store,
+        &h.ctx,
+        "inherited text".into(),
+        &VoicePrefs::default(),
+    );
+    h.until("main voice inherited", |_| {
+        gw.requests("/voice/tts/stream").len() == 2
+            && matches!(store.voice.speaking.get_untracked(), voice::Speaking::Idle)
+    });
+    let requests = gw.requests("/voice/tts/stream");
+    let first: Value = serde_json::from_str(&requests[0].2).unwrap();
+    let second: Value = serde_json::from_str(&requests[1].2).unwrap();
+    assert_eq!(first["provider"], "supertonic");
+    assert_eq!(first["voice"], "M2");
+    assert_eq!(second["provider"], "piper");
+    assert_eq!(second["voice"], "main-voice");
+    let commands = &log.lock().unwrap().commands;
+    assert!(commands
+        .iter()
+        .filter(|c| c["op"] == "play")
+        .all(|c| c["device"] == "uid-speakers"));
+    assert_eq!(
+        h.prefs.borrow().voice.as_ref().unwrap()["voice"],
+        "main-voice"
+    );
+}
+
+#[test]
+fn cancelling_assistant_transcription_discards_its_late_http_reply() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        transcription_delay: Duration::from_millis(250),
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+    );
+    h.until("record", |_| ops(&log).contains(&"record".into()));
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+    );
+    h.until("transcription request", |_| {
+        gw.requests("/audio/transcribe").len() == 1
+    });
+    assert!(ui::voice_view::escape(h.store));
+    for _ in 0..20 {
+        h.turn();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(h.store.run_question_draft.get_untracked().is_empty());
+    assert!(h.store.voice.transcript.get_untracked().is_none());
+    assert!(!h._rx.try_iter().any(|cmd| matches!(
+        cmd,
+        Cmd::Start { .. } | Cmd::Steer { .. } | Cmd::Resume { .. } | Cmd::AssistantAsk { .. }
+    )));
+}
+
+#[test]
+fn companion_narration_shares_main_queue_without_interrupting_or_losing_following_entries() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(80),
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    h.prefs.borrow_mut().companion = Some(json!({"enabled":true,"read_aloud":true}));
+    ui::voice_view::speak_text(h.store, &h.ctx, "main first".into());
+    h.until("main playback", |_| !played(&log).is_empty());
+    let stops = ops(&log).iter().filter(|op| op.as_str() == "stop").count();
+    ui::voice_view::narrate_assistant(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+        "side second".into(),
+        &VoicePrefs::default(),
+    );
+    ui::voice_view::narrate(h.store, &h.ctx, "main third".into());
+    assert_eq!(
+        gw.requests("/voice/tts/stream").len(),
+        1,
+        "side queue must not overlap main inference/playback"
+    );
+    let store = h.store;
+    h.until("side playback identity", |_| {
+        gw.requests("/voice/tts/stream").len() == 2
+            && store.voice.speaking.get_untracked() != voice::Speaking::Idle
+    });
+    assert_eq!(
+        store.voice.speaking_text.get_untracked(),
+        Some(voice::text_key("side second"))
+    );
+    h.until("ordered main/side queue", |_| {
+        gw.requests("/voice/tts/stream").len() == 3
+            && matches!(store.voice.speaking.get_untracked(), voice::Speaking::Idle)
+    });
+    let text = gw
+        .requests("/voice/tts/stream")
+        .into_iter()
+        .map(|r| {
+            serde_json::from_str::<Value>(&r.2).unwrap()["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(text, vec!["main first", "side second", "main third"]);
+    assert_eq!(
+        ops(&log).iter().filter(|op| op.as_str() == "stop").count(),
+        stops,
+        "queued side speech cannot stop main playback or clear the following narration"
+    );
+}
+
+#[test]
+fn paused_speaker_and_recording_microphone_hold_companion_narration() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    h.prefs.borrow_mut().companion = Some(json!({"enabled":true,"read_aloud":true}));
+    h.store.voice.speaking.set(voice::Speaking::Paused);
+    ui::voice_view::narrate_assistant(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+        "paused entry".into(),
+        &VoicePrefs::default(),
+    );
+    for _ in 0..4 {
+        h.turn();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(gw.requests("/voice/tts/stream").is_empty());
+    ui::voice_view::stop_speaking(h.store); // Also cancels that queued entry.
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+    );
+    h.until("microphone", |_| ops(&log).contains(&"record".into()));
+    ui::voice_view::narrate_assistant(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+        "after recording".into(),
+        &VoicePrefs::default(),
+    );
+    for _ in 0..4 {
+        h.turn();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(gw.requests("/voice/tts/stream").is_empty());
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+    );
+    let store = h.store;
+    h.until("narration after microphone released", |_| {
+        gw.requests("/voice/tts/stream").len() == 1
+            && matches!(store.voice.speaking.get_untracked(), voice::Speaking::Idle)
+    });
+    let body: Value = serde_json::from_str(&gw.requests("/voice/tts/stream")[0].2).unwrap();
+    assert_eq!(body["text"], "after recording");
+}
+
+#[test]
+fn queued_companion_narration_is_discarded_after_side_or_main_source_changes() {
+    let _g = serial();
+    for change_main in [false, true] {
+        let gw = serve(GatewayScript::default());
+        let (_host, _log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("ready");
+        h.prefs.borrow_mut().companion = Some(json!({"enabled":true,"read_aloud":true}));
+        h.store.voice.speaking.set(voice::Speaking::Paused);
+        ui::voice_view::narrate_assistant(
+            h.store,
+            &h.ctx,
+            abstractcode::docs_chat::ChatScope::Run,
+            "stale side narration".into(),
+            &VoicePrefs::default(),
+        );
+        if change_main {
+            h.store.session_id.set("other-main-session".into());
+        } else {
+            h.store.run_chat.set(Default::default());
+        }
+        h.store.voice.speaking.set(voice::Speaking::Idle);
+        for _ in 0..5 {
+            h.turn();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(gw.requests("/voice/tts/stream").is_empty());
+    }
+}
+
+#[test]
+fn companion_voice_picker_changes_only_the_companion_preset() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, _log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    h.prefs.borrow_mut().voice =
+        Some(json!({"provider":"piper","model":"main-model","voice":"main-voice"}));
+    h.prefs.borrow_mut().companion = Some(json!({"enabled":true,"future_field":true}));
+    ui::voice_view::open_companion_voice_picker(h.scope, h.store, &h.ctx);
+    h.until("independent voice catalog", |s| {
+        s.contains("Companion voice · Enter selects") && s.contains("Main assistant voice")
+    });
+    h.term.push_input(b"\x1b[B\r");
+    h.turn();
+    let preferences = h.prefs.borrow();
+    assert_eq!(preferences.voice.as_ref().unwrap()["voice"], "main-voice");
+    let companion = preferences.companion.as_ref().unwrap();
+    assert_eq!(companion["voice"]["profile"], "M3");
+    assert_eq!(companion["voice"]["voice_label"], "M3");
+    assert_eq!(companion["future_field"], true);
+    assert!(
+        gw.requests("/voice/tts/stream").is_empty(),
+        "selection must not start synthesis"
+    );
+}
+
+#[test]
+fn disabling_read_aloud_or_companion_suppresses_already_queued_side_speech() {
+    let _g = serial();
+    for key in ["enabled", "read_aloud"] {
+        let gw = serve(GatewayScript {
+            segment_delay: Duration::from_millis(80),
+            ..Default::default()
+        });
+        let (_host, log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("ready");
+        h.prefs.borrow_mut().companion = Some(json!({"enabled":true,"read_aloud":true}));
+        ui::voice_view::speak_text(h.store, &h.ctx, "main speech".into());
+        h.until("main speech", |_| !played(&log).is_empty());
+        ui::voice_view::narrate_assistant(
+            h.store,
+            &h.ctx,
+            abstractcode::docs_chat::ChatScope::Run,
+            "must not speak".into(),
+            &VoicePrefs::default(),
+        );
+        h.prefs.borrow_mut().companion.as_mut().unwrap()[key] = json!(false);
+        let store = h.store;
+        h.until("main finished", |_| {
+            matches!(store.voice.speaking.get_untracked(), voice::Speaking::Idle)
+        });
+        for _ in 0..5 {
+            h.turn();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            gw.requests("/voice/tts/stream").len(),
+            1,
+            "queued speech must obey latest {key} choice"
+        );
+    }
+}
+
+#[test]
+fn assistant_microphone_does_not_take_over_an_existing_main_recording() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("ready");
+    ui::voice_view::toggle_dictation(h.store, &h.ctx);
+    h.until("main recording", |_| ops(&log).contains(&"record".into()));
+    ui::voice_view::toggle_assistant_dictation(
+        h.store,
+        &h.ctx,
+        abstractcode::docs_chat::ChatScope::Run,
+    );
+    assert!(!ui::voice_view::is_assistant_recording(
+        h.store,
+        abstractcode::docs_chat::ChatScope::Run
+    ));
+    assert!(
+        !ops(&log).contains(&"record_stop".into()),
+        "assistant action cannot stop the main microphone"
+    );
+    assert!(ui::voice_view::escape(h.store));
+}
+
+#[test]
+fn companion_speech_failures_are_not_appended_to_the_coding_transcript() {
+    let _g = serial();
+    for queued in [false, true] {
+        let gw = serve(GatewayScript {
+            tts_refusal: Some((429, "companion speech quota exceeded".into())),
+            ..Default::default()
+        });
+        let (_host, _log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("coding answer remains unchanged");
+        h.prefs.borrow_mut().companion = Some(json!({"enabled":true,"read_aloud":true}));
+        let original = h.store.fold.with_untracked(|fold| fold.items.clone());
+        if queued {
+            ui::voice_view::narrate_assistant(
+                h.store,
+                &h.ctx,
+                abstractcode::docs_chat::ChatScope::Run,
+                "side answer".into(),
+                &VoicePrefs::default(),
+            );
+        } else {
+            ui::voice_view::speak_text_with_prefs(
+                h.store,
+                &h.ctx,
+                "side answer".into(),
+                &VoicePrefs::default(),
+            );
+        }
+        h.until("side speech refusal notification", |s| {
+            s.contains("Reading aloud failed: companion speech quota exceeded.")
+        });
+        assert_eq!(
+            h.store.fold.with_untracked(|fold| fold.items.clone()),
+            original,
+            "side audio failure must not modify main conversation or advice context"
+        );
+        assert!(h
+            .store
+            .run_chat
+            .with_untracked(|chat| chat.messages.is_empty()));
+    }
+}
+
+fn current_speech_button_bounds(h: &mut Harness, label: &str) -> Option<Rect> {
+    h.app
+        .tree()
+        .accessibility_tree()
+        .entries
+        .into_iter()
+        .find(|entry| entry.label == label)
+        .map(|entry| entry.bounds)
+}
+fn click_current_speech_button(h: &mut Harness, bounds: Rect) {
+    let x = bounds.x + bounds.w / 2 + 1;
+    let y = bounds.y + 1;
+    h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+    h.turn();
+    h.term.push_input(format!("\x1b[<0;{x};{y}m").as_bytes());
+    h.turn();
+}
+
+#[test]
+fn current_speech_controls_pause_resume_the_selected_companion_audio_without_replay() {
+    let _g = serial();
+    let gw = serve(GatewayScript {
+        segment_delay: Duration::from_millis(300),
+        segments: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        ..Default::default()
+    });
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("The latest coding answer must not be replayed.");
+    h.term.push_resize(Size::new(80, 34));
+    h.turn();
+    ui::companion_voice::speak(
+        h.store,
+        &h.ctx,
+        "This selected companion speech stays selected.".into(),
+        &VoicePrefs::default(),
+    );
+    let screen = h.until("current selected speech", |s| s.contains("♪ Speaking…"));
+    let row = screen
+        .lines()
+        .find(|line| line.contains("♪ Speaking…"))
+        .unwrap();
+    assert!(
+        row.contains("Ctrl+P pauses") && row.chars().any(|c| "▂▃▄▅▆▇█".contains(c)),
+        "80-column meter retains useful content: {screen}"
+    );
+    let pause =
+        current_speech_button_bounds(&mut h, "Pause current speech").expect("pause control");
+    assert!(
+        pause.w > 0 && pause.x >= 0 && pause.right() <= 80,
+        "button bounds {pause:?}\n{screen}"
+    );
+    let last_bar = row
+        .chars()
+        .enumerate()
+        .filter(|(_, c)| "▂▃▄▅▆▇█".contains(*c))
+        .map(|(x, _)| x as i32)
+        .max()
+        .unwrap();
+    assert!(
+        (1..=4).contains(&(pause.x - last_bar)),
+        "pause must be beside the spectrum, not at the far right: {pause:?} {row}"
+    );
+    // A changing spectrum and elapsed tick must not unmount a pressed button.
+    let x = pause.x + pause.w / 2 + 1;
+    let y = pause.y + 1;
+    h.term.push_input(format!("\x1b[<0;{x};{y}M").as_bytes());
+    h.turn();
+    h.store.voice.speak_levels.set(vec![0.1, 0.8, 0.4, 0.9]);
+    h.store.voice.tick.update(|n| *n += 1);
+    h.turn();
+    h.term.push_input(format!("\x1b[<0;{x};{y}m").as_bytes());
+    h.turn();
+    h.until("paused selected speech", |s| s.contains("‖ Paused"));
+    let resume =
+        current_speech_button_bounds(&mut h, "Resume current speech").expect("resume control");
+    click_current_speech_button(&mut h, resume);
+    h.until("resumed selected speech", |s| s.contains("♪ Speaking…"));
+    let commands = log.lock().unwrap().commands.clone();
+    let generation = commands.iter().find(|v| v["op"] == "play").unwrap()["gen"].clone();
+    let controls = commands
+        .iter()
+        .filter(|v| v["op"] == "pause" || v["op"] == "resume")
+        .collect::<Vec<_>>();
+    assert_eq!(controls.len(), 2);
+    assert!(controls.iter().all(|v| v["gen"] == generation));
+    assert_eq!(gw.requests("/voice/tts/stream").len(), 1);
+    let body: Value = serde_json::from_str(&gw.requests("/voice/tts/stream")[0].2).unwrap();
+    assert_eq!(
+        body["text"],
+        "This selected companion speech stays selected."
+    );
+    for width in [40, 220] {
+        h.term.push_resize(Size::new(width, 34));
+        h.turn();
+        let screen = h.driver.screenshot().to_text();
+        let row = screen
+            .lines()
+            .find(|line| line.contains("♪ Speaking…"))
+            .unwrap();
+        let control = current_speech_button_bounds(&mut h, "Pause current speech").unwrap();
+        let last_bar = row
+            .chars()
+            .enumerate()
+            .filter(|(_, c)| "▂▃▄▅▆▇█".contains(*c))
+            .map(|(x, _)| x as i32)
+            .max()
+            .unwrap();
+        assert!(
+            (1..=4).contains(&(control.x - last_bar)),
+            "width {width}: {control:?} {row}"
+        );
+        assert!(control.right() <= width);
+        if let Ok(dir) = std::env::var("ABSTRACTCODE_VOICE_CAPTURE_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            h.driver
+                .screenshot()
+                .write_png(std::path::Path::new(&dir).join(format!("speech-meter-{width}.png")))
+                .unwrap();
+        }
+    }
+
+    h.escape();
+    let store = h.store;
+    h.until("speech stopped", move |_| {
+        store.voice.speaking.get_untracked() == voice::Speaking::Idle
+    });
+    let screen = h.driver.screenshot().to_text();
+    assert!(!screen.contains("♪ Speaking…") && !screen.contains("‖ Paused"));
+    assert!(current_speech_button_bounds(&mut h, "Pause current speech").is_none());
+    assert!(current_speech_button_bounds(&mut h, "Resume current speech").is_none());
+    click_current_speech_button(&mut h, resume);
+    assert_eq!(
+        gw.requests("/voice/tts/stream").len(),
+        1,
+        "a stale button position cannot replay the latest answer"
+    );
+}
+
+#[test]
+fn current_speech_controls_are_absent_when_idle_preparing_or_recording() {
+    let _g = serial();
+    let gw = serve(GatewayScript::default());
+    let (_host, log, _) = fake_host(false);
+    let mut h = harness(&gw.url);
+    h.with_reply("Available latest answer.");
+    for state in [voice::Speaking::Idle, voice::Speaking::Preparing] {
+        h.store.voice.speaking.set(state);
+        h.turn();
+        assert!(current_speech_button_bounds(&mut h, "Pause current speech").is_none());
+        assert!(current_speech_button_bounds(&mut h, "Resume current speech").is_none());
+    }
+    h.store.voice.speaking.set(voice::Speaking::Playing);
+    h.store.voice.dictation.set(voice::Dictation::Recording {
+        since: Instant::now(),
+        gen: 42,
+    });
+    h.store.voice.levels.set(vec![0.5; 24]);
+    let screen = h.turn();
+    assert!(
+        screen.contains("● Recording…") && screen.contains("Ctrl+R transcribes"),
+        "{screen}"
+    );
+    assert!(current_speech_button_bounds(&mut h, "Pause current speech").is_none());
+    assert!(current_speech_button_bounds(&mut h, "Resume current speech").is_none());
+    assert!(gw.requests("/voice/tts/stream").is_empty());
+    assert!(!ops(&log)
+        .iter()
+        .any(|op| op == "pause" || op == "resume" || op == "play"));
+}
+
+#[test]
+fn submitting_a_message_cancels_old_speech_and_queued_narration_in_every_run_phase() {
+    let _g = serial();
+    for phase in [
+        abstractcode::store::Phase::Idle,
+        abstractcode::store::Phase::Starting,
+        abstractcode::store::Phase::Running,
+    ] {
+        let gw = serve(GatewayScript {
+            segment_delay: Duration::from_millis(100),
+            segments: vec![1, 2, 3, 4, 5, 6],
+            ..Default::default()
+        });
+        let (_host, log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("The old answer.");
+        h.store.workflow.set(abstractcode::store::Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "basic".into(),
+            name: "Basic agent".into(),
+            ..Default::default()
+        });
+        h.store.phase.set(phase);
+        ui::voice_view::narrate(h.store, &h.ctx, "Old speech being read.".into());
+        ui::voice_view::narrate(h.store, &h.ctx, "Obsolete queued narration.".into());
+        h.until("old speech playing", |s| s.contains("♪ Speaking…"));
+        // Typing alone must not interrupt; submitting is the ownership boundary.
+        h.type_text("My new question");
+        h.turn();
+        assert_ne!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle
+        );
+        h.type_text("\r");
+        h.turn();
+        let before = played(&log).len();
+        assert_eq!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle,
+            "{phase:?}"
+        );
+        assert!(h.store.voice.speaking_text.get_untracked().is_none());
+        assert!(
+            ops(&log).contains(&"stop".into()),
+            "host must be stopped immediately"
+        );
+        if phase == abstractcode::store::Phase::Idle {
+            assert!(
+                h._rx
+                    .try_iter()
+                    .any(|cmd| matches!(cmd,Cmd::Start{prompt,..} if prompt=="My new question")),
+                "speech must not delay the new run"
+            );
+        }
+        let deadline = Instant::now() + Duration::from_millis(350);
+        while Instant::now() < deadline {
+            h.turn();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            played(&log).len(),
+            before,
+            "late old chunks cannot restart audio: {phase:?}"
+        );
+        assert_eq!(
+            gw.requests("/voice/tts/stream").len(),
+            1,
+            "old queued narration must be discarded"
+        );
+        assert_eq!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle
+        );
+    }
+}
+
+#[test]
+fn submitting_interrupts_paused_or_preparing_speech_without_stale_completion_overwriting_new_audio()
+{
+    let _g = serial();
+    for paused in [false, true] {
+        let gw = serve(GatewayScript {
+            segment_delay: Duration::from_millis(150),
+            segments: vec![1, 2, 3],
+            ..Default::default()
+        });
+        let (_host, log, _) = fake_host(false);
+        let mut h = harness(&gw.url);
+        h.with_reply("Old answer");
+        h.store.workflow.set(abstractcode::store::Workflow {
+            bundle_id: "basic-agent".into(),
+            flow_id: "basic".into(),
+            ..Default::default()
+        });
+        ui::voice_view::narrate(h.store, &h.ctx, "Previous speech".into());
+        if paused {
+            h.until("playing", |s| s.contains("♪ Speaking…"));
+            h.term.push_input(&[0x10]);
+            h.until("paused", |s| s.contains("‖ Paused"));
+        } else {
+            assert_eq!(
+                h.store.voice.speaking.get_untracked(),
+                voice::Speaking::Preparing
+            );
+        }
+        h.type_text("Next question\r");
+        h.turn();
+        assert_eq!(
+            h.store.voice.speaking.get_untracked(),
+            voice::Speaking::Idle
+        );
+        let new_text = "New answer to the next question";
+        ui::voice_view::narrate(h.store, &h.ctx, new_text.into());
+        h.until("new speech", |s| s.contains("♪ Speaking…"));
+        assert_eq!(
+            h.store.voice.speaking_text.get_untracked(),
+            Some(voice::text_key(new_text))
+        );
+        assert!(ops(&log).contains(&"stop".into()));
+        h.escape();
+    }
+}
+
+#[test]
+fn session_boundaries_stop_current_and_queued_speech_in_all_playback_states() {
+    let _g = serial();
+    for command in ["/new", "/clear", "/sessions another-session"] {
+        for state in ["preparing", "playing", "paused"] {
+            let gw = serve(GatewayScript {
+                segment_delay: Duration::from_millis(100),
+                segments: vec![1, 2, 3, 4],
+                ..Default::default()
+            });
+            let (_host, log, _) = fake_host(false);
+            let mut h = harness(&gw.url);
+            h.with_reply("Old session reply");
+            let old_session = h.store.session_id.get_untracked();
+            ui::voice_view::narrate(h.store, &h.ctx, "Old session speech".into());
+            ui::voice_view::narrate(h.store, &h.ctx, "Obsolete queued speech".into());
+            match state {
+                "playing" | "paused" => {
+                    h.until("old session speaking", |s| s.contains("♪ Speaking…"));
+                    if state == "paused" {
+                        h.term.push_input(&[0x10]);
+                        h.until("paused", |s| s.contains("‖ Paused"));
+                    }
+                }
+                _ => assert_eq!(
+                    h.store.voice.speaking.get_untracked(),
+                    voice::Speaking::Preparing
+                ),
+            }
+            h.type_text(&format!("{command}\r"));
+            h.turn();
+            assert_ne!(
+                h.store.session_id.get_untracked(),
+                old_session,
+                "{command} {state}"
+            );
+            assert_eq!(
+                h.store.voice.speaking.get_untracked(),
+                voice::Speaking::Idle,
+                "{command} {state}"
+            );
+            assert!(h.store.voice.speaking_text.get_untracked().is_none());
+            assert!(
+                ops(&log).contains(&"stop".into()),
+                "host must stop at the session boundary"
+            );
+            let stopped_plays = played(&log).len();
+            let deadline = Instant::now() + Duration::from_millis(250);
+            while Instant::now() < deadline {
+                h.turn();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(
+                played(&log).len(),
+                stopped_plays,
+                "late audio after {command} {state}"
+            );
+            assert!(
+                gw.requests("/voice/tts/stream").len() <= 1,
+                "old queue must not start another speech request"
+            );
+            assert_eq!(
+                h.store.voice.speaking.get_untracked(),
+                voice::Speaking::Idle
+            );
+        }
+    }
 }

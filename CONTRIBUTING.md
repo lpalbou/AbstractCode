@@ -29,6 +29,22 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+For an unreleased AbstractTUI dependency, use a sibling checkout explicitly:
+
+```sh
+cargo test --workspace \
+  --config 'patch.crates-io.abstracttui.path="../abstracttui"' \
+  --config 'patch.crates-io.abstractavatar.path="../abstractavatar"'
+cargo install --path tui \
+  --config 'patch.crates-io.abstracttui.path="../abstracttui"' \
+  --config 'patch.crates-io.abstractavatar.path="../abstractavatar"' --force
+```
+
+Resolve the patch path relative to your working directory. Registry-only builds
+require the dependency version to have been published.
+The Avatar patch is needed while that shared generator is also unreleased;
+it is supplied per command, rather than through a global Cargo configuration.
+
 All three run in CI and must pass. `cargo package --manifest-path tui/Cargo.toml --list`
 shows exactly what a release would publish.
 

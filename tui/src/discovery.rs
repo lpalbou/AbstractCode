@@ -558,9 +558,6 @@ pub fn skills_from_response(v: &Value) -> Vec<SkillInfo> {
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .trim()
-                .lines()
-                .next()
-                .unwrap_or("")
                 .to_string(),
             trust: s
                 .get("trust_level")
@@ -1491,6 +1488,7 @@ mod tests {
         assert_eq!(skills.len(), 2);
         assert_eq!(skills[0].name, "coredoc");
         assert_eq!(skills[0].trust, "adopted");
+        assert_eq!(skills[0].description, "Docs.\nMore.");
         assert!(!skills[0].blocked);
         assert!(skills[1].blocked);
     }
