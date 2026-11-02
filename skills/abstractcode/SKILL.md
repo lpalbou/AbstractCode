@@ -3,7 +3,7 @@ name: abstractcode
 description: Operate AbstractCode terminal and browser clients of AbstractGateway. Use for connecting, continuing durable coding sessions, inspecting tool permissions and workspaces, asking scoped assistant questions, or configuring terminal voice and dictation.
 license: MIT
 metadata:
-  package-version: "terminal 0.13.1 / web 0.14.0"
+  package-version: "terminal 0.13.2 / web 0.14.0"
 ---
 
 # Use AbstractCode

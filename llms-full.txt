@@ -25,7 +25,8 @@ close your laptop, and pick the same session up in the browser.
 Status: **pre-alpha.** Interfaces and UX may change.
 
 What's new: browser 0.14.0 adds the Avatar conversation view and compact settings;
-terminal 0.13.0 adds six shared companion designs and a larger Skills picker. See
+terminal 0.13.0 adds six shared companion designs and a larger Skills picker, and
+terminal 0.13.2 gives side questions the 50,000-token history window. See
 [CHANGELOG.md](CHANGELOG.md).
 
 ## The two clients
@@ -1858,9 +1859,10 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.13.1**, pre-alpha. What's new in 0.13.0: six companion designs
-shared with the other apps, a larger Skills picker, and speech that stops at
-session boundaries ([CHANGELOG.md](CHANGELOG.md#0130---2026-11-02)).
+Status: **0.13.2**, pre-alpha. What's new in 0.13.2: Companion and Documentation
+questions read the newest whole turns of your conversation up to 50,000 tokens,
+never a shortened message, and say what they left out
+([CHANGELOG.md](CHANGELOG.md#0132---2026-11-02)).
 
 ## What it looks like
 
@@ -4514,6 +4516,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [terminal 0.13.2] - 2026-11-02
 
 ### Changed
 

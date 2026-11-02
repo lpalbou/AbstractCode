@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.13.2] - 2026-11-02
+
 ### Changed
 
 - Terminal: Companion and Documentation questions, and automatic comments, include the
