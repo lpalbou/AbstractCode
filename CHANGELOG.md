@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Web Avatar view captions.** The captions under the avatar are a realtime rolling list of the
+  current turn's public updates, questions and answer, newest at the bottom, rendered like the
+  conversation (Markdown, links, files, structured results); an answer is no longer split into
+  pages that cycle, and the Previous / Next / Pause subtitle buttons are gone. The captions and the
+  Conversation history and Talk buttons sit above the message box at every width. Shared
+  conversation bundle re-synced from AbstractUIC panel-chat.
+
 ## [terminal 0.13.2] - 2026-11-02
 
 ### Changed
