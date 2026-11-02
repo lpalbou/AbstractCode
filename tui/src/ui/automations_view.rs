@@ -183,6 +183,8 @@ fn arm_poll(mcx: Scope, store: Store, ctx: UiCtx) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListTarget {
     Automation(String),
+    /// The `Paused · N` line (Enter opens/closes it; ADR 0048).
+    PausedLine,
     /// The `Archived · N` line (Enter opens/closes it).
     ArchivedLine,
     /// An archived automation (Enter or `u` unarchives it).
@@ -198,7 +200,8 @@ pub fn archive_question(title: &str) -> String {
 /// the "waiting for you" badge), `↻ every 24 h · last 3 h ago`, then
 /// `next in 20 h` with the Active switch at the right (+ a third line, in the
 /// error ink, only while the last "Email result" failed); then the quiet
-/// `Archived · N` line and, when open, the archived ones with Unarchive.
+/// `Paused · N` line (ADR 0048; when open, the paused ones as the same
+/// cards), then the quiet `Archived · N` line and, when open, the archived ones with Unarchive.
 /// `confirm` = the automation whose Archive question is showing.
 pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>, Vec<ListTarget>) {
     let mut cards = Vec::new();
@@ -210,8 +213,9 @@ pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>
             Ink::Error,
         )])),
         Some(Ok(items)) => {
-            let shown = auto::visible(items);
-            for s in &shown {
+            // ADR 0048: the gateway's order; the paused ones fold under `Paused · N`.
+            let (shown, paused) = auto::sections(items);
+            let push_card = |s: &Summary, cards: &mut Vec<Card>, targets: &mut Vec<ListTarget>| {
                 let (line1, line2) = auto::card_lines(s, now);
                 let mut lines = vec![CardLine::new(s.title.clone(), Ink::Title)
                     .right(auto::waiting_badge(s).unwrap_or(""))];
@@ -240,8 +244,20 @@ pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>
                 }
                 cards.push(Card::new(lines));
                 targets.push(ListTarget::Automation(s.id.clone()));
+            };
+            for s in &shown {
+                push_card(s, &mut cards, &mut targets);
             }
-            if shown.is_empty() {
+            if let Some(line) = auto::paused_line(paused.len()) {
+                cards.push(Card::new(vec![CardLine::new(line, Ink::Faint)]));
+                targets.push(ListTarget::PausedLine);
+                if v.paused_open {
+                    for s in &paused {
+                        push_card(s, &mut cards, &mut targets);
+                    }
+                }
+            }
+            if shown.is_empty() && paused.is_empty() {
                 cards.push(Card::note(
                     "No automations yet. n creates one from the current workflow (/automation).",
                 ));
@@ -403,6 +419,9 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
             let unarchive = unarchive.clone();
             move || match target() {
                 Some(ListTarget::Automation(id)) => open_automation(cx, store, &ctx, &id),
+                Some(ListTarget::PausedLine) => {
+                    store.automations.update(|v| v.paused_open = !v.paused_open);
+                }
                 Some(ListTarget::ArchivedLine) => {
                     store
                         .automations
@@ -1425,6 +1444,80 @@ mod tests {
             artifacts: Vec::new(),
             waits: Vec::new(),
         }
+    }
+
+    /// ADR 0048: the gateway's order, the paused ones folded under `Paused · N`
+    /// (Enter opens them as the same cards); a gateway without `section` gets
+    /// every row as today.
+    #[test]
+    fn paused_automations_fold_under_their_own_line_in_the_served_order() {
+        let page: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/automations/list.json"))
+                .unwrap();
+        let mut items = auto::parse_list_page(&page).unwrap().items;
+        assert!(
+            items.len() >= 3,
+            "the fixture lists at least three automations"
+        );
+        let older = items.clone();
+        for (i, s) in items.iter_mut().enumerate() {
+            s.section = Some(if i == 0 { "paused" } else { "active" }.into());
+        }
+        let ids = |targets: &[ListTarget]| -> Vec<String> {
+            targets
+                .iter()
+                .map(|t| match t {
+                    ListTarget::Automation(id) => id.clone(),
+                    ListTarget::PausedLine => "<paused>".into(),
+                    ListTarget::ArchivedLine => "<archived>".into(),
+                    ListTarget::Archived(id) => format!("archived:{id}"),
+                })
+                .collect()
+        };
+        let live: Vec<String> = items
+            .iter()
+            .skip(1)
+            .filter(|s| s.status != "archived")
+            .map(|s| s.id.clone())
+            .collect();
+        let mut v = auto::View {
+            list: Some(Ok(items.clone())),
+            ..Default::default()
+        };
+        let (cards, targets) = list_cards(&v, 0, None);
+        let mut want = live.clone();
+        want.push("<paused>".into());
+        assert_eq!(
+            ids(&targets),
+            want,
+            "active ones in the served order, then the folded line"
+        );
+        assert!(cards
+            .iter()
+            .any(|c| c.lines.iter().any(|l| l.text == "Paused · 1")));
+        v.paused_open = true;
+        let (_, targets) = list_cards(&v, 0, None);
+        want.push(items[0].id.clone());
+        assert_eq!(
+            ids(&targets),
+            want,
+            "opened: the paused one, as a card, after the line"
+        );
+        let v = auto::View {
+            list: Some(Ok(older.clone())),
+            ..Default::default()
+        };
+        let (_, targets) = list_cards(&v, 0, None);
+        let today: Vec<String> = older
+            .iter()
+            .filter(|s| s.status != "archived")
+            .map(|s| s.id.clone())
+            .collect();
+        assert_eq!(
+            ids(&targets),
+            today,
+            "an older gateway: every row as served, no Paused line"
+        );
     }
 
     #[test]
