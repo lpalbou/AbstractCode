@@ -7,39 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.14.0] - 2026-11-02
+
+On AbstractUIC 0.9.0 (`@abstractframework/ui-kit` ^0.9.12, `@abstractframework/panel-chat` ^0.7.0, `@abstractframework/app-server` ^0.1.13).
+
+### Added
+
+- **Avatar conversation view.** Choose **Avatar** in the conversation header for a second view over the same work: the
+  avatar shows activity, short subtitles carry the assistant's public updates (discoveries, choices, questions), and
+  **Conversation history** opens the full public exchanges and the final answer. **Reply to this** pins one update as
+  context for a correction; permission requests explain the action, its destinations and the assistant's stated reason,
+  with Deny / Allow once and **Review details** for the technical view. **Conversation cues** turn visual and audio
+  alerts on or off for questions, permission requests and completion (audio off by default). Switching views keeps the
+  draft and attachments. Public updates need a run started in Avatar mode on a gateway that serves the public
+  conversation protocol; see [docs/web.md](docs/web.md).
+
 ### Changed
 
 - The chat composer is the shared rounded multiline composer in both Conversation and Avatar
   modes (AbstractUIC panel-chat 0.7.0): Attach, voice tools, Stop and the circular Send sit in
   one box; Enter sends, Shift+Enter adds a line. The Docs assistant drawer is the shared
   AbstractUIC component (vendored like the conversation), so its composer and footer match every app.
+- **Settings are compact**: Model, one Agent panel (workflow, tools and skills, with folded tool categories and
+  Off / Ask / Auto per category and per tool) and a quieter Workspace panel; short labels carry their help in
+  tooltips. The Voice panel is simpler, and an automation's Model panel names what applies to background work.
+- **The sidebar uses the shared session and automation cards**: conversations first, unread and needs-your-attention
+  states on each card, automation cards in the Watch layout, and the shared automation replay panel.
+- Messages show their files with the shared attachment previews; archive controls are compact; the account menu is
+  the kit's single account widget.
 
 ### Fixed
 
-- Opening a conversation clears its existing unread history even when the latest answer was already read and older turns load later.
+- Opening a conversation clears its existing unread history even when the latest answer was already read and older
+  turns load later. Read markers use durable gateway receipts shared across clients; opening a historical turn keeps
+  the outcomes you have not seen yet.
+- Sidebar cards have more space and attachment previews fit their media.
+- **The automation header names its folder in words** (ADR 0043): "Workspace · This automation's folder" instead of the
+  folder's generated id, and a conversation's folder reads "This conversation's folder". The path is only in the copy
+  action; a folder you chose keeps its own name. The sidebar's Workspace row follows the same rule.
+- **Read aloud no longer speaks a session's existing messages when it is opened, reloaded or switched to.** A reply is
+  spoken by itself only when its run was seen in progress in the open conversation.
 
+## [terminal 0.13.0] - 2026-11-02
 
-- Web conversation read markers use durable Gateway receipts shared across clients; sidebar cards have more space and attachment previews fit their media.
+Needs AbstractTUI 0.7.1 with its `avatar` feature (AbstractAvatar 0.1.0). The full list is in
+[tui/CHANGELOG.md](tui/CHANGELOG.md#0130---2026-11-02).
 
+### Added
 
-- Terminal avatar overlays preserve transcript text outside the procedural shape.
-  Reconnect completion handling drains final ledger records and reconciles canonical
-  output, so a completed answer is not left hidden inside a reasoning cycle.
+- Terminal: an optional session **companion** (six shared avatar designs from AbstractAvatar) floats beneath the header
+  controls without narrowing the transcript; it shows listening, waiting, working and error poses, offers bounded
+  change-driven comments and a side conversation, and has its own speech preferences. Placement (top right / bottom
+  right) and the design are saved; Appearance previews the phases live.
+- Terminal: select assistant prose, table cells or code and stage **Explain**, **Use as context** or **Change** in the
+  draft; nothing is sent automatically.
+- Terminal: **Docs** in the header asks the gateway's documentation workflow in a separate conversation; Docs, Theme,
+  About and the account menu (connection status, copy user id, disconnect) sit at the header's right end, and Tools,
+  Skills and MCP are grouped under one Tools menu.
 
-- Terminal companion supports saved Top right / Bottom right placement, expressive
-  pose animation, separate Documentation and Companion entries, and current-audio
-  pause/resume controls beside the speaking meter and avatar.
+### Changed
 
-- **The automation header names its folder in words** (operator QA 2026-10-29, ADR 0043). It read "Workspace
-  session-automation-7f7613b4-fd8b-…", the folder's id. It now reads "Workspace · This automation's folder", and a
-  conversation's folder reads "This conversation's folder". The path is only in the copy action. A folder the person
-  chose keeps its own name. The sidebar's Workspace row follows the same rule (`workspaceLabel`).
+- Terminal: the Tools dialog folds its categories and shows Off / Ask / Auto per tool and per category; the Skills
+  picker is larger, scrolls with the mouse and gives descriptions a readable pane. Voice settings can hold held-Space
+  messages for review before sending.
+- Terminal: speech stops at session boundaries, and a new submission interrupts the previous narration; the playback
+  control sits beside the speaking meter.
 
-- **Read aloud no longer speaks a session's existing messages when it is opened, reloaded or switched to**
-  (operator 2026-10-29). A reply is spoken by itself only when its run was seen in progress in the open
-  conversation (AbstractUIC panel-chat's rule, `readAloudStep`, inlined in `web/src/lib/read_aloud.ts` until the
-  next kit release). The effect used to remember the newest reply before the conversation had loaded, so the
-  first loaded reply was spoken.
+### Fixed
+
+- Terminal avatar overlays preserve transcript text outside the procedural shape. Reconnect completion handling drains
+  final ledger records and reconciles canonical output, so a completed answer is not left hidden inside a reasoning
+  cycle.
 
 ## [web 0.13.3] - 2026-10-28
 

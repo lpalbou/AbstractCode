@@ -169,16 +169,23 @@ client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 - **Files live on the gateway host.** Both clients browse a run's workspace
   through the gateway's workspace routes and show its absolute path together
   with the host it is on.
-- **Shared browser components are package dependencies.** `web/` consumes
-  AbstractUIC packages from the npm registry, without sibling-checkout aliases,
-  so the checkout builds independently.
+- **Shared browser components come from AbstractUIC.** `web/` consumes the
+  AbstractUIC packages (`ui-kit`, `panel-chat`, `app-server`, the monitors) from
+  the npm registry, without sibling-checkout aliases, so the checkout builds
+  independently. The conversation (with the Avatar view), the session and
+  automation cards, and the Docs assistant drawer are AbstractUIC's exported
+  builds vendored under `web/src/vendor/`; each folder's `provenance.json` records
+  the source hashes, and `npm run build` refuses a vendored file that differs
+  from its recorded hash.
 
 ## Browser ownership
 
 ```mermaid
 flowchart LR
-    shell["AbstractCode workspace shell"] --> chat["AbstractUIC WorkflowChat"]
-    shell --> kit["AbstractUIC themes / auth / settings"]
+    shell["AbstractCode workspace shell"] --> chat["AbstractUIC WorkflowChat<br/>Conversation + Avatar views<br/>(vendored, web/src/vendor/abstractchat)"]
+    shell --> cards["AbstractUIC session + automation cards<br/>(vendored, web/src/vendor/abstractsessions)"]
+    shell --> docs["AbstractUIC Docs assistant drawer<br/>(vendored, web/src/vendor/abstractdocs)"]
+    shell --> kit["AbstractUIC themes / auth / settings<br/>(npm ui-kit)"]
     shell --> adapter["App transport + catalog adapters"]
     chat --> state["Transport-injected WorkflowSessionController"]
     state --> adapter
