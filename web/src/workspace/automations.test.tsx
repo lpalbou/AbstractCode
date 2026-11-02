@@ -324,6 +324,8 @@ describe("the sidebar section", () => {
     const order = active.map((s) => closed.indexOf(`data-automation-id="${s.automation_id}"`));
     expect(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1]))).toBe(true);
     expect(closed).toContain('<div class="code-archived" data-section="paused" data-list="automations" data-open="false"><button type="button" class="code-archived-toggle" aria-expanded="false" aria-controls="code-paused-automations"><span>Paused · 1</span>');
+    // The gateway's figure when it serves one (ADR 0048).
+    expect(renderToStaticMarkup(<AutomationsSection {...base} state={{ ...state(sectioned), pausedCount: 7 }} />)).toContain("<span>Paused · 7</span>");
     const opened = renderToStaticMarkup(<AutomationsSection {...base} state={state(sectioned)} pausedOpen />);
     expect(opened).toMatch(new RegExp(`data-section="paused"[\\s\\S]*data-automation-id="${paused.automation_id}"`));
     // A gateway that serves no `section`: every row as served, no Paused footer.

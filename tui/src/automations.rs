@@ -2736,6 +2736,9 @@ pub struct View {
     pub archived_open: bool,
     /// The `Paused · N` line is open (ADR 0048; closed at first).
     pub paused_open: bool,
+    /// `paused_automations_count` of the newest list answer (ADR 0048);
+    /// `None` when the gateway serves none (the rows are counted).
+    pub paused_count: Option<u64>,
     pub detail: Option<Detail>,
     /// An action is in flight (controls are disabled with "Working…").
     pub busy: bool,

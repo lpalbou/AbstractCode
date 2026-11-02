@@ -192,7 +192,7 @@ export function AutomationsSection(props: {
             {st.rowError?.automationId === s.automation_id ? <ErrorLine error={st.rowError.error} /> : null}
           </React.Fragment>
         ))}
-        <PausedFooter count={paused.length} open={props.pausedOpen === true} onToggle={() => props.onTogglePaused?.()}>
+        <PausedFooter count={paused.length ? st.pausedCount ?? paused.length : 0} open={props.pausedOpen === true} onToggle={() => props.onTogglePaused?.()}>
           {paused.map((s) => (
             <li key={s.automation_id} className="code-paused-row">
               <AutomationCard

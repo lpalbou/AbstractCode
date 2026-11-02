@@ -248,7 +248,12 @@ pub fn list_cards(v: &auto::View, now: i64, confirm: Option<&str>) -> (Vec<Card>
             for s in &shown {
                 push_card(s, &mut cards, &mut targets);
             }
-            if let Some(line) = auto::paused_line(paused.len()) {
+            // The gateway's figure when it serves one (ADR 0048), else the rows read.
+            let paused_n = match (paused.is_empty(), v.paused_count) {
+                (false, Some(n)) => n as usize,
+                _ => paused.len(),
+            };
+            if let Some(line) = auto::paused_line(paused_n) {
                 cards.push(Card::new(vec![CardLine::new(line, Ink::Faint)]));
                 targets.push(ListTarget::PausedLine);
                 if v.paused_open {
@@ -1495,6 +1500,16 @@ mod tests {
         assert!(cards
             .iter()
             .any(|c| c.lines.iter().any(|l| l.text == "Paused · 1")));
+        // The gateway's figure when it serves one (ADR 0048).
+        let served = auto::View {
+            list: Some(Ok(items.clone())),
+            paused_count: Some(7),
+            ..Default::default()
+        };
+        assert!(list_cards(&served, 0, None)
+            .0
+            .iter()
+            .any(|c| c.lines.iter().any(|l| l.text == "Paused · 7")));
         v.paused_open = true;
         let (_, targets) = list_cards(&v, 0, None);
         want.push(items[0].id.clone());
