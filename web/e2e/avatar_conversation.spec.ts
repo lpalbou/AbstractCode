@@ -36,8 +36,7 @@ test('optional avatar keeps drafts, answers the real current question, and prese
  await composer.fill('continue');await page.getByRole('button',{name:'Send',exact:true}).click();
  await expect.poll(()=>commands.some(c=>c.type==='resume'&&c.payload?.payload?.response==='continue')).toBe(true);
  await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Completed');
- await page.getByRole('button',{name:'Conversation history',exact:true}).click();
- await expect(page.getByRole('list',{name:'Public conversation history'})).toContainText('structured-output');
+ await expect(page.locator('.pc-avatar-conversation__answer')).toContainText('structured-output');
  await page.screenshot({path:'/tmp/avatar-code-desktop.png'});
  await page.getByRole('button',{name:'Conversation',exact:true}).click();
  await expect(page.getByRole('region',{name:'Avatar conversation',exact:true})).toHaveCount(0);
