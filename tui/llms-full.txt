@@ -768,7 +768,7 @@ The reusable engine ChatPanel owns message layout, scrolling and the composer.
 The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
 the Code corpus; Companion captures an explicitly labelled snapshot of the loaded
 conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
-a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded. The reference holds the newest whole turns up to 50,000 estimated tokens (`assistant_context`, the runtime history-window rule), never cuts a message, and states how many older messages it left out. A separate worker
+a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded. The reference holds the newest whole turns up to 50,000 tokens (`assistant_context`: the runtime history-window rule, with a characters / 4 estimate), never cuts a message, and states how many older messages it left out. A separate worker
 follows that run, keeping coding commands and approval responses responsive.
 Temporary polling errors back off on the existing run; only an explicit retry
 after failure starts another inference. UI posts check both session and operation
@@ -1889,8 +1889,9 @@ Both modes receive a fresh, explicitly labelled snapshot of user requests, guida
 and assistant replies from the main conversation, including visible streaming content.
 Tool payloads and hidden reasoning are excluded. Messages are never shortened and
 there is no message-count or character limit: the snapshot holds the newest whole
-turns (a request plus the guidance and replies after it) up to 50,000 estimated
-tokens, the same history window the Gateway uses when it replays a session. A
+turns (a request plus the guidance and replies after it) up to 50,000 tokens:
+the same rule the Gateway applies when it replays a session, with a
+characters / 4 estimate (the Gateway counts with AbstractCore's estimator). A
 newest turn larger than the window is still included whole. When older messages
 are left out, the snapshot begins with a `#TRUNCATION` note that counts them, and
 the drawer shows the same count beside your question.
@@ -2856,9 +2857,9 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - Companion and Documentation questions, and automatic comments, include the
-  newest whole turns of the loaded conversation up to 50,000 estimated tokens,
-  the history window the Gateway uses when it replays a session (previously the
-  newest 24,000 characters). Messages are never shortened and there is no
+  newest whole turns of the loaded conversation up to 50,000 tokens, estimated
+  as characters / 4: the same rule the Gateway applies when it replays a
+  session (previously the newest 24,000 characters). Messages are never shortened and there is no
   message-count limit; a newest turn larger than the window is included whole.
   When older messages are left out, the snapshot starts with a note that counts
   them, and the drawer shows the same count beside your question.

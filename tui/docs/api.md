@@ -896,8 +896,9 @@ Both modes receive a fresh, explicitly labelled snapshot of user requests, guida
 and assistant replies from the main conversation, including visible streaming content.
 Tool payloads and hidden reasoning are excluded. Messages are never shortened and
 there is no message-count or character limit: the snapshot holds the newest whole
-turns (a request plus the guidance and replies after it) up to 50,000 estimated
-tokens, the same history window the Gateway uses when it replays a session. A
+turns (a request plus the guidance and replies after it) up to 50,000 tokens:
+the same rule the Gateway applies when it replays a session, with a
+characters / 4 estimate (the Gateway counts with AbstractCore's estimator). A
 newest turn larger than the window is still included whole. When older messages
 are left out, the snapshot begins with a `#TRUNCATION` note that counts them, and
 the drawer shows the same count beside your question.

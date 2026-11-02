@@ -104,7 +104,7 @@ fn estimate_tokens(role: Role, text: &str) -> usize {
 }
 
 /// Index of the first message kept, and the receipt (see the module doc).
-fn select(messages: &[(Role, String)], budget: usize) -> (usize, Window) {
+fn select<T: AsRef<str>>(messages: &[(Role, T)], budget: usize) -> (usize, Window) {
     let mut turns: Vec<(usize, usize, usize)> = Vec::new(); // (start, messages, tokens)
     for (i, (role, text)) in messages.iter().enumerate() {
         if *role == Role::User || turns.is_empty() {
@@ -112,7 +112,7 @@ fn select(messages: &[(Role, String)], budget: usize) -> (usize, Window) {
         }
         let turn = turns.last_mut().expect("a turn was just opened");
         turn.1 += 1;
-        turn.2 += estimate_tokens(*role, text);
+        turn.2 += estimate_tokens(*role, text.as_ref());
     }
     let mut window = Window::default();
     let mut start = messages.len();
@@ -132,51 +132,54 @@ fn select(messages: &[(Role, String)], budget: usize) -> (usize, Window) {
     }
     for (role, text) in &messages[..start] {
         window.left_out_messages += 1;
-        window.left_out_tokens += estimate_tokens(*role, text);
+        window.left_out_tokens += estimate_tokens(*role, text.as_ref());
     }
     (start, window)
 }
 
 pub fn capture(store: Store) -> Reference {
-    let (mut messages, run, partial) = store.fold.with_untracked(|fold| {
-        let messages = fold
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::User { text } => Some((Role::User, text.clone())),
-                Item::Steer { text } => Some((Role::Guidance, text.clone())),
-                Item::Assistant { text, .. } => Some((Role::Assistant, text.clone())),
-                _ => None,
-            })
-            .filter(|(_, text)| !text.trim().is_empty())
-            .collect::<Vec<_>>();
-        (messages, fold.root_run_id().to_string(), fold.truncated())
-    });
-    store.live.with_untracked(|live| {
-        if live.root() == run {
-            messages.extend(
-                live.entries()
-                    .iter()
-                    .filter(|e| !e.content.trim().is_empty())
-                    .map(|e| (Role::Streaming, e.content.clone())),
-            );
-        }
-    });
-    render(
-        &store.session_id.get_untracked(),
-        &run,
-        &format!("{:?}", store.phase.get_untracked()),
-        &messages,
-        partial,
-        HISTORY_WINDOW_TOKENS,
-    )
+    let session = store.session_id.get_untracked();
+    let state = format!("{:?}", store.phase.get_untracked());
+    // Borrowed until the window has chosen: only the kept bodies are copied.
+    store.fold.with_untracked(|fold| {
+        store.live.with_untracked(|live| {
+            let run = fold.root_run_id();
+            let mut messages = fold
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::User { text } => Some((Role::User, text.as_str())),
+                    Item::Steer { text } => Some((Role::Guidance, text.as_str())),
+                    Item::Assistant { text, .. } => Some((Role::Assistant, text.as_str())),
+                    _ => None,
+                })
+                .filter(|(_, text)| !text.trim().is_empty())
+                .collect::<Vec<_>>();
+            if live.root() == run {
+                messages.extend(
+                    live.entries()
+                        .iter()
+                        .filter(|e| !e.content.trim().is_empty())
+                        .map(|e| (Role::Streaming, e.content.as_str())),
+                );
+            }
+            render(
+                &session,
+                run,
+                &state,
+                &messages,
+                fold.truncated(),
+                HISTORY_WINDOW_TOKENS,
+            )
+        })
+    })
 }
 
-fn render(
+fn render<T: AsRef<str>>(
     session: &str,
     run: &str,
     state: &str,
-    messages: &[(Role, String)],
+    messages: &[(Role, T)],
     partial: bool,
     budget: usize,
 ) -> Reference {
@@ -214,7 +217,7 @@ fn render(
     } else {
         let kept = messages[start..]
             .iter()
-            .map(|(role, body)| format!("## {}\n{body}\n", role.label()))
+            .map(|(role, body)| format!("## {}\n{}\n", role.label(), body.as_ref()))
             .collect::<Vec<_>>();
         text.push_str(&kept.join("\n"));
     }
@@ -348,7 +351,7 @@ mod tests {
         assert!(r.text.contains("partial: earlier history was not loaded"));
         assert_eq!(r.window.left_out_messages, 0);
         assert_eq!(r.window.notice(), None);
-        let empty = render("s", "r", "Idle", &[], false, HISTORY_WINDOW_TOKENS);
+        let empty = render::<&str>("s", "r", "Idle", &[], false, HISTORY_WINDOW_TOKENS);
         assert!(empty
             .text
             .contains("No user requests or assistant replies are loaded."));
