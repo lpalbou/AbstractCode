@@ -27,7 +27,12 @@ Requires Rust **1.87+** (the crate's declared minimum; CI builds against it).
 cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
+python3 scripts/check_portable_paths.py   # every tracked name checks out on Windows
 ```
+
+CI also builds the terminal client on Windows. A tracked file name with `< > : " | ? *`,
+a trailing dot or space, or a reserved device name (`CON`, `NUL`, `COM1`...) fails
+`scripts/check_portable_paths.py`, which runs before every build and release.
 
 For an unreleased AbstractTUI dependency, use a sibling checkout explicitly:
 

@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-02
+
+### Fixed
+
+- Release binaries for every platform (macOS, Linux, Windows) on the GitHub
+  release; no code change since 0.13.0.
+
 ## [0.13.0] - 2026-11-02
 
 Needs AbstractTUI 0.7.1 with its `avatar` feature (the companion's designs come

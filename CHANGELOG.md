@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [terminal 0.13.1] - 2026-11-02
+
+### Fixed
+
+- Terminal: release binaries for every platform (macOS, Linux, Windows) on the GitHub release; no code change since 0.13.0.
+
 ## [web 0.14.0] - 2026-11-02
 
 On AbstractUIC 0.9.0 (`@abstractframework/ui-kit` ^0.9.12, `@abstractframework/panel-chat` ^0.7.0, `@abstractframework/app-server` ^0.1.13).
