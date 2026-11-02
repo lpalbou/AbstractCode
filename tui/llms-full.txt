@@ -767,7 +767,7 @@ The reusable engine ChatPanel owns message layout, scrolling and the composer.
 The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
 the Code corpus; Companion captures an explicitly labelled snapshot of the loaded
 conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
-a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded; bounded history is labelled. A separate worker
+a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded. The reference holds the newest whole turns up to 50,000 estimated tokens (`assistant_context`, the runtime history-window rule), never cuts a message, and states how many older messages it left out. A separate worker
 follows that run, keeping coding commands and approval responses responsive.
 Temporary polling errors back off on the existing run; only an explicit retry
 after failure starts another inference. UI posts check both session and operation
@@ -1886,8 +1886,13 @@ Closing the drawer preserves them and your coding draft.
 Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
 Both modes receive a fresh, explicitly labelled snapshot of user requests, guidance
 and assistant replies from the main conversation, including visible streaming content.
-Tool payloads and hidden reasoning are excluded. The snapshot retains up to 24,000
-characters of recent message text and labels any omitted or shortened history.
+Tool payloads and hidden reasoning are excluded. Messages are never shortened and
+there is no message-count or character limit: the snapshot holds the newest whole
+turns (a request plus the guidance and replies after it) up to 50,000 estimated
+tokens, the same history window the Gateway uses when it replays a session. A
+newest turn larger than the window is still included whole. When older messages
+are left out, the snapshot begins with a `#TRUNCATION` note that counts them, and
+the drawer shows the same count beside your question.
 Docs additionally supplies the corpus from `/docs/corpus?app=code`, cached separately
 from conversation context. The snapshot includes session/run identity and state, and says when earlier records are
 not loaded. These questions do not steer, approve or execute tools in the coding
@@ -1974,9 +1979,10 @@ a baseline; tool payload/hidden-reasoning changes do not trigger a request. Chan
 coalesce and stale, duplicate or NO_ADVICE responses are not displayed. The cap is
 per running TUI process; shared multi-client ownership is not implemented here.
 
-Only recent loaded requests/replies are supplied (the 24,000-character context bound
-above applies). The side assistant has no history-browsing tool. Older history can
-be loaded into the client before asking again; omission markers remain explicit.
+Comments read the same snapshot as Companion questions (the 50,000-token history
+window above) and are shown whole; the request asks the model for two short
+sentences. The side assistant has no history-browsing tool. Older history can be
+loaded into the client before asking again; omission notes remain explicit.
 
 Preferences live under `companion` in the client's prefs.json. They do not change
 Gateway defaults or entity-owned appearance/voice. Device preferences stay local.
@@ -2843,6 +2849,17 @@ All notable changes to this project are documented here. The format follows
 [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+### Changed
+
+- Companion and Documentation questions, and automatic comments, include the
+  newest whole turns of the loaded conversation up to 50,000 estimated tokens,
+  the history window the Gateway uses when it replays a session (previously the
+  newest 24,000 characters). Messages are never shortened and there is no
+  message-count limit; a newest turn larger than the window is included whole.
+  When older messages are left out, the snapshot starts with a note that counts
+  them, and the drawer shows the same count beside your question.
+- Automatic comments are shown whole (previously shortened at 800 characters).
 
 ## [0.13.1] - 2026-11-02
 

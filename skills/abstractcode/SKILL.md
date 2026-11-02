@@ -49,7 +49,8 @@ scrolling, arrow keys and explicit buttons are available in the Tools list.
 Documentation and Companion are separate drawers with independent histories and
 drafts. Documentation receives AbstractCode documentation plus recent user requests
 and assistant replies from the main conversation. Companion receives an immutable snapshot of the
-currently loaded conversation when each question is sent. It cannot inspect
+currently loaded conversation when each question is sent: the newest whole turns up
+to 50,000 estimated tokens, with a note counting any older messages left out. It cannot inspect
 newer/unloaded records or steer, approve or execute tools on the coding run.
 `/docs` opens Documentation directly; the avatar or account menu opens Companion.
 Use the coding composer for task instructions, not a side question that should

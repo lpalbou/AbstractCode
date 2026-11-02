@@ -516,6 +516,47 @@ fn advice_is_change_driven_not_replayed_and_tool_payloads_never_trigger_an_extra
 }
 
 #[test]
+fn automatic_comments_read_the_history_window_not_a_character_cap() {
+    let mut h = harness(
+        220,
+        Some(json!({"enabled":true,"advice":true,"animate":false})),
+    );
+    h.turn();
+    // 200,000 characters: far over the old 24,000-character cap, under no
+    // message cap, and larger than the 50,000-token window as an older turn.
+    let long = "earlier detail ".repeat(14_000);
+    h.store.fold.update(|f| {
+        f.push_item(Item::Assistant {
+            text: long.clone(),
+            final_answer: true,
+        });
+        f.push_item(Item::User {
+            text: "A new visible question".into(),
+        });
+    });
+    h.turn();
+    let commands = h.commands();
+    let context = commands
+        .iter()
+        .find_map(|c| match c {
+            Cmd::AssistantAsk {
+                scope: ChatScope::Advice,
+                context,
+                ..
+            } => Some(context),
+            _ => None,
+        })
+        .expect("one automatic comment request");
+    assert!(context.contains("## User\nA new visible question"));
+    assert!(!context.contains(&long) && !context.contains("Existing user request"));
+    assert!(
+        context.contains("[#TRUNCATION: 3 earlier message(s)"),
+        "{context}"
+    );
+    assert!(!context.contains("message shortened"));
+}
+
+#[test]
 fn a_genuine_approval_hides_the_companion_and_an_outside_click_never_resumes_it() {
     use abstractcode::transcript::{PendingWait, WaitKind};
     let mut h = harness(

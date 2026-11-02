@@ -13,7 +13,6 @@ use std::{
 pub const ADVICE_INTERVAL: Duration = Duration::from_secs(60);
 pub const NO_ADVICE: &str = "NO_ADVICE";
 const REVISION_BYTES: usize = 32_768;
-const MAX_ADVICE_CHARS: usize = 800;
 
 /// Local presentation choices. Future shared identity resolution stays outside
 /// these client preferences; `voice` is an explicit per-client override.
@@ -287,20 +286,14 @@ impl AdviceGate {
             return None;
         }
         self.last_suggestion = Some((ticket.revision.session, normalized));
-        if text.chars().count() > MAX_ADVICE_CHARS {
-            Some(format!(
-                "{}\n[TRUNCATION: advice shortened]",
-                text.chars().take(MAX_ADVICE_CHARS).collect::<String>()
-            ))
-        } else {
-            Some(text.into())
-        }
+        // Shown whole: the length is the model's, set by the request's own
+        // instruction ("two short sentences"), never cut here (ADR-0026).
+        Some(text.into())
     }
 }
 fn normalized(text: &str) -> String {
     text.split_whitespace()
         .flat_map(str::chars)
-        .take(MAX_ADVICE_CHARS)
         .flat_map(char::to_lowercase)
         .collect()
 }
@@ -509,7 +502,7 @@ mod tests {
         assert!(!g.in_flight());
     }
     #[test]
-    fn suggestions_are_current_deduplicated_bounded_and_no_advice_is_silent() {
+    fn suggestions_are_current_deduplicated_whole_and_no_advice_is_silent() {
         let mut g = ready();
         g.observe(r("one", 1), true, true);
         let ticket = g.try_begin(t(0)).unwrap();
@@ -528,8 +521,8 @@ mod tests {
         );
         g.observe(r("one", 4), true, true);
         let ticket = g.try_begin(t(180)).unwrap();
-        let huge = g.finish(ticket, Some(&"語".repeat(2000))).unwrap();
-        assert!(huge.chars().count() < 850 && huge.contains("TRUNCATION"));
+        let long = "語".repeat(2000);
+        assert_eq!(g.finish(ticket, Some(&long)), Some(long.clone()));
         g.observe(r("one", 5), true, true);
         let ticket = g.try_begin(t(240)).unwrap();
         g.observe(r("one", 6), true, true);

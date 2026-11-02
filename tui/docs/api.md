@@ -894,8 +894,13 @@ Closing the drawer preserves them and your coding draft.
 Both use the Gateway-hosted `docs-qa@0.1.1:docsqa001` grounded question workflow.
 Both modes receive a fresh, explicitly labelled snapshot of user requests, guidance
 and assistant replies from the main conversation, including visible streaming content.
-Tool payloads and hidden reasoning are excluded. The snapshot retains up to 24,000
-characters of recent message text and labels any omitted or shortened history.
+Tool payloads and hidden reasoning are excluded. Messages are never shortened and
+there is no message-count or character limit: the snapshot holds the newest whole
+turns (a request plus the guidance and replies after it) up to 50,000 estimated
+tokens, the same history window the Gateway uses when it replays a session. A
+newest turn larger than the window is still included whole. When older messages
+are left out, the snapshot begins with a `#TRUNCATION` note that counts them, and
+the drawer shows the same count beside your question.
 Docs additionally supplies the corpus from `/docs/corpus?app=code`, cached separately
 from conversation context. The snapshot includes session/run identity and state, and says when earlier records are
 not loaded. These questions do not steer, approve or execute tools in the coding
@@ -982,9 +987,10 @@ a baseline; tool payload/hidden-reasoning changes do not trigger a request. Chan
 coalesce and stale, duplicate or NO_ADVICE responses are not displayed. The cap is
 per running TUI process; shared multi-client ownership is not implemented here.
 
-Only recent loaded requests/replies are supplied (the 24,000-character context bound
-above applies). The side assistant has no history-browsing tool. Older history can
-be loaded into the client before asking again; omission markers remain explicit.
+Comments read the same snapshot as Companion questions (the 50,000-token history
+window above) and are shown whole; the request asks the model for two short
+sentences. The side assistant has no history-browsing tool. Older history can be
+loaded into the client before asking again; omission notes remain explicit.
 
 Preferences live under `companion` in the client's prefs.json. They do not change
 Gateway defaults or entity-owned appearance/voice. Device preferences stay local.

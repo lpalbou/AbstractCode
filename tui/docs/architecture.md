@@ -66,7 +66,7 @@ The reusable engine ChatPanel owns message layout, scrolling and the composer.
 The Code adapter owns scopes, draft/history state and Gateway requests. Docs fetches
 the Code corpus; Companion captures an explicitly labelled snapshot of the loaded
 conversation and current run state. Both start `docs-qa@0.1.1:docsqa001` in a dedicated `kind=docs` session. It grants no tools and does not steer the coding run. Run-scope questions receive
-a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded; bounded history is labelled. A separate worker
+a fresh user-visible conversation reference; Docs receives that reference plus its cached corpus. Tool details and hidden reasoning are excluded. The reference holds the newest whole turns up to 50,000 estimated tokens (`assistant_context`, the runtime history-window rule), never cuts a message, and states how many older messages it left out. A separate worker
 follows that run, keeping coding commands and approval responses responsive.
 Temporary polling errors back off on the existing run; only an explicit retry
 after failure starts another inference. UI posts check both session and operation

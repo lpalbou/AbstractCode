@@ -35,6 +35,9 @@ pub struct DocsChat {
     pub error: String,
     pub corpus: Option<String>,
     pub source_session: String,
+    /// What the latest question's conversation reference left out
+    /// (`assistant_context::Window::notice`); `None` when nothing was.
+    pub context_note: Option<String>,
 }
 impl Default for DocsChat {
     fn default() -> Self {
@@ -47,6 +50,7 @@ impl Default for DocsChat {
             error: String::new(),
             corpus: None,
             source_session: String::new(),
+            context_note: None,
         }
     }
 }
