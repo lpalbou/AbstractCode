@@ -138,6 +138,18 @@ export function visibleAutomations(items: AutomationSummary[]): AutomationSummar
   return items.filter((s) => s.status !== "archived");
 }
 
+/**
+ * ADR 0048: the rows in the gateway's order, split by the `section` it serves: the active ones,
+ * then the paused ones (drawn folded under `Paused · N`). Nothing is sorted or decided here; a
+ * gateway that serves no `section` (0.19.0 and earlier) gets every row as today.
+ */
+export function automationSections(items: AutomationSummary[]): { main: AutomationSummary[]; paused: AutomationSummary[] } {
+  const rows = visibleAutomations(items);
+  const section = (s: AutomationSummary): unknown => (s as AutomationSummary & { section?: unknown }).section;
+  if (!rows.some((s) => typeof section(s) === "string")) return { main: rows, paused: [] };
+  return { main: rows.filter((s) => section(s) !== "paused"), paused: rows.filter((s) => section(s) === "paused") };
+}
+
 /** `archived_automations` of a `GET /automations` page: the gateway's count of archived automations (it lists them only when asked). */
 export function archivedAutomationCount(page: unknown): number {
   const n = (page as { archived_automations?: unknown } | null)?.archived_automations;

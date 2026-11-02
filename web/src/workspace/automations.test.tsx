@@ -316,6 +316,23 @@ describe("the sidebar section", () => {
     expect(html).toMatch(/data-automation-id="a3"[\s\S]*?<\/div><p class="code-inline-error" role="alert" data-code="not_permitted">/);
   });
 
+  it("ADR 0048: the served order, the paused ones folded under `Paused · N` (the same cards); an older gateway draws today's list", () => {
+    const sectioned = list().map((s, i) => ({ ...s, status: (i === 0 ? "paused" : "active") as AutomationSummary["status"], section: i === 0 ? "paused" : "active" }));
+    const [paused, ...active] = sectioned;
+    const closed = renderToStaticMarkup(<AutomationsSection {...base} state={state(sectioned)} />);
+    expect(closed).not.toContain(`data-automation-id="${paused.automation_id}"`);
+    const order = active.map((s) => closed.indexOf(`data-automation-id="${s.automation_id}"`));
+    expect(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1]))).toBe(true);
+    expect(closed).toContain('<div class="code-archived" data-section="paused" data-list="automations" data-open="false"><button type="button" class="code-archived-toggle" aria-expanded="false" aria-controls="code-paused-automations"><span>Paused · 1</span>');
+    const opened = renderToStaticMarkup(<AutomationsSection {...base} state={state(sectioned)} pausedOpen />);
+    expect(opened).toMatch(new RegExp(`data-section="paused"[\\s\\S]*data-automation-id="${paused.automation_id}"`));
+    // A gateway that serves no `section`: every row as served, no Paused footer.
+    const older = sectioned.map(({ section: _s, ...s }) => s as AutomationSummary);
+    const today = renderToStaticMarkup(<AutomationsSection {...base} state={state(older)} />);
+    expect(today).toContain(`data-automation-id="${paused.automation_id}"`);
+    expect(today).not.toContain('data-section="paused"');
+  });
+
   it("R5: no Show archived switch; a quiet `Archived · N` footer at the end opens them inline with Unarchive", () => {
     const all = list().map((s, i) => (i === 1 || i === 2 ? { ...s, status: "archived" as const } : s));
     const items = all;
@@ -325,7 +342,7 @@ describe("the sidebar section", () => {
     expect(closed).not.toMatch(/Show archived|show-archived/);
     expect(closed).not.toContain(`data-automation-id="${items[1].automation_id}"`);
     // The footer is the LAST thing in the list region.
-    expect(closed).toMatch(/<div class="code-archived" data-list="automations" data-open="false"><button type="button" class="code-archived-toggle" aria-expanded="false" aria-controls="code-archived-automations"><span>Archived · 2<\/span>[\s\S]*?<\/button><\/div><\/div><\/section>$/);
+    expect(closed).toMatch(/<div class="code-archived" data-section="archived" data-list="automations" data-open="false"><button type="button" class="code-archived-toggle" aria-expanded="false" aria-controls="code-archived-automations"><span>Archived · 2<\/span>[\s\S]*?<\/button><\/div><\/div><\/section>$/);
     expect(closed).not.toContain('data-action="unarchive"');
     const onUnarchive = vi.fn();
     expect(renderToStaticMarkup(<AutomationsSection {...base} archivedOpen state={withArchived(null)} />)).toContain("Loading archived automations…");

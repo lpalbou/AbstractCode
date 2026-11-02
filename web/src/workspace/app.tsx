@@ -360,6 +360,8 @@ export function CodeWorkspace() {
       void automations.loadArchived();
   }, [archivedOpen.automations, automationsState.loaded, automationsState.archivedCount, automationsState.archived, automations]);
   const [automationView, setAutomationView] = useState(false);
+  // ADR 0048: the Paused section of the automations list, closed at first.
+  const [pausedOpen, setPausedOpen] = useState(false);
   const [newAutomationOpen, setNewAutomationOpen] = useState(false);
   const switchNotice = useRef("");
   const [search, setSearch] = useState("");
@@ -1752,6 +1754,8 @@ export function CodeWorkspace() {
           onRefresh={() => void automations.refresh()}
           archivedOpen={archivedOpen.automations}
           onToggleArchived={() => toggleArchivedOpen("automations")}
+          pausedOpen={pausedOpen}
+          onTogglePaused={() => setPausedOpen((v) => !v)}
           onUnarchive={(s) => void automations.unarchive(s.automation_id).catch(() => undefined)}
           onArchive={(s) => automations.command(s.automation_id, "automation.archive")}
           open={panels.automations}

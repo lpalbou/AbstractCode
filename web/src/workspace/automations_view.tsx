@@ -13,7 +13,7 @@ import { AutomationWorkflowPicker, type AutomationWorkflowPickerOptions, automat
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { LoadingStatus } from "./loading_status";
-import { ArchivedFooter, ArchivedRow, PanelHeader, panelIds } from "./sidebar_panels";
+import { ArchivedFooter, ArchivedRow, PanelHeader, PausedFooter, panelIds } from "./sidebar_panels";
 import { AutomationCard } from "./sidebar_cards";
 // Canonical consumption-aware panel; the installed UI-kit peer predates visibility receipts.
 import { AutomationPanel } from "../vendor/abstractsessions/automation_panel.js";
@@ -40,7 +40,7 @@ import {
   discussionNotice,
   proxyAnswerWait,
   toApiError,
-  visibleAutomations,
+  automationSections,
   type AutomationsState,
 } from "./automations";
 import { proxyGatewayFetch } from "./session_files";
@@ -126,6 +126,9 @@ export function AutomationsSection(props: {
   onToggleArchived?(): void;
   /** Unarchive one automation (the gateway's `automation.unarchive`). */
   onUnarchive?(s: AutomationSummary): void;
+  /** The `Paused · N` section (ADR 0048): open state (closed at first) and its toggle. */
+  pausedOpen?: boolean;
+  onTogglePaused?(): void;
   /** Archive confirmation is owned by the host card. */
   onArchive?(s: AutomationSummary): Promise<unknown>;
   nowMs?: number;
@@ -138,7 +141,7 @@ export function AutomationsSection(props: {
   const open = props.open ?? true;
   const ids = panelIds("automations");
   const st = props.state;
-  const rows = visibleAutomations(st.items);
+  const { main: rows, paused } = automationSections(st.items);
   const archived = st.archived ?? [];
   const attention = props.attention;
   const waiting = attention
@@ -189,6 +192,21 @@ export function AutomationsSection(props: {
             {st.rowError?.automationId === s.automation_id ? <ErrorLine error={st.rowError.error} /> : null}
           </React.Fragment>
         ))}
+        <PausedFooter count={paused.length} open={props.pausedOpen === true} onToggle={() => props.onTogglePaused?.()}>
+          {paused.map((s) => (
+            <li key={s.automation_id} className="code-paused-row">
+              <AutomationCard
+                summary={s}
+                selected={props.selectedId === s.automation_id}
+                busy={st.busy}
+                nowMs={props.nowMs ?? Date.now()}
+                onSelect={() => props.onSelect(s.automation_id)}
+                onArchive={props.onArchive ? () => props.onArchive!(s) : undefined}
+              />
+              {st.rowError?.automationId === s.automation_id ? <ErrorLine error={st.rowError.error} /> : null}
+            </li>
+          ))}
+        </PausedFooter>
         <ArchivedFooter list="automations" count={st.archivedCount} open={props.archivedOpen === true} onToggle={() => props.onToggleArchived?.()}>
           {st.archived === null ? <li><LoadingStatus>Loading archived automations…</LoadingStatus></li> : null}
           {archived.map((s) => (
