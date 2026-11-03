@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [web 0.15.0] - 2026-11-03
 
+On AbstractUIC `@abstractframework/ui-kit` ^0.9.13 and `@abstractframework/panel-chat` ^0.8.0.
+
 ### Changed
 
 - **Avatar view: one live line and a Findings panel (web).** Under the avatar, one line shows the latest
@@ -42,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   When older messages are left out, the snapshot starts with a note that counts
   them, and the drawer shows the same count beside your question.
 - Terminal: automatic comments are shown whole (previously shortened at 800 characters).
+- Terminal: the companion looks at you with its eyes only; designs without eyes no longer lean toward the
+  pointer (AbstractAvatar 0.1.1).
 
 ### Fixed
 

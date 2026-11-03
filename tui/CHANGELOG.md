@@ -24,6 +24,8 @@ All notable changes to this project are documented here. The format follows
   When older messages are left out, the snapshot starts with a note that counts
   them, and the drawer shows the same count beside your question.
 - Automatic comments are shown whole (previously shortened at 800 characters).
+- The companion looks at you with its eyes only; designs without eyes no longer
+  lean toward the pointer (AbstractAvatar 0.1.1).
 
 ### Fixed
 
