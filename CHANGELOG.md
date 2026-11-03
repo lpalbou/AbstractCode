@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the gateway's order, then a `Paused · N` line that Enter opens (the same cards), then
   `Archived · N`. With a gateway that does not serve sections the list is drawn as before.
 
+### Fixed
+
+- **Terminal: automation runs no longer appear as conversations.** The `/sessions` board, `--resume` and
+  the `Archived · N` rows now ask the gateway for conversations only (`session_kind=chat,discussion`, the
+  runtime's attribution tag, the same filter the Assistant sends); an automation's runs stay under
+  `/automations`. Before, an automation that had run recently could be the session `--resume` reopened.
+
 ## [terminal 0.13.2] - 2026-11-02
 
 ### Changed
