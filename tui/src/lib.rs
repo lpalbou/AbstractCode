@@ -625,7 +625,9 @@ mod tests {
         );
         let line = rx.recv().unwrap();
         assert!(
-            line.contains("/runs?") && line.contains("root_only=true"),
+            line.contains("/runs?")
+                && line.contains("root_only=true")
+                && line.contains("session_kind=chat,discussion"),
             "{line}"
         );
     }

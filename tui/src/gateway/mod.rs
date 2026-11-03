@@ -898,8 +898,15 @@ impl GatewayClient {
         // "7 tools" is their sum, the same figure the Code web shows. The
         // listing also carries `archived_sessions` (the `Archived · N`
         // line); archived sessions are left out of it by the gateway.
+        //
+        // `session_kind=chat,discussion` (the runtime's attribution tag,
+        // `run_attribution.py`): an automation's runs (`automation` /
+        // `occurrence`) are not conversations — they live under
+        // /automations — so the board, `--resume` and the Archived rows
+        // ask the gateway for conversations only, the same filter the
+        // Assistant sends. Operator report 2026-11-03.
         format!(
-            "/runs?limit={}&root_only=true&include_ledger_len=false&include_metrics=false",
+            "/runs?limit={}&root_only=true&session_kind=chat,discussion&include_ledger_len=false&include_metrics=false",
             limit.max(1)
         )
     }
@@ -908,7 +915,7 @@ impl GatewayClient {
     /// under the board's `Archived · N` line, each with Unarchive.
     pub(crate) fn archived_session_listing_path(limit: u32) -> String {
         format!(
-            "/runs?limit={}&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=false",
+            "/runs?limit={}&root_only=true&archived_only=true&session_kind=chat,discussion&include_ledger_len=false&include_metrics=false",
             limit.max(1)
         )
     }
@@ -1531,11 +1538,11 @@ mod tests {
         let p = GatewayClient::session_listing_path(200);
         assert_eq!(
             p,
-            "/runs?limit=200&root_only=true&include_ledger_len=false&include_metrics=false"
+            "/runs?limit=200&root_only=true&session_kind=chat,discussion&include_ledger_len=false&include_metrics=false"
         );
         assert_eq!(
             GatewayClient::archived_session_listing_path(200),
-            "/runs?limit=200&root_only=true&archived_only=true&include_ledger_len=false&include_metrics=false"
+            "/runs?limit=200&root_only=true&archived_only=true&session_kind=chat,discussion&include_ledger_len=false&include_metrics=false"
         );
         // No session filter: the whole point is discovering sessions
         // this client has never heard of.
