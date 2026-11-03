@@ -11,9 +11,9 @@ abstractgateway serve            # binds 0.0.0.0:8080 by default
 ```
 
 Use AbstractGateway 0.13.0 or later to archive conversations and to see the
-gateway's default voice routes in the clients. The browser client 0.14.0 needs
-AbstractGateway 0.19.0 or later for shared unread markers and the Avatar view's
-public updates.
+gateway's default voice routes in the clients. The browser client 0.15.0 needs
+AbstractGateway 0.20.0 or later for shared unread markers, the Avatar view's live
+line and Findings, and the `Paused · N` automation section.
 
 The gateway ships working agent bundles out of the box. Its default agent
 workflow is the shipped `basic-agent` until its operator chooses another, and

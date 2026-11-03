@@ -12,10 +12,10 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
-What's new: browser 0.14.0 adds the Avatar conversation view and compact settings;
-terminal 0.13.0 adds six shared companion designs and a larger Skills picker, and
-terminal 0.13.2 gives side questions the 50,000-token history window. See
-[CHANGELOG.md](CHANGELOG.md).
+What's new: browser 0.15.0 shows one live line and a Findings panel in the Avatar view
+and lists paused automations under `Paused · N`; terminal 0.14.0 gives side questions
+the 50,000-token history window, folds paused automations under `Paused · N` and lists
+only conversations in `/sessions`. See [CHANGELOG.md](CHANGELOG.md).
 
 ## The two clients
 
@@ -40,8 +40,10 @@ abstractgateway serve            # binds 0.0.0.0:8080; reach it at http://127.0.
 ```
 
 Archiving conversations, the **Archived · N** lists and the gateway's default
-voice routes need AbstractGateway 0.13.0 or later; the browser client 0.14.0
-(shared unread markers, the Avatar view's public updates) needs 0.19.0 or later.
+voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
+(shared unread markers, the Avatar view's live line and Findings, the `Paused · N`
+section) needs 0.20.0 or later; with an older gateway every update shows as progress
+and automations are listed without sections.
 
 Then start whichever client you prefer:
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.15.0] - 2026-11-03
+
+On AbstractUIC `@abstractframework/ui-kit` ^0.9.14 and `@abstractframework/panel-chat` ^0.8.1.
+
 ### Changed
 
 - **Avatar view: one live line and a Findings panel (web).** Under the avatar, one line shows the latest
@@ -21,18 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the gateway's order (most recent activity first) and keeps the paused automations behind a quiet
   `Paused · N` row above `Archived · N`, which opens them as the same cards (framework ADR 0048).
   With a gateway that does not serve sections (0.19.0 and earlier) the list is drawn as before.
+
+## [terminal 0.14.0] - 2026-11-03
+
+### Added
+
 - **Terminal automations: the paused ones under `Paused · N`.** `/automations` lists the active ones
   in the gateway's order, then a `Paused · N` line that Enter opens (the same cards), then
   `Archived · N`. With a gateway that does not serve sections the list is drawn as before.
-
-### Fixed
-
-- **Terminal: automation runs no longer appear as conversations.** The `/sessions` board, `--resume` and
-  the `Archived · N` rows now ask the gateway for conversations only (`session_kind=chat,discussion`, the
-  runtime's attribution tag, the same filter the Assistant sends); an automation's runs stay under
-  `/automations`. Before, an automation that had run recently could be the session `--resume` reopened.
-
-## [terminal 0.13.2] - 2026-11-02
 
 ### Changed
 
@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   When older messages are left out, the snapshot starts with a note that counts
   them, and the drawer shows the same count beside your question.
 - Terminal: automatic comments are shown whole (previously shortened at 800 characters).
+- Terminal: the companion looks at you with its eyes only; designs without eyes no longer lean toward the
+  pointer (AbstractAvatar 0.1.1).
+
+### Fixed
+
+- **Terminal: automation runs no longer appear as conversations.** The `/sessions` board, `--resume` and
+  the `Archived · N` rows now ask the gateway for conversations only (`session_kind=chat,discussion`, the
+  runtime's attribution tag, the same filter the Assistant sends); an automation's runs stay under
+  `/automations`.
 
 ## [terminal 0.13.1] - 2026-11-02
 

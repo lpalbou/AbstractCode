@@ -18,10 +18,11 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.13.2**, pre-alpha. What's new in 0.13.2: Companion and Documentation
+Status: **0.14.0**, pre-alpha. What's new in 0.14.0: Companion and Documentation
 questions read the newest whole turns of your conversation up to 50,000 tokens,
-never a shortened message, and say what they left out
-([CHANGELOG.md](CHANGELOG.md#0132---2026-11-02)).
+never a shortened message, and say what they left out; `/automations` folds the
+paused ones under `Paused · N`; `/sessions` and `--resume` list conversations only
+([CHANGELOG.md](CHANGELOG.md#0140---2026-11-03)).
 
 ## What it looks like
 
@@ -2852,7 +2853,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.13.2] - 2026-11-02
+## [0.14.0] - 2026-11-03
+
+### Added
+
+- `/automations` lists the active automations in the gateway's order, then a
+  `Paused · N` line that Enter opens (the same cards), then `Archived · N`. With
+  a gateway that does not serve sections the list is drawn as before.
 
 ### Changed
 
@@ -2864,6 +2871,15 @@ All notable changes to this project are documented here. The format follows
   When older messages are left out, the snapshot starts with a note that counts
   them, and the drawer shows the same count beside your question.
 - Automatic comments are shown whole (previously shortened at 800 characters).
+- The companion looks at you with its eyes only; designs without eyes no longer
+  lean toward the pointer (AbstractAvatar 0.1.1).
+
+### Fixed
+
+- Automation runs no longer appear as conversations: the `/sessions` board,
+  `--resume` and the `Archived · N` rows ask the gateway for conversations only
+  (`session_kind=chat,discussion`, the same filter the Assistant sends); an
+  automation's runs stay under `/automations`.
 
 ## [0.13.1] - 2026-11-02
 
