@@ -1,7 +1,7 @@
 import {test,expect,type Locator,type Page} from '@playwright/test';
 import {openWorkspaceSection,openWorkflowInputs,closeWorkspaceDrawer} from './drawer_navigation';
 const gateway=process.env.ABSTRACTCODE_E2E_GATEWAY_URL||'http://127.0.0.1:18781';
-test('optional avatar keeps drafts, answers the real current question, and preserves final history',async({page})=>{
+test('optional avatar keeps drafts, answers the real current question, and preserves final history',async({page},testInfo)=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  // Warm the disposable principal host before exercising the app's short login timeout.
  const ready=await page.request.get(`${gateway}/api/gateway/bundles`,{headers:{Authorization:'Bearer abstractcode-e2e-only'},timeout:60000});
@@ -37,14 +37,14 @@ test('optional avatar keeps drafts, answers the real current question, and prese
  await expect.poll(()=>commands.some(c=>c.type==='resume'&&c.payload?.payload?.response==='continue')).toBe(true);
  await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Completed');
  await expect(page.locator('.pc-avatar-conversation__answer')).toContainText('structured-output');
- await page.screenshot({path:'/tmp/avatar-code-desktop.png'});
+ await page.screenshot({path:testInfo.outputPath('avatar-code-desktop.png')});
  await page.getByRole('button',{name:'Conversation',exact:true}).click();
  await expect(page.getByRole('region',{name:'Avatar conversation',exact:true})).toHaveCount(0);
  await expect(page.locator('.code-conversation .pc-chat-thread')).toContainText('structured-output');
  expect(errors).toEqual([]);
 });
 
-test('avatar keeps the real approval and compact multiline composer visible',async({page})=>{
+test('avatar keeps the real approval and compact multiline composer visible',async({page},testInfo)=>{
  const ready=await page.request.get(`${gateway}/api/gateway/bundles`,{headers:{Authorization:'Bearer abstractcode-e2e-only'},timeout:60000});expect(ready.ok()).toBe(true);
  const appOrigin=new URL(process.env.ABSTRACTCODE_E2E_URL||'http://127.0.0.1:18782').origin;
  await page.route('**/*',route=>new URL(route.request().url()).origin===appOrigin?route.continue():route.abort('blockedbyclient'));
@@ -55,7 +55,7 @@ test('avatar keeps the real approval and compact multiline composer visible',asy
  const composer=page.locator('.code-conversation .pc-composer');await expect(composer).toHaveClass(/pc-composer--compact/);
  const input=composer.getByRole('textbox',{name:'Message',exact:true});await input.fill('Review these notes\nKeep both options\nCompare access');await expect(input).toHaveValue(/\n.*\n/);
  await expect(input).toHaveCSS('outline-style','none');
- await composer.screenshot({path:'/tmp/code-compact-multiline.png',animations:'disabled'});
+ await composer.screenshot({path:testInfo.outputPath('code-compact-multiline.png'),animations:'disabled'});
  await page.getByRole('button',{name:'Send',exact:true}).click();
  const allow=page.getByRole('button',{name:'Allow once',exact:true});await expect(allow).toBeVisible();
  await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Permission required');
@@ -73,7 +73,7 @@ test('avatar keeps the real approval and compact multiline composer visible',asy
   await expect.poll(()=>visible(allow)).toBe(true);await expect.poll(()=>visible(page.locator('.pc-avatar-conversation__request .pc-workflow-interaction__prompt'))).toBe(true);
   await allow.click({trial:true});
   await expect(composer.getByRole('textbox',{name:'Message',exact:true})).toBeVisible();expect(commands.length).toBe(0);
-  await page.screenshot({path:`/tmp/avatar-public-code-fixture-${viewport.width}.png`,animations:'disabled'});
+  await page.screenshot({path:testInfo.outputPath(`avatar-public-code-fixture-${viewport.width}.png`),animations:'disabled'});
  }
  await page.getByRole('button',{name:'Review details',exact:true}).click();
  await expect(page.getByRole('region',{name:'Avatar conversation',exact:true})).toHaveCount(0);expect(commands).toEqual([]);
@@ -97,7 +97,7 @@ async function startDelegatedApproval(page:Page):Promise<void>{
  await page.getByRole('button',{name:'Avatar',exact:true}).click();
 }
 
-test('public webpage approval uses a deterministic served-view double with an exact bound why',async({page})=>{
+test('public webpage approval uses a deterministic served-view double with an exact bound why',async({page},testInfo)=>{
  // This tests the actual built Code host. Only its served replay view is doubled:
  // the real disposable Gateway fixture remains unchanged and no URL/model is read.
  const WHY='I want to compare these two restaurant pages to check their opening hours.';
@@ -139,13 +139,13 @@ test('public webpage approval uses a deterministic served-view double with an ex
  await expect(allow.locator('svg')).toHaveCount(1);await expect(page.getByRole('button',{name:'Deny',exact:true}).locator('svg')).toHaveCount(1);
  for(const viewport of[{width:1280,height:800},{width:1000,height:650},{width:390,height:844}]){
   await page.setViewportSize(viewport);
-  await page.screenshot({path:`/tmp/avatar-public-code-pages-${viewport.width}.png`,animations:'disabled'});
+  await page.screenshot({path:testInfo.outputPath(`avatar-public-code-pages-${viewport.width}.png`),animations:'disabled'});
   for(const locator of[page.getByRole('heading',{name:'May I read these 2 webpages?',exact:true}),page.getByText(WHY,{exact:true}),...URLS.map(url=>page.getByText(url,{exact:true})),allow,page.getByRole('button',{name:'Deny',exact:true}),page.getByRole('button',{name:'Review details',exact:true})]){
    const label=await locator.innerText();
    await expect.poll(()=>publicTargetVisible(locator),{message:`Readable ${label} at ${viewport.width}x${viewport.height}`}).toBe(true);
   }
   await allow.click({trial:true});expect(decisions).toEqual([]);
-  await page.screenshot({path:`/tmp/avatar-public-code-pages-${viewport.width}.png`,animations:'disabled'});
+  await page.screenshot({path:testInfo.outputPath(`avatar-public-code-pages-${viewport.width}.png`),animations:'disabled'});
  }
  await page.getByRole('button',{name:'Deny',exact:true}).click();
  await expect.poll(()=>decisions.length).toBe(1);expect(decisions[0].type).toBe('resume');expect(decisions[0].payload?.payload?.approved).toBe(false);
