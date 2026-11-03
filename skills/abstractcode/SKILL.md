@@ -154,7 +154,7 @@ fallback and do not provide semantic actions. See
 
 ## Optional avatar conversation
 
-In the browser, choose **Avatar** for public subtitles and **Conversation** to restore the
+In the browser, choose **Avatar** for the live line of public updates and the Findings panel, and **Conversation** to restore the
 ordinary trace. Start the next task in Avatar mode to request actor-authored public updates;
 changing a legacy run's view does not create missing updates. Type or speak during work to
 guide it; selecting **Reply to this** fixes a public brève as context. Accepted guidance is
