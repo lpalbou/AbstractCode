@@ -6,7 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.13.2] - 2026-11-02
+## [0.14.0] - 2026-11-03
+
+### Added
+
+- `/automations` lists the active automations in the gateway's order, then a
+  `Paused · N` line that Enter opens (the same cards), then `Archived · N`. With
+  a gateway that does not serve sections the list is drawn as before.
 
 ### Changed
 
@@ -18,6 +24,13 @@ All notable changes to this project are documented here. The format follows
   When older messages are left out, the snapshot starts with a note that counts
   them, and the drawer shows the same count beside your question.
 - Automatic comments are shown whole (previously shortened at 800 characters).
+
+### Fixed
+
+- Automation runs no longer appear as conversations: the `/sessions` board,
+  `--resume` and the `Archived · N` rows ask the gateway for conversations only
+  (`session_kind=chat,discussion`, the same filter the Assistant sends); an
+  automation's runs stay under `/automations`.
 
 ## [0.13.1] - 2026-11-02
 

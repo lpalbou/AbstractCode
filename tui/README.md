@@ -7,10 +7,11 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.13.2**, pre-alpha. What's new in 0.13.2: Companion and Documentation
+Status: **0.14.0**, pre-alpha. What's new in 0.14.0: Companion and Documentation
 questions read the newest whole turns of your conversation up to 50,000 tokens,
-never a shortened message, and say what they left out
-([CHANGELOG.md](CHANGELOG.md#0132---2026-11-02)).
+never a shortened message, and say what they left out; `/automations` folds the
+paused ones under `Paused · N`; `/sessions` and `--resume` list conversations only
+([CHANGELOG.md](CHANGELOG.md#0140---2026-11-03)).
 
 ## What it looks like
 
