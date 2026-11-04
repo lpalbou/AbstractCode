@@ -11,7 +11,7 @@ Status: **0.14.0**, pre-alpha. What's new in 0.14.0: Companion and Documentation
 questions read the newest whole turns of your conversation up to 50,000 tokens,
 never a shortened message, and say what they left out; `/automations` folds the
 paused ones under `Paused · N`; `/sessions` and `--resume` list conversations only
-([CHANGELOG.md](CHANGELOG.md#0140---2026-11-03)).
+([CHANGELOG.md](CHANGELOG.md#0140---2026-11-04)).
 
 ## What it looks like
 

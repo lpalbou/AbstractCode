@@ -42,8 +42,9 @@ Docs:
   - Voice (optional): composer dictation, replies read aloud, and the **Voice** panel (see [`../docs/web.md`](../docs/web.md#optional-voice))
 
 Archiving conversations, **Archived · N** and the gateway's default voice
-routes need AbstractGateway 0.13.0 or later. Shared unread markers and the
-Avatar view's public updates need AbstractGateway 0.19.0 or later.
+routes need AbstractGateway 0.13.0 or later. Shared unread markers need
+AbstractGateway 0.19.0 or later; the Avatar view's live line and Findings and the
+`Paused · N` automation section need AbstractGateway 0.20.0 or later.
 
 ## Local dev
 ```bash
