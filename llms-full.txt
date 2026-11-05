@@ -1870,7 +1870,7 @@ Status: **0.14.0**, pre-alpha. What's new in 0.14.0: Companion and Documentation
 questions read the newest whole turns of your conversation up to 50,000 tokens,
 never a shortened message, and say what they left out; `/automations` folds the
 paused ones under `Paused · N`; `/sessions` and `--resume` list conversations only
-([CHANGELOG.md](CHANGELOG.md#0140---2026-11-03)).
+([CHANGELOG.md](CHANGELOG.md#0140---2026-11-04)).
 
 ## What it looks like
 
@@ -4414,8 +4414,9 @@ Docs:
   - Voice (optional): composer dictation, replies read aloud, and the **Voice** panel (see [`../docs/web.md`](../docs/web.md#optional-voice))
 
 Archiving conversations, **Archived · N** and the gateway's default voice
-routes need AbstractGateway 0.13.0 or later. Shared unread markers and the
-Avatar view's public updates need AbstractGateway 0.19.0 or later.
+routes need AbstractGateway 0.13.0 or later. Shared unread markers need
+AbstractGateway 0.19.0 or later; the Avatar view's live line and Findings and the
+`Paused · N` automation section need AbstractGateway 0.20.0 or later.
 
 ## Local dev
 ```bash
@@ -4531,9 +4532,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [web 0.15.0] - 2026-11-03
+## [web 0.15.0] - 2026-11-04
 
 On AbstractUIC `@abstractframework/ui-kit` ^0.9.14 and `@abstractframework/panel-chat` ^0.8.1.
+Needs AbstractGateway 0.20.0 for the live line, Findings and the `Paused · N` section; with an older
+gateway every update shows as progress and automations are listed without sections.
 
 ### Changed
 
@@ -4550,7 +4553,7 @@ On AbstractUIC `@abstractframework/ui-kit` ^0.9.14 and `@abstractframework/panel
   `Paused · N` row above `Archived · N`, which opens them as the same cards (framework ADR 0048).
   With a gateway that does not serve sections (0.19.0 and earlier) the list is drawn as before.
 
-## [terminal 0.14.0] - 2026-11-03
+## [terminal 0.14.0] - 2026-11-04
 
 ### Added
 

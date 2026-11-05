@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [web 0.15.0] - 2026-11-03
+## [web 0.15.0] - 2026-11-04
 
 On AbstractUIC `@abstractframework/ui-kit` ^0.9.14 and `@abstractframework/panel-chat` ^0.8.1.
+Needs AbstractGateway 0.20.0 for the live line, Findings and the `Paused · N` section; with an older
+gateway every update shows as progress and automations are listed without sections.
 
 ### Changed
 
@@ -26,7 +28,7 @@ On AbstractUIC `@abstractframework/ui-kit` ^0.9.14 and `@abstractframework/panel
   `Paused · N` row above `Archived · N`, which opens them as the same cards (framework ADR 0048).
   With a gateway that does not serve sections (0.19.0 and earlier) the list is drawn as before.
 
-## [terminal 0.14.0] - 2026-11-03
+## [terminal 0.14.0] - 2026-11-04
 
 ### Added
 
