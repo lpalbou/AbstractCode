@@ -1,5 +1,5 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, useAvatarConversationPreferences, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
-import { ActivityAvatar, AfVoiceMicButton, voiceCaptureMode, useVoiceLevel } from "@abstractframework/ui-kit";
+import { ActivityAvatar, useVoiceLevel } from "@abstractframework/ui-kit";
 import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget, sessionOpeningReceipts } from "../vendor/abstractsessions/session_cards.js";
 import { createSessionReadClient, useSessionReads, sessionReadScope, SessionReadMarker, sessionContentRevision } from "../vendor/abstractsessions/session_cards.js";
@@ -169,7 +169,7 @@ function writeRoute(sessionId: string, runId = "") {
 
 function ConversationAvatar({ voice, active, pending, failed, paused }: { voice: ReturnType<typeof useWorkspaceVoice>; active: boolean; pending: boolean; failed: boolean; paused: boolean }) {
   const microphone = useVoiceLevel(voice.voice_ptt_recording ? voice : null);
-  return <ActivityAvatar design="halo" size={320} pose={voice.voice_ptt_recording ? "listening" : voice.tts_playback.status === "playing" ? "speaking" : paused || pending ? "waiting" : active ? "thinking" : failed ? "error" : "ready"} level={voice.voice_ptt_recording ? microphone : 0} label="Your assistant" />;
+  return <ActivityAvatar design="watch-hover" size={320} pose={voice.voice_ptt_recording ? "listening" : voice.tts_speaking ? "speaking" : paused || pending ? "waiting" : active ? "thinking" : failed ? "error" : "ready"} level={voice.voice_ptt_recording ? microphone : 0} label="Your assistant" />;
 }
 
 export function CodeWorkspace() {
@@ -1691,7 +1691,7 @@ export function CodeWorkspace() {
         >
           {!currentSession ? (
             <div className="af-session-card code-session-placeholder" data-selected="true">
-              <button type="button" className="af-session-card__open" onClick={() => setSidebarOpen(false)}>
+              <button type="button" className="af-session-card__open" aria-current="page" onClick={() => setSidebarOpen(false)}>
                 <span className="af-session-card__title">New conversation</span>
                 <span className="af-session-card__meta">Ready when you are</span>
               </button>
@@ -1946,7 +1946,7 @@ export function CodeWorkspace() {
                 avatar: <ConversationAvatar voice={voice} active={active} pending={Boolean(pendingInteraction)} failed={snapshot.status === "failed"} paused={paused && !terminal(snapshot.status)} />,
                 ...conversationSnapshot(snapshot),
                 listening: voice.voice_ptt_recording,
-                speaking: voice.tts_playback.status === "playing",
+                speaking: voice.tts_speaking,
                 preferences: avatarPreferences.preferences,
                 onPreferencesChange: avatarPreferences.setPreferences,
                 onCue: (cue) => { void playConversationCue(cue).catch((reason) => setNotice(String(reason instanceof Error ? reason.message : reason))); },
@@ -1954,11 +1954,7 @@ export function CodeWorkspace() {
                 onReplyContext: setAvatarReplyContext,
                 onAttendedChange: setAvatarAttended,
                 narrate: voicePreferences.read_aloud === true && !voicePreferences.reply_muted,
-                onNarrate: (message) => { if (voice.tts_supported) void voice.toggle_tts(`brief:${message.id}`, message.content); },
-                voiceControl: <span onPointerDown={() => voice.stop_tts()}><AfVoiceMicButton voice={voice} mode={voiceCaptureMode(voicePreferences.capture_mode ?? CODE_CAPTURE_DEFAULTS.capture_mode)} label="Talk" onTranscript={(text) => { if ((voicePreferences.auto_send ?? CODE_CAPTURE_DEFAULTS.auto_send) === false) setDraft((d) => spokenMessage(d, text)); else void sendSpoken(text); }} /></span>,
-                playbackControl: <span role="group" aria-label="Voice controls">
-                  {["playing", "paused"].includes(voice.tts_playback.status) && <><AfSwitch variant="row" label="Voice paused" checked={voice.tts_playback.status === "paused"} onChange={() => { const message = messages.find((m) => String(m.id || "") === voice.tts_playback.key.replace(/^brief:/, "")); if (message) void voice.toggle_tts(voice.tts_playback.key, message.content); }} /><button type="button" onClick={() => voice.stop_tts()}>Silence voice</button></>}
-                </span>,
+                onNarrate: (message) => { if (voice.tts_supported) void voice.toggle_tts(message.id || message.content, message.content); },
               } : undefined}
                 artifactFetch={proxyGatewayFetch}
                 attachmentScope={JSON.stringify([identity,session.sessionId])}

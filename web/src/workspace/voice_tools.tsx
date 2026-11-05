@@ -1,3 +1,4 @@
+import { streamTtsJsonl, useGatewayVoice } from "../vendor/abstractvoice/use_gateway_voice.js";
 import { gatewayApiPath } from "@abstractframework/ui-kit";
 import React, { useEffect, useRef } from "react";
 import {
@@ -6,8 +7,6 @@ import {
   Icon,
   GATEWAY_VOICE_ROUTES,
   gatewayVoiceOptions,
-  streamTtsJsonl,
-  useGatewayVoice,
   voiceCaptureMode,
   voiceCloneDeployPath,
   voiceClonePath,

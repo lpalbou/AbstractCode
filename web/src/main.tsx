@@ -4,7 +4,8 @@ import ReactDOM from "react-dom/client";
 import "@abstractframework/ui-kit/theme.css";
 import { installViewportVars } from "@abstractframework/ui-kit";
 
-import "@abstractframework/panel-chat/panel_chat.css";
+// The conversation snapshot imported by app owns the complete shared chat CSS too.
+// Loading an older installed copy alongside it resurrects removed avatar styles.
 import { CodeWorkspace, WorkspaceErrorBoundary } from "./workspace/app";
 import { installKeyboardFlag } from "./workspace/layout";
 import "./workspace/workspace.css";

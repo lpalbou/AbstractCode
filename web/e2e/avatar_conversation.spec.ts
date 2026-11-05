@@ -16,6 +16,9 @@ test('optional avatar keeps drafts, answers the real current question, and prese
  await page.locator('#gateway-session-token').fill('abstractcode-e2e-only');
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await expect(page.getByRole('dialog',{name:'Gateway connection'})).toBeHidden();
+ await expect(page.locator('.code-session-placeholder .af-session-card__open')).toHaveAttribute('aria-current','page');
+ await expect(page.locator('.code-session-placeholder')).toHaveCSS('box-shadow', /inset.*2px|2px.*inset/);
+ await page.locator('.code-session-placeholder').screenshot({path:testInfo.outputPath('new-conversation-selected.png')});
  await openWorkspaceSection(page,'Workflow');
  const picker=page.getByRole('combobox',{name:'Workflow',exact:true});await expect(picker).toBeEnabled();await picker.click();
  await page.getByRole('listbox',{name:'Workflow'}).getByRole('option').filter({has:page.locator('.af-workflow-picker__name',{hasText:/^Prompt structured$/})}).click();
@@ -37,6 +40,9 @@ test('optional avatar keeps drafts, answers the real current question, and prese
  await expect.poll(()=>commands.some(c=>c.type==='resume'&&c.payload?.payload?.response==='continue')).toBe(true);
  await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Completed');
  await expect(page.locator('.pc-avatar-conversation__answer')).toContainText('structured-output');
+ await expect(page.locator('.pc-avatar-conversation__answer .pc-chat-item')).toHaveCSS('border-inline-start-width','0px');
+ await expect(page.locator('.pc-avatar-conversation .af-voice-mic')).toHaveCount(0);
+ await expect(page.locator('.code-conversation .pc-composer .af-voice-mic')).toHaveCount(1);
  await page.screenshot({path:testInfo.outputPath('avatar-code-desktop.png')});
  await page.getByRole('button',{name:'Conversation',exact:true}).click();
  await expect(page.getByRole('region',{name:'Avatar conversation',exact:true})).toHaveCount(0);
