@@ -83,9 +83,10 @@ export type WorkflowChatProps = {
     onCancel?: (signal: AbortSignal) => void | Promise<unknown>;
     /**
      * Ledger-derived Stop state (`WorkflowSessionSnapshot.stop`). While busy the
-     * Stop button reads "Stopping…" for `stopping`; once the host is no longer
-     * busy the state stays visible in the button's place ("Stopped", or the
-     * gateway's forced-stop text) until the next run.
+     * Stop button reads "Stopping…" for `stopping`. Once the host is no longer
+     * busy the composer is back to idle (Send, the host's trailing actions,
+     * nothing else): the outcome ("Stopped", or the gateway's forced-stop text)
+     * belongs to the host's run status (`workflowProgress`), never the composer.
      */
     stopState?: {
         phase: "stopping" | "stopped" | "forced";

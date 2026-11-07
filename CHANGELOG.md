@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.8] - 2026-11-07 (local build, not published)
+
+Built on AbstractUIC 0.10.10 (`@abstractframework/panel-chat` 0.9.3, `@abstractframework/ui-kit` 0.9.21), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.7.
+
+### Fixed
+
+- **After Stop the message box is back to normal**: the microphone and Send, nothing else. "Stopped" is shown
+  in the run status at the top of the conversation, not in the message box.
+- **Read aloud keeps working when the sound output changes** (Safari, Bluetooth headphones). Replies and the
+  speaker Test could stay silent until the macOS output was switched away and back: the page kept one audio
+  player for its whole life. Code now opens a new one after a device change, when Play is pressed on a reply
+  that did not start or after 30 seconds of silence, and when you pick **Re-open audio**. With Read aloud on,
+  your clicks and key presses keep the player ready so the next reply is spoken. When Safari holds a reply
+  back, Code says so instead of showing a Play button that does nothing.
+- **Settings → Output device can always be changed.** It offers "Follow the system output (default)", your
+  speakers where the browser can switch them (Chrome, Edge), and "Re-open audio". Safari says it follows the
+  output chosen in macOS Sound settings.
+
 ## [web 0.15.7] - 2026-11-07
 
 Same gateways and AbstractUIC floor as web 0.15.6.

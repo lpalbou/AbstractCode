@@ -670,22 +670,6 @@
   color: var(--error);
 }
 
-/* Ledger-derived Stop outcome, shown where the Stop button was. */
-.pc-workflow-chat__stop-state {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--ui-border-1);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  padding: 6px 9px;
-  color: var(--text-secondary, var(--text-primary));
-}
-
-.pc-workflow-chat__stop-state--forced {
-  border-color: var(--error-border);
-  color: var(--error);
-}
-
 /* Drag-and-drop / paste to attach. The drop zone is an absolutely
  * positioned layer over the composer box, so showing it never moves the
  * layout. "Armed" (a file drag is over the window) is quiet; "over" (the
