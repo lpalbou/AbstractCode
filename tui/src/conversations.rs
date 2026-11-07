@@ -1,7 +1,7 @@
 //! Conversation cards (R7.3): the Code WUI sidebar's wording, in the
 //! terminal — pure and test-pinned.
 //!
-//! A card is its title (the opening prompt, else `Conversation <8 chars>`)
+//! A card is its title (the opening prompt, else `Untitled conversation`)
 //! and one quiet line `Oct 2 · 2 turns · 7 tools`: the day of the newest
 //! turn (month + day in local time, never a year), the turns (root runs),
 //! and the tool calls across them — the gateway's per-turn `tool_calls`
@@ -29,29 +29,44 @@ const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+/// Shown when a conversation's opening words are unknown (the Code web's
+/// `UNTITLED_CONVERSATION`).
+pub const UNTITLED: &str = "Untitled conversation";
+
 /// The card title: the opening prompt on one line, else
-/// `Conversation <id>` — the id's readable TAIL when long (this
-/// client's ids all begin `acode-`, so the web's first 8 characters would
-/// name nothing; ids differ at the end).
-pub fn card_title(label: &str, id: &str) -> String {
-    let one = label
+/// `Untitled conversation`. Never built from the session id (framework
+/// ADR 0043: a computer id is never a label); `_id` stays in the signature
+/// for the callers that pass it.
+pub fn card_title(label: &str, _id: &str) -> String {
+    label
         .lines()
         .map(str::trim)
         .find(|l| !l.is_empty())
-        .unwrap_or("");
-    if one.is_empty() {
-        {
-            let n = id.chars().count();
-            let tail = if n > 22 {
-                format!("…{}", id.chars().skip(n - 21).collect::<String>())
-            } else {
-                id.to_string()
-            };
-            format!("Conversation {tail}")
-        }
-    } else {
-        one.to_string()
-    }
+        .unwrap_or(UNTITLED)
+        .to_string()
+}
+
+/// The AbstractNote bundle id. Notes' own sessions (captures, drains,
+/// recall) are its background work, not conversations: the board and
+/// `--resume` leave out a session whose ROOT workflow belongs to this
+/// bundle — read from the run's `workflow_id` (`bundle@version:flow`),
+/// never from a session-id prefix (operator, 2026-11-07; the Code web's
+/// `notes_work.ts`).
+pub const NOTES_BUNDLE_ID: &str = "abstractnote";
+
+/// `bundle` of a gateway workflow id `bundle[@version]:flow`.
+pub fn workflow_bundle_id(workflow_id: &str) -> Option<&str> {
+    let (head, _) = workflow_id.split_once(':')?;
+    let bundle = head.split('@').next()?.trim();
+    (!bundle.is_empty()).then_some(bundle)
+}
+
+/// A run row runs an AbstractNote workflow (exact bundle id).
+pub fn is_notes_run(run: &serde_json::Value) -> bool {
+    run.get("workflow_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(workflow_bundle_id)
+        == Some(NOTES_BUNDLE_ID)
 }
 
 /// "Oct 2" for an RFC3339 stamp shifted by `offset_secs` (the viewer's
@@ -165,13 +180,10 @@ mod tests {
     #[test]
     fn titles_and_handover() {
         assert_eq!(card_title("fix the parser\nplease", "x"), "fix the parser");
+        assert_eq!(card_title("", "acode-never-seen"), "Untitled conversation");
         assert_eq!(
-            card_title("", "acode-never-seen"),
-            "Conversation acode-never-seen"
-        );
-        assert_eq!(
-            card_title("", "acode-0123456789abcdef0123456789"),
-            "Conversation …56789abcdef0123456789"
+            card_title("  \n ", "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46"),
+            "Untitled conversation"
         );
         let ids: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
         assert_eq!(next_after_archive(&ids, "b").as_deref(), Some("c"));

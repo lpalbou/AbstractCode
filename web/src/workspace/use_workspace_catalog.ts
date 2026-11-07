@@ -12,6 +12,7 @@ import {
   normalizeWorkspacePolicy,
   normalizeToolCatalog,
   normalizeSessionSummaries,
+  withoutNotesSessions,
   type WorkflowDefinition,
   type WorkspacePolicy,
   type ToolSpec,
@@ -33,7 +34,8 @@ import {
   gatewayDefaultFromEnvelope,
   type GatewayDefaultState,
 } from "./workflow_selection";
-import { archivedSessionCount } from "./archived_conversations";
+import { archivedConversationCount } from "./archived_conversations";
+import { withoutNotesEntries } from "./notes_work";
 import {
   CONVERSATIONS_PAGE,
   conversationPage,
@@ -46,6 +48,11 @@ type CatalogState = {
   policy: WorkspacePolicy | null;
   tools: ToolSpec[];
   sessions: SessionSummary[];
+  /**
+   * AbstractNote's sessions in the same runs page (`notes_work.ts`): never listed, kept only so a
+   * link naming one opens it (read-only) on its latest turn.
+   */
+  notesSessions: SessionSummary[];
   sessionActivity: Record<string, SessionActivity>;
   capabilities: Record<string, any>;
   capabilitiesLoading: boolean;
@@ -81,6 +88,7 @@ const empty: CatalogState = {
   policy: null,
   tools: [],
   sessions: [],
+  notesSessions: [],
   sessionActivity: {},
   capabilities: {},
   capabilitiesLoading: true,
@@ -173,16 +181,18 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     setState((s) => ({ ...s, loading: true }));
     try {
       const runs = await fetchRuns(abort.signal);
+      const archivedSessions = await archivedConversationCount(runs, gatewayRequest, abort.signal);
       if (listGeneration.current !== listGen) return;
       const page = pageOf(runs);
       setState((s) => ({
         ...s,
         loading: false,
         sessions: page.sessions,
-        sessionActivity: sessionActivityFromRuns(runs),
+        notesSessions: normalizeSessionSummaries(runs, {}, { purpose: "notes" }),
+        sessionActivity: sessionActivityFromRuns(withoutNotesSessions(runs)),
         sessionsLoaded: true,
         hasMore: page.hasMore,
-        archivedSessions: archivedSessionCount(runs),
+        archivedSessions,
         errors: s.errors.filter((e) => !e.startsWith("Conversations: ")),
       }));
       await hydrateLabels(runs, listGen, abort.signal);
@@ -246,6 +256,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         errors.push(`Tools: ${formatError(reason)}`);
       }
     }
+    const archivedSessions = value(3) ? await archivedConversationCount(value(3), gatewayRequest, abort.signal).catch(() => 0) : 0;
+    if (generation.current !== gen) return;
     // A "Load more" started while this refresh was in flight owns the list now.
     const listCurrent = listGeneration.current === listGen;
     const page = pageOf(value(3));
@@ -254,7 +266,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       executable = { status: "error", data: null, error: `Workflows for this app: ${formatError((result[7] as PromiseRejectedResult).reason)}` };
     else {
       try {
-        executable = { status: "ready", data: parseExecutableWorkflows(value(7), CODE_AGENT_INTERFACE), error: "" };
+        executable = { status: "ready", data: withoutNotesEntries(parseExecutableWorkflows(value(7), CODE_AGENT_INTERFACE)), error: "" };
       } catch (reason: any) {
         // A gateway that does not filter per app is said, never papered over.
         executable = { status: "error", data: null, error: String(reason?.message || reason) };
@@ -266,7 +278,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       policy: value(1) ? normalizeWorkspacePolicy(value(1)) : null,
       tools: normalizeToolCatalog(value(2)),
       sessions: listCurrent && value(3) ? page.sessions : previous.sessions,
-      sessionActivity: listCurrent && value(3) ? sessionActivityFromRuns(value(3)) : previous.sessionActivity,
+      notesSessions: listCurrent && value(3) ? normalizeSessionSummaries(value(3), {}, { purpose: "notes" }) : previous.notesSessions,
+      sessionActivity: listCurrent && value(3) ? sessionActivityFromRuns(withoutNotesSessions(value(3))) : previous.sessionActivity,
       sessionsLoaded: previous.sessionsLoaded || Boolean(listCurrent && value(3)),
       capabilities: capabilityContracts(value(4)),
       capabilitiesLoading: false,
@@ -285,7 +298,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       loading: false,
       errors,
       hasMore: listCurrent && value(3) ? page.hasMore : previous.hasMore,
-      archivedSessions: listCurrent && value(3) ? archivedSessionCount(value(3)) : previous.archivedSessions,
+      archivedSessions: listCurrent && value(3) ? archivedSessions : previous.archivedSessions,
     }));
     if (listCurrent && value(3)) await hydrateLabels(value(3), listGen, abort.signal);
   }, [identity, onAuthError, fetchRuns, hydrateLabels]);

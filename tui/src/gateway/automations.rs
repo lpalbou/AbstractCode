@@ -254,15 +254,32 @@ impl AutomationClient {
 
     /// Every page of a listing + the first page's `archived_automations` and
     /// `paused_automations_count` (ADR 0048; `None` when not served).
+    ///
+    /// AbstractNote's own automations ("Process my notes", "Reflect on my
+    /// notes", "Consolidate my notes") are its background work, not the
+    /// person's: they are left out (`target` runs an `abstractnote`
+    /// workflow, `notes_automation`), and the served paused count is lowered
+    /// by the ones the listing held paused (2026-11-07).
     fn list_pages(&self, request: fn(Option<&str>) -> Request) -> Result<Listing, String> {
         let mut out = Vec::new();
         let mut archived = 0;
         let mut paused = None;
+        let mut notes_paused = 0;
         let mut cursor: Option<String> = None;
         for page_no in 0..200 {
-            let v = self
+            let mut v = self
                 .send(&request(cursor.as_deref()))
                 .map_err(|e| auto::api_error_text(&e))?;
+            if let Some(items) = v.get_mut("items").and_then(Value::as_array_mut) {
+                notes_paused += items
+                    .iter()
+                    .filter(|a| {
+                        notes_automation(a)
+                            && a.get("status").and_then(Value::as_str) == Some("paused")
+                    })
+                    .count() as u64;
+                items.retain(|a| !notes_automation(a));
+            }
             if page_no == 0 {
                 archived = v
                     .get("archived_automations")
@@ -278,7 +295,7 @@ impl AutomationClient {
                     return Ok(Listing {
                         items: out,
                         archived,
-                        paused,
+                        paused: paused.map(|n| n.saturating_sub(notes_paused)),
                     })
                 }
             }
@@ -423,6 +440,26 @@ struct Listing {
     paused: Option<u64>,
 }
 
+/// An automation of `GET /automations` runs an AbstractNote workflow: its
+/// `target.bundle_ref` (`bundle@version`), else `target.workflow_id`,
+/// names the `abstractnote` bundle exactly.
+pub(crate) fn notes_automation(summary: &Value) -> bool {
+    let target = summary.get("target");
+    let bundle = target
+        .and_then(|t| t.get("bundle_ref"))
+        .and_then(Value::as_str)
+        .and_then(|r| r.split('@').next())
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .or_else(|| {
+            target
+                .and_then(|t| t.get("workflow_id"))
+                .and_then(Value::as_str)
+                .and_then(crate::conversations::workflow_bundle_id)
+        });
+    bundle == Some(crate::conversations::NOTES_BUNDLE_ID)
+}
+
 /// Read the list (+ the open automation) and post it.
 fn refresh(client: &AutomationClient, wake: &WakeHandle, store: Store, open: Option<String>) {
     let list = client.list_pages(auto::list_request);
@@ -440,12 +477,18 @@ fn refresh(client: &AutomationClient, wake: &WakeHandle, store: Store, open: Opt
     let detail = open.map(|id| (id.clone(), client.detail(&id)));
     wake.post(move || {
         store.automations.update(|v| {
+            // The `Archived · N` count is the archived rows shown (Notes'
+            // are left out of them) when they were read.
+            let shown_archived = match &archived {
+                Some(Ok(rows)) => Some(rows.len() as u64),
+                _ => None,
+            };
             if let Some(a) = archived {
                 v.archived = Some(a);
             }
             match list {
                 Ok(listing) => {
-                    v.archived_count = listing.archived;
+                    v.archived_count = shown_archived.unwrap_or(listing.archived);
                     v.paused_count = listing.paused;
                     v.apply_list(listing.items)
                 }
@@ -903,6 +946,46 @@ mod tests {
 
     fn body_with(trigger: Value) -> Value {
         json!({"request_id": "r1", "title": "t", "target": {"flow_id": "f"}, "trigger": trigger})
+    }
+
+    /// AbstractNote's automations (2026-11-07) leave the listing, and the
+    /// served paused count drops by the Notes ones it held paused. Targets
+    /// shaped like a live gateway 0.20.2 answer.
+    #[test]
+    fn notes_automations_leave_the_list_and_its_paused_count() {
+        let mut page: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/automations/list.json"))
+                .unwrap();
+        let items = page["items"].as_array_mut().unwrap();
+        let person = items[0].clone();
+        let mut reflect = items[0].clone();
+        reflect["automation_id"] = json!("2b1a0f9e-reflect");
+        reflect["title"] = json!("Reflect on my notes");
+        reflect["status"] = json!("paused");
+        reflect["target"] = json!({"workflow_id": "abstractnote@0.3.1:note-reflect", "bundle_ref": "abstractnote@0.3.1", "flow_id": "note-reflect"});
+        let mut drain = items[0].clone();
+        drain["automation_id"] = json!("5a8fe473-drain");
+        drain["title"] = json!("Process my notes");
+        drain["target"] =
+            json!({"workflow_id": "abstractnote@0.3.1:note-drain", "flow_id": "note-drain"});
+        let mut paused = items[0].clone();
+        paused["automation_id"] = json!("15df10ad-mailbox");
+        paused["title"] = json!("Mailbox watch");
+        paused["status"] = json!("paused");
+        paused["target"] = json!({"workflow_id": "live-mailbox-judge@1.0.2:8ee07990", "bundle_ref": "live-mailbox-judge@1.0.2", "flow_id": "8ee07990"});
+        *items = vec![drain, person, reflect, paused];
+        page["next_cursor"] = Value::Null;
+        page["paused_automations_count"] = json!(2);
+        let body: &'static str = Box::leak(page.to_string().into_boxed_str());
+        let (url, _rx) = server(vec![("200 OK", body)]);
+        let listing = client(&url)
+            .list_pages(auto::list_request)
+            .expect("listing");
+        let titles: Vec<&str> = listing.items.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles.len(), 2, "{titles:?}");
+        assert!(!titles.iter().any(|t| t.contains("notes")), "{titles:?}");
+        assert!(titles.contains(&"Mailbox watch"), "{titles:?}");
+        assert_eq!(listing.paused, Some(1));
     }
 
     #[test]

@@ -3427,9 +3427,16 @@ fn the_sessions_board_shows_gateway_sessions_and_names_its_sources() {
             archived: 0,
         });
     let screen = h.turn();
-    assert!(
-        screen.contains("never-seen"),
+    // Both rows are offered; with no opening prompt fetched yet each is
+    // "Untitled conversation", never its session id (ADR 0043, 2026-11-07).
+    assert_eq!(
+        screen.matches("Untitled conversation").count(),
+        2,
         "every gateway session is offered:\n{screen}"
+    );
+    assert!(
+        !screen.contains("never-seen"),
+        "a session id is never the label:\n{screen}"
     );
     assert!(
         screen.contains("waiting on you"),

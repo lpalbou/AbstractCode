@@ -24,7 +24,10 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
-What's new: browser 0.15.2 moves the resting avatar smoothly (24 frames per second, was 6). Browser 0.15.1 highlights the new conversation in the sidebar, and its
+What's new: browser 0.15.3 no longer lists AbstractNote's own work (note captures and the
+"Process / Reflect / Consolidate my notes" automations) among your conversations and automations,
+continues an older conversation on the updated version of its workflow instead of refusing it, and
+names an untitled conversation "Untitled conversation" instead of part of its ID. Browser 0.15.2 moves the resting avatar smoothly (24 frames per second, was 6). Browser 0.15.1 highlights the new conversation in the sidebar, and its
 Avatar view uses the composer's microphone and each reply's play button and shows the
 avatar speaking only while you can hear it. Browser 0.15.0 shows one live line and a
 Findings panel in the Avatar view and lists paused automations under `Paused · N`;
@@ -1517,7 +1520,7 @@ Archiving a conversation, the **Archived · N** lines and the gateway's default 
 
 ## Working in the interface
 
-- **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25.
+- **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25. A conversation is named by its first message (**Untitled conversation** when that is unknown), never by its session ID. AbstractNote's own work (capturing, filing and processing your notes, any session whose first turn runs an `abstractnote` workflow) is not a conversation and is not listed or found by search; opened from a link, such a session can be read but not continued, and the app says so. Whether a session is Notes' work is decided by its first turn, so a conversation stays listed whatever a later turn runs; for the same reason the workflow picker does not offer AbstractNote's flows ("Ask your notes").
 - **The right panel** is a vertical rail at the right edge of the window with one icon per subject — **Activity**, **Files**, **Model**, **Agent**, **Workspace** and **Voice**. Clicking an icon opens its panel beside the rail; clicking it again (or the panel's collapse arrow) folds the panel back to the icons. The rail always stays; it is the only way into the panels (the header has no settings button).
 
 | Panel | What it shows |
@@ -1634,7 +1637,11 @@ Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run.
 ## Automations
 
 The **Automations** section of the sidebar lists the gateway's automations —
-the same ones the Assistant, the Observer and the terminal show — as cards
+the same ones the Assistant, the Observer and the terminal show — as cards,
+except AbstractNote's own automations ("Process my notes", "Reflect on my notes",
+"Consolidate my notes": those whose workflow is in the `abstractnote` bundle), which
+are Notes' background work and are left out of the list and of its `Paused · N` and
+`Archived · N` counts (the Conversations `Archived · N` leaves Notes' sessions out the same way)
 (see [Navigation panels](#navigation-panels)). **+** creates
 one with its own workflow picker, initially set to the conversation's workflow. Selecting one opens its page. Its header shows
 the title, the **Active** switch, the timing line, **waiting for you** when
@@ -1659,7 +1666,7 @@ Each conversation also has its private workspace (**Current workspace session-�
 
 An automation keeps its own workspaces in its definition (`input_data.workspace`, the same `{posture, default_mode, folders}` a one-off run sends, saved as a new revision); what they mean is the gateway's answer for them (`POST /api/gateway/workspace/effective/me`). Until you change them the automation uses your default (**Use my default** returns to that). Conversation turns send no workspace list: the gateway applies this conversation's workspaces (else your default, else the gateway's) at every run start and refuses anything outside the eligible workspaces. Continuing an agent conversation restores its gateway-returned workspace instead of silently creating a different one.
 
-Shared workflow restoration uses the gateway's verified public selection: registry scope, bundle ID, version, and flow ID. If that exact workflow is unavailable, restore it on the gateway or start a new conversation.
+Shared workflow restoration uses the gateway's verified public selection: registry scope, bundle ID, version, and flow ID. When the version a conversation recorded is no longer available but the same workflow is loaded in another version, the conversation continues with the loaded version (from the other registry, the shared catalog or the private one, when only that copy is left) and a line above it says so ("This conversation started with a version of … that is no longer available. It continues with the version available now, so its next answers may differ."). Only when the workflow itself is gone is the next turn refused: "The workflow this conversation used is no longer available, so it cannot be continued here. Start a new conversation to keep working."
 
 A turn sends exactly what you attached to it. Reopening a conversation restores its workflow fields (its request text, tool choices, limits) into the form, never a run's context, attachments or media; switching to another conversation or starting a new one resets the form to the workflow's defaults, so nothing from one conversation rides into the first turn of another.
 
@@ -4535,6 +4542,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Fixed (terminal, ships with the next terminal release)
+
+- **`/sessions` and `--resume` leave AbstractNote's own work out.** A session whose first turn runs
+  an AbstractNote workflow (a note captured from the watch or the web) is not a conversation: it is
+  no longer listed, and `--resume` never reopens it. AbstractNote's automations ("Process my notes",
+  "Reflect on my notes", "Consolidate my notes") leave the automations list and its counts.
+- **A conversation without a known first message is called "Untitled conversation"**, never
+  "Conversation" followed by part of its session ID.
+
+## [web 0.15.3] - 2026-11-07
+
+Same dependencies and gateways as web 0.15.2. No gateway change is needed.
+
+### Fixed
+
+- **AbstractNote's own work is no longer listed among your conversations and automations.** Notes
+  files and processes your notes in sessions and automations of its own. Those sessions (a note
+  captured from the watch or the web, showing as "Conversation note-wat…" with two tools) are no
+  longer in **Conversations**, and search no longer finds them. Notes' automations ("Process my
+  notes", "Reflect on my notes", "Consolidate my notes") are no longer in **Automations**, and the
+  `Paused · N` and `Archived · N` counts (of both lists) no longer count them. Opened from a link,
+  such a session can be read, with a note that it is part of Notes' background work, but it cannot
+  be continued from AbstractCode. The rule is what the session's first turn runs (any AbstractNote
+  workflow), never which app created it, so a conversation stays a conversation whatever a later
+  turn runs. For the same reason, AbstractNote's "Ask your notes" is no longer offered in the
+  workflow picker: a conversation started with it would have left the list after its first answer.
+- **An older conversation continues when its workflow was updated.** A conversation recorded on a
+  version that is no longer available showed "This conversation's exact workflow version is
+  unavailable…" and refused to send. It now continues with the available version of the same
+  workflow (from the shared catalog when only that copy is left), and a line above it says so in
+  plain words until you choose another workflow. The refusal remains only when the workflow
+  itself is gone, and it now says so plainly: "The workflow this conversation used is no longer
+  available, so it cannot be continued here. Start a new conversation to keep working."
+- **Conversations are never named by their session ID.** A conversation whose first message is not
+  known is called **Untitled conversation** in the list, the archived list and its header.
 
 ## [web 0.15.2] - 2026-11-07
 

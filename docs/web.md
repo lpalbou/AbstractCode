@@ -8,7 +8,7 @@ Archiving a conversation, the **Archived · N** lines and the gateway's default 
 
 ## Working in the interface
 
-- **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25.
+- **Conversations** restores gateway sessions and history. Search by conversation text or session ID. The list shows 25 conversations; **Load more conversations** adds the next 25. A conversation is named by its first message (**Untitled conversation** when that is unknown), never by its session ID. AbstractNote's own work (capturing, filing and processing your notes, any session whose first turn runs an `abstractnote` workflow) is not a conversation and is not listed or found by search; opened from a link, such a session can be read but not continued, and the app says so. Whether a session is Notes' work is decided by its first turn, so a conversation stays listed whatever a later turn runs; for the same reason the workflow picker does not offer AbstractNote's flows ("Ask your notes").
 - **The right panel** is a vertical rail at the right edge of the window with one icon per subject — **Activity**, **Files**, **Model**, **Agent**, **Workspace** and **Voice**. Clicking an icon opens its panel beside the rail; clicking it again (or the panel's collapse arrow) folds the panel back to the icons. The rail always stays; it is the only way into the panels (the header has no settings button).
 
 | Panel | What it shows |
@@ -125,7 +125,11 @@ Use **Pause**, **Resume**, **Conclude**, or **Stop** to supervise an active run.
 ## Automations
 
 The **Automations** section of the sidebar lists the gateway's automations —
-the same ones the Assistant, the Observer and the terminal show — as cards
+the same ones the Assistant, the Observer and the terminal show — as cards,
+except AbstractNote's own automations ("Process my notes", "Reflect on my notes",
+"Consolidate my notes": those whose workflow is in the `abstractnote` bundle), which
+are Notes' background work and are left out of the list and of its `Paused · N` and
+`Archived · N` counts (the Conversations `Archived · N` leaves Notes' sessions out the same way)
 (see [Navigation panels](#navigation-panels)). **+** creates
 one with its own workflow picker, initially set to the conversation's workflow. Selecting one opens its page. Its header shows
 the title, the **Active** switch, the timing line, **waiting for you** when
@@ -150,7 +154,7 @@ Each conversation also has its private workspace (**Current workspace session-�
 
 An automation keeps its own workspaces in its definition (`input_data.workspace`, the same `{posture, default_mode, folders}` a one-off run sends, saved as a new revision); what they mean is the gateway's answer for them (`POST /api/gateway/workspace/effective/me`). Until you change them the automation uses your default (**Use my default** returns to that). Conversation turns send no workspace list: the gateway applies this conversation's workspaces (else your default, else the gateway's) at every run start and refuses anything outside the eligible workspaces. Continuing an agent conversation restores its gateway-returned workspace instead of silently creating a different one.
 
-Shared workflow restoration uses the gateway's verified public selection: registry scope, bundle ID, version, and flow ID. If that exact workflow is unavailable, restore it on the gateway or start a new conversation.
+Shared workflow restoration uses the gateway's verified public selection: registry scope, bundle ID, version, and flow ID. When the version a conversation recorded is no longer available but the same workflow is loaded in another version, the conversation continues with the loaded version (from the other registry, the shared catalog or the private one, when only that copy is left) and a line above it says so ("This conversation started with a version of … that is no longer available. It continues with the version available now, so its next answers may differ."). Only when the workflow itself is gone is the next turn refused: "The workflow this conversation used is no longer available, so it cannot be continued here. Start a new conversation to keep working."
 
 A turn sends exactly what you attached to it. Reopening a conversation restores its workflow fields (its request text, tool choices, limits) into the form, never a run's context, attachments or media; switching to another conversation or starting a new one resets the form to the workflow's defaults, so nothing from one conversation rides into the first turn of another.
 
