@@ -1,4 +1,7 @@
-import {WorkflowChat, useWorkflowSession, conversationSnapshot, useAvatarConversationPreferences, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
+import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
+import { useConversationView } from "./conversation_view";
+import { guardedRunInput } from "./model_options_guard";
+import type { ModelOptions } from "@abstractframework/ui-kit";
 import { ActivityAvatar, useVoiceLevel } from "@abstractframework/ui-kit";
 import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget, sessionOpeningReceipts } from "../vendor/abstractsessions/session_cards.js";
@@ -179,7 +182,7 @@ export function CodeWorkspace() {
   const identity = connection.connected
     ? workspacePrincipalIdentity(connection.status)
     : "";
-  const avatarPreferences = useAvatarConversationPreferences(`abstractcode:${identity}`);
+  const avatarPreferences = useConversationView(`abstractcode:${identity}`);
   const avatarMode = avatarPreferences.mode === "avatar";
   const [avatarReplyContext, setAvatarReplyContext] = useState<ChatMessage | null>(null);
   const [avatarAttended, setAvatarAttended] = useState(false);
@@ -900,7 +903,12 @@ export function CodeWorkspace() {
     panelOpen,
   ]);
 
-  function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema) {
+  // Reasoning and MTP reach a run only when the capability card of the model THAT run uses allows
+  // them: the input's own provider/model (Settings choice, else the target workflow's pins), else
+  // the gateway default's model.
+  const guardedWorkflowInput = (build: (modelOptions: ModelOptions) => ReturnType<typeof currentWorkflowInput>) =>
+    guardedRunInput(build, preferences, catalog.defaultModel || undefined);
+  function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema, modelOptions: ModelOptions = {}) {
     let input = buildWorkflowInput({
       workflow: selectedWorkflow || undefined,
       inputSchema: selectedSchema,
@@ -908,8 +916,8 @@ export function CodeWorkspace() {
       prompt: text,
       promptProperty,
       model: preferences,
-      reasoning: preferences.reasoning || undefined,
-      speculation: preferences.speculation,
+      reasoning: modelOptions.reasoning || undefined,
+      speculation: modelOptions.speculation,
       streamReplies: streamReplies,
       systemPromptExtra: preferences.system || undefined,
       attachments,
@@ -1005,7 +1013,7 @@ export function CodeWorkspace() {
     const startedEpoch = authEpoch.current;
     let attachedRun = "";
     try {
-      const input = currentWorkflowInput(text, values, runAttachments);
+      const input = await guardedWorkflowInput(options => currentWorkflowInput(text, values, runAttachments, false, workflow, schema, options));
       // Validate the actual outgoing payload, after composer context and
       // explicit Settings overrides. Empty optional pins stay absent so the
       // workflow/Gateway resolves them just as it does for the TUI/Assistant.
@@ -2171,12 +2179,12 @@ export function CodeWorkspace() {
         availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
         initialTools={automationToolSelection(hasToolChoices(catalog.toolCatalog, { app: appToolLayer }) ? { ...inputs, tools: planRunTools(catalog.toolCatalog, { app: appToolLayer }).tools } : inputs)}
         buildInput={async (prompt, target) => {
-          if (!target) return currentWorkflowInput(prompt, { ...schemaDefaults(schema), ...inputs }, [], true);
+          if (!target) return guardedWorkflowInput(options => currentWorkflowInput(prompt, { ...schemaDefaults(schema), ...inputs }, [], true, workflow, schema, options));
           const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
           if (!next) throw new Error("The selected workflow is no longer available. Refresh the workflow list.");
           const nextSchema = await fetchWorkflowSchema(next);
                 if (!nextSchema) throw new Error("Workflow inputs could not be checked. Refresh the workflow list and try again.");
-          const input = currentWorkflowInput(prompt, schemaDefaults(nextSchema), [], true, next, nextSchema);
+          const input = await guardedWorkflowInput(options => currentWorkflowInput(prompt, schemaDefaults(nextSchema), [], true, next, nextSchema, options));
           const problems = validateWorkflowInputs(nextSchema, input);
           if (problems.length) throw new Error(problems.join(" "));
           return input;

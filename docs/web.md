@@ -34,10 +34,15 @@ The panel width is resizable on wide screens (drag the panel's left edge, or foc
 
 The standard upper-right controls remain available: **Docs assistant** (book icon), **Appearance**, **About** and gateway connection. Next to the conversation's title, **⋯** holds **Archive** (see [Archiving a conversation](#archiving-a-conversation)). The Docs assistant is the same chat as the gateway console and the other apps: it answers from AbstractCode's llms.txt (this app serves it at `/llms.txt`; the gateway reads it at `GET /api/gateway/docs/corpus?app=code`) through the gateway's docs-qa workflow, in its own gateway session; it does not inherit the conversation’s settings or attachments. You can attach files to a question, the answer streams when the gateway's **Streamed replies** setting is on, each message has **Copy**, and the icon at the top starts a new conversation. Closing its drawer preserves its conversation. It uses the same shared drawer as the Gateway and other apps, with the composer pinned to the bottom.
 
-MTP depth is independent of reasoning. Leave it on **Inherit** to follow workflow and
+MTP depth is independent of reasoning. Leave it on **Gateway default** to follow workflow and
 execution-host defaults, choose **Off** to send an explicit `false`, or request an advertised
-depth. Choices come from provider/model execution discovery; missing support is unknown,
-and saved unavailable choices stay visible. An explicit depth sets `require_acceleration`
+depth. **Off** and the depths appear only when the gateway says the selected model supports
+MTP; otherwise the control is disabled and says why. Changing the provider or the model puts
+reasoning and MTP back on **Gateway default**, and a saved level or depth the current model
+cannot use is never sent. The check reads the model the run will actually use: an automation is
+checked against its own workflow's model, and if the gateway does not describe the model within
+10 seconds the turn is sent without an MTP depth (an explicit **Off** and the reasoning level
+stay). An explicit depth sets `require_acceleration`
 so the host must honor it or report an error. The browser saves this preference locally and
 sends it as `_runtime.speculation`; it does not load models, download heads, or change the
 shared Core default. Fresh Core configurations use depth 2 only for compatible models.
@@ -206,7 +211,8 @@ The **Docs assistant** shows a speaker on assistant replies when speech is confi
 
 ## Avatar conversation view
 
-Choose **Avatar** in the conversation header for a second view over the same work.
+Choose **Avatar** in the conversation header for a second view over the same work. Code always
+opens on **Conversation**; Avatar lasts for the current visit.
 The avatar shows activity and, under it, one live line: the latest thing the assistant
 reports while it works, replaced as soon as something new arrives (nothing cycles). Click
 it to read it in full, then **Reply to this** to answer it or **Latest** to follow again.
