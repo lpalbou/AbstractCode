@@ -484,6 +484,13 @@ export function CodeWorkspace() {
     },
     onError: setError,
   });
+
+  // Talking in the Avatar view stops a reply that is being read aloud first, so the assistant
+  // never talks over you into the microphone (0.15.0's Talk button did this; the composer
+  // microphone replaced it in 0.15.1).
+  useEffect(() => {
+    if (avatarMode && voice.voice_ptt_recording) voice.stop_tts();
+  }, [avatarMode, voice.voice_ptt_recording, voice.stop_tts]);
   // Read aloud (the Voice panel): a reply is spoken by itself only when it was
   // generated while this conversation is open — its run was seen in progress
   // here (operator 2026-10-29: opening, reloading or switching to a session
