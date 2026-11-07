@@ -264,7 +264,7 @@ button {
   margin-top: 3px;
   color: var(--text-secondary);
 }
-.code-session > span:not(.code-status-dot) {
+.code-session > span {
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -624,8 +624,7 @@ select option {
   align-items: center;
   gap: 7px;
 }
-.code-small-dot,
-.code-status-dot {
+.code-small-dot {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -633,16 +632,8 @@ select option {
   background: var(--text-secondary);
   flex-shrink: 0;
 }
-.code-small-dot,
-.code-status-dot.is-online {
+.code-small-dot {
   background: var(--success);
-}
-.code-status-dot.is-working {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-subtle);
-}
-.code-status-dot.is-waiting {
-  background: var(--warning);
 }
 .code-welcome {
   width: 100%;
@@ -2607,9 +2598,6 @@ select option {
   white-space: nowrap;
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
-}
-.code-session.code-card > .code-status-dot {
-  margin-top: 6px;
 }
 .code-automation-item { margin-bottom: 8px; min-width: 0; }
 .code-switch-icon-only .af-switch__text {
