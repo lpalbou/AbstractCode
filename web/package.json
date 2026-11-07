@@ -31,14 +31,13 @@
   ],
   "scripts": {
     "dev": "vite --host --port 3002",
-    "build": "node scripts/sync_gateway_voice.mjs --check && node scripts/sync_conversation.mjs --check && node scripts/sync_sessions.mjs --check && node scripts/sync_docs_assistant.mjs --check && tsc && vite build && node scripts/check_relative_urls.mjs --dist",
+    "build": "node scripts/sync_conversation.mjs --check && node scripts/sync_sessions.mjs --check && node scripts/sync_docs_assistant.mjs --check && tsc && vite build && node scripts/check_relative_urls.mjs --dist",
     "preview": "vite preview",
     "start": "node ./bin/cli.js",
     "test": "vitest run",
     "check:lock": "node scripts/check_lock.mjs",
     "test:e2e": "playwright test",
     "prepublishOnly": "npm run build",
-    "sync:voice": "node scripts/sync_gateway_voice.mjs",
     "sync:sessions": "node scripts/sync_sessions.mjs",
     "sync:conversation": "node scripts/sync_conversation.mjs",
     "sync:docs": "node scripts/sync_docs_assistant.mjs"
