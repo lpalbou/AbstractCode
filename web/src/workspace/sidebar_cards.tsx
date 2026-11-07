@@ -38,8 +38,25 @@ export function conversationMetaLine(
   return parts.join(" · ");
 }
 
-export function conversationTitle(item: Pick<SessionSummary, "prompt" | "sessionId">): string {
-  return item.prompt || `Conversation ${item.sessionId.slice(0, 8)}`;
+/** Shown when a conversation has no title and its first message is unknown. */
+export const UNTITLED_CONVERSATION = "Untitled conversation";
+
+/**
+ * A conversation's name (ADR 0043: never a computer id): its first message, else a plain
+ * fallback. The gateway serves no session title, so the opening message is the name.
+ */
+export function conversationTitle(item: Pick<SessionSummary, "prompt">): string {
+  return item.prompt?.trim() || UNTITLED_CONVERSATION;
+}
+
+/**
+ * The search box over the listed conversations: the query (any case) in the shown name or the
+ * session id (support pastes ids). It searches the list it is given, so whatever the list leaves
+ * out (AbstractNote's background work) is never found either.
+ */
+export function searchConversations<T extends Pick<SessionSummary, "prompt" | "sessionId">>(items: readonly T[], query: string): T[] {
+  const q = query.toLowerCase();
+  return items.filter((item) => `${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
 }
 
 /** Shared compact session presentation; the host owns archive confirmation. */

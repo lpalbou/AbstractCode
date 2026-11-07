@@ -12,7 +12,10 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
-What's new: browser 0.15.2 moves the resting avatar smoothly (24 frames per second, was 6). Browser 0.15.1 highlights the new conversation in the sidebar, and its
+What's new: browser 0.15.3 no longer lists AbstractNote's own work (note captures and the
+"Process / Reflect / Consolidate my notes" automations) among your conversations and automations,
+continues an older conversation on the updated version of its workflow instead of refusing it, and
+names an untitled conversation "Untitled conversation" instead of part of its ID. Browser 0.15.2 moves the resting avatar smoothly (24 frames per second, was 6). Browser 0.15.1 highlights the new conversation in the sidebar, and its
 Avatar view uses the composer's microphone and each reply's play button and shows the
 avatar speaking only while you can hear it. Browser 0.15.0 shows one live line and a
 Findings panel in the Avatar view and lists paused automations under `Paused · N`;

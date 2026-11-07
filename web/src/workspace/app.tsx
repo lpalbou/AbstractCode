@@ -53,7 +53,7 @@ import { SidebarDrawer } from "./sidebar_drawer";
 import { CodeDefaultWorkspacesDialog } from "./workspace_folders";
 import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
 import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
-import { ConversationCard } from "./sidebar_cards";
+import { ConversationCard, UNTITLED_CONVERSATION, searchConversations } from "./sidebar_cards";
 import {
   WorkspaceBrowser,
   uploadRefusal,
@@ -65,9 +65,9 @@ import {
 import {
   buildWorkflowInput,
   isChatAgent,
-  resolveRestoredWorkflow,
   type WorkflowDefinition,
 } from "./catalog";
+import { conversationRestore } from "./conversation_restore";
 import {
   fetchWorkflowSchema,
   useWorkspaceCatalog,
@@ -114,7 +114,6 @@ import {
   GATEWAY_DEFAULT,
   conversationSelection,
   defaultInterfaceMismatch,
-  runSelectionSource,
   selectionSourceNote,
   gatewayDefaultDefinition,
   CODE_AGENT_INTERFACE,
@@ -544,30 +543,32 @@ export function CodeWorkspace() {
       (snapshot.run?.vars as any)?.workspace_root ||
       "",
   );
-  const restoredWorkflow = useMemo(
+  // The opened conversation's workflow, what is said about it, and whether it can continue
+  // (`conversation_restore.ts`: Notes' background work reads only; a superseded version continues).
+  const restore = useMemo(
     () =>
-      resolveRestoredWorkflow(catalog.workflows, {
-        inputData: restoredInputs,
-        runWorkflowId: snapshot.run?.workflow_id,
+      conversationRestore({
+        sessionId: session.sessionId,
+        runId: session.runId,
+        restoredInputs,
+        run: snapshot.run,
+        workflows: catalog.workflows,
+        notesSessions: catalog.notesSessions,
+        catalogLoading: catalog.loading,
       }),
-    [catalog.workflows, restoredInputs, snapshot.run?.workflow_id],
+    [session.sessionId, session.runId, restoredInputs, snapshot.run, catalog.workflows, catalog.notesSessions, catalog.loading],
   );
-  const restoreSelectionError =
-    session.runId &&
-    restoredInputs &&
-    !catalog.loading &&
-    snapshot.run &&
-    !restoredWorkflow &&
-    runSelectionSource(restoredInputs) !== "gateway_default"
-      ? "This conversation's exact workflow version is unavailable. Restore it in the gateway, or start a new conversation with an available workflow."
-      : "";
-  const currentSession = catalog.sessions.find(
-    (item) => item.sessionId === session.sessionId,
-  );
+  const notesSession = restore.notesSession;
+  const restoredWorkflow = restore.workflow;
+  const restoredVersionNote = restore.versionNote;
+  const restoreSelectionError = restore.error;
+  const currentSession =
+    catalog.sessions.find((item) => item.sessionId === session.sessionId) ??
+    catalog.notesSessions.find((item) => item.sessionId === session.sessionId);
   const title =
     currentSession?.prompt ||
     messages.find((m) => m.role === "user")?.content ||
-    "New conversation";
+    (session.runId ? UNTITLED_CONVERSATION : "New conversation");
   // "Email isn't set up — open My email": the gateway console's Users tab,
   // in a new tab (the console has its own sign-in).
   const myEmailUrl = myEmailConsoleUrl(connection.status?.gateway_url);
@@ -817,10 +818,10 @@ export function CodeWorkspace() {
     void catalog.refresh();
   }, [session.runId, snapshot.status]);
   useEffect(() => {
-    if (!session.runId || !restoredInputs) return;
+    if (!session.runId || !restoredInputs || notesSession) return;
     const next = conversationSelection({ restoredInputs, restored: restoredWorkflow });
     if (next) setSelection(next);
-  }, [session.runId, restoredInputs, restoredWorkflow?.id]);
+  }, [session.runId, restoredInputs, restoredWorkflow?.id, notesSession]);
   const sourceNote = session.runId ? selectionSourceNote(restoredInputs) : "";
 
   const newConversation = useCallback(() => {
@@ -960,6 +961,7 @@ export function CodeWorkspace() {
         restoreError ||
           "Wait for the gateway to restore this conversation's workspace.",
       );
+    if (restore.readOnlyNotice) throw new Error(restore.readOnlyNotice);
     if (restoreSelectionError) throw new Error(restoreSelectionError);
     if (schemaLoading || schemaError)
       throw new Error(schemaError || "Wait for workflow inputs to load.");
@@ -1240,11 +1242,7 @@ export function CodeWorkspace() {
         setError(formatError(e));
     });
   };
-  const filteredSessions = catalog.sessions.filter((item) =>
-    `${item.prompt || ""} ${item.sessionId}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
-  );
+  const filteredSessions = searchConversations(catalog.sessions, search);
   // Round 6 (DESIGN R6.2): archive a conversation from its card's "⋯" or the header's "⋯", always
   // through the one inline confirm; the gateway hides it (nothing is deleted), the list moves it
   // under `Archived · N`, and an archived ACTIVE conversation hands over to the next one.
@@ -1881,6 +1879,11 @@ export function CodeWorkspace() {
                 </details>
               </div>
             ) : null}
+            {restoredVersionNote ? (
+              <div className="code-notice" role="status" data-field="version-note">
+                {restoredVersionNote}
+              </div>
+            ) : null}
             {restoreSelectionError ? (
               <div className="code-alert" role="alert">
                 <span>{restoreSelectionError}</span>
@@ -2011,6 +2014,7 @@ export function CodeWorkspace() {
               onCancel={cancelCurrentRun}
               stopState={snapshot.stop ?? null}
               disabled={!connection.connected}
+              blockedNotice={restore.readOnlyNotice || undefined}
               interaction={interaction}
               onAttach={() => fileInput.current?.click()}
               onFiles={(files) => { attachUploads(files); }}

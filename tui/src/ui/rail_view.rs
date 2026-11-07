@@ -444,6 +444,7 @@ fn auto_settings(s: &Snap) -> Option<(Summary, Definition, RunSettings)> {
 /// The header lines above a panel: what the panels are bound to.
 pub fn binding_lines(s: &Snap) -> Vec<String> {
     match &s.binding {
+        Binding::Conversation if s.title == crate::conversations::UNTITLED => vec![s.title.clone()],
         Binding::Conversation => vec![format!("Conversation {}", s.title)],
         Binding::Automation(_) => match s.auto.as_ref() {
             Some((Some(summary), Some(def), _, _)) => vec![

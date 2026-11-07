@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (terminal, ships with the next terminal release)
+
+- **`/sessions` and `--resume` leave AbstractNote's own work out.** A session whose first turn runs
+  an AbstractNote workflow (a note captured from the watch or the web) is not a conversation: it is
+  no longer listed, and `--resume` never reopens it. AbstractNote's automations ("Process my notes",
+  "Reflect on my notes", "Consolidate my notes") leave the automations list and its counts.
+- **A conversation without a known first message is called "Untitled conversation"**, never
+  "Conversation" followed by part of its session ID.
+
+## [web 0.15.3] - 2026-11-07
+
+Same dependencies and gateways as web 0.15.2. No gateway change is needed.
+
+### Fixed
+
+- **AbstractNote's own work is no longer listed among your conversations and automations.** Notes
+  files and processes your notes in sessions and automations of its own. Those sessions (a note
+  captured from the watch or the web, showing as "Conversation note-wat…" with two tools) are no
+  longer in **Conversations**, and search no longer finds them. Notes' automations ("Process my
+  notes", "Reflect on my notes", "Consolidate my notes") are no longer in **Automations**, and the
+  `Paused · N` and `Archived · N` counts no longer count them. Opened from a link, such a session
+  can be read, with a note that it is part of Notes' background work, but it cannot be continued
+  from AbstractCode. The rule is what the session runs (any AbstractNote workflow), never which
+  app created it.
+- **An older conversation continues when its workflow was updated.** A conversation recorded on a
+  version that is no longer available showed "This conversation's exact workflow version is
+  unavailable…" and refused to send. It now continues with the available version of the same
+  workflow, and a line above it says so in plain words. The refusal remains only when the workflow
+  itself is gone, and it now says so plainly: "The workflow this conversation used is no longer
+  available, so it cannot be continued here. Start a new conversation to keep working."
+- **Conversations are never named by their session ID.** A conversation whose first message is not
+  known is called **Untitled conversation** in the list, the archived list and its header.
+
 ## [web 0.15.2] - 2026-11-07
 
 On `@abstractframework/ui-kit` ^0.9.16 (AbstractUIC 0.10.3). Works with the same gateways as web 0.15.1.

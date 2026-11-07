@@ -367,7 +367,12 @@ describe("the sidebar section", () => {
     await ctl.refresh();
     expect(ctl.state.archivedCount).toBe(1);
     expect(ctl.state.archived).toBeNull();
-    expect((client.listAutomations as any).mock.calls.every((c: any[]) => !c[0]?.status)).toBe(true);
+    // 0.15.3: a served archived count is checked against the archived listing (Notes' automations
+    // are not counted), so refresh reads it once; with nothing archived it never does.
+    expect((client.listAutomations as any).mock.calls.map((c: any[]) => c[0]?.status ?? "")).toEqual(["", "archived"]);
+    const none = stubClient({ listAutomations: vi.fn(async () => ({ items: list().slice(0, 1), next_cursor: null, archived_automations: 0 }) as any) });
+    await new AutomationsController(none, vi.fn(), []).refresh();
+    expect((none.listAutomations as any).mock.calls.every((c: any[]) => !c[0]?.status)).toBe(true);
     await ctl.loadArchived();
     expect(ctl.state.archived?.map((s) => s.automation_id)).toEqual([archivedRow.automation_id]);
     expect((client.listAutomations as any).mock.calls.at(-1)[0]).toMatchObject({ status: "archived" });

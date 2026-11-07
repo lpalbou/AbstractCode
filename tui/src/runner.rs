@@ -742,8 +742,26 @@ const SESSION_PROMPT_BATCH: usize = 8;
 /// not report contributes nothing rather than a guess.
 pub(crate) fn fold_session_rows(items: &[Value]) -> Vec<crate::store::SessionRow> {
     use crate::store::{SessionRow, SessionState};
+    // AbstractNote's background work is not a conversation: a session
+    // whose ROOT turn (the oldest listed — the listing is newest-first,
+    // so the last row seen) runs an `abstractnote` workflow is left out
+    // (`conversations::is_notes_run`).
+    let mut root_is_notes: std::collections::HashMap<&str, bool> = std::collections::HashMap::new();
+    for run in items {
+        if let Some(sid) = run.get("session_id").and_then(Value::as_str) {
+            root_is_notes.insert(sid.trim(), crate::conversations::is_notes_run(run));
+        }
+    }
     let mut out: Vec<SessionRow> = Vec::new();
     for run in items {
+        if run
+            .get("session_id")
+            .and_then(Value::as_str)
+            .and_then(|sid| root_is_notes.get(sid.trim()))
+            == Some(&true)
+        {
+            continue;
+        }
         let sid = run
             .get("session_id")
             .and_then(Value::as_str)
@@ -5111,6 +5129,79 @@ mod tests {
         assert_eq!(
             rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
             ["B", "A", "C"]
+        );
+    }
+
+    /// AbstractNote's background work (2026-11-07): a session whose ROOT
+    /// workflow is in the `abstractnote` bundle (captures from the watch
+    /// and the web; the drain is an occurrence the gateway filter already
+    /// drops) is not a conversation row — decided by the workflow id the
+    /// row carries, never by the `note-watch-` id prefix. Real-shaped rows
+    /// of a live gateway 0.20.2 listing (2026-11-07).
+    #[test]
+    fn notes_sessions_are_not_conversation_rows() {
+        let row = |sid: &str, run: &str, wf: &str, at: &str| {
+            serde_json::json!({
+                "run_id": run, "workflow_id": wf, "status": "completed",
+                "created_at": at, "updated_at": at, "actor_id": "gateway",
+                "session_id": sid, "parent_run_id": null, "session_kind": "chat",
+                "automation_id": null, "role": null, "tool_calls": 2, "kind": "conversation"
+            })
+        };
+        let capture = "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46";
+        let items = [
+            row(
+                "acode-8ec4cd0251ba",
+                "r-code",
+                "basic-agent@0.0.5:81795ea9",
+                "2026-11-07T10:00:00Z",
+            ),
+            row(
+                capture,
+                "r-cap-2",
+                "abstractnote@0.3.0:note-capture",
+                "2026-11-06T21:45:52Z",
+            ),
+            row(
+                capture,
+                "r-cap-1",
+                "abstractnote@0.3.0:note-capture",
+                "2026-11-06T21:40:05Z",
+            ),
+            row(
+                "note-web-0f3c2a9e",
+                "r-web",
+                "abstractnote@0.3.1:note-capture",
+                "2026-11-06T20:00:04Z",
+            ),
+            // A note-shaped id on another bundle IS a conversation (no prefix rule).
+            row(
+                "note-watch-not-notes",
+                "r-x",
+                "basic-agent@0.0.5:81795ea9",
+                "2026-11-05T09:00:00Z",
+            ),
+            // A conversation whose LATER turn ran a Notes flow stays (the root decides).
+            row(
+                "acode-mixed",
+                "r-mixed-2",
+                "abstractnote@0.3.1:note-recall",
+                "2026-11-04T09:05:00Z",
+            ),
+            row(
+                "acode-mixed",
+                "r-mixed-1",
+                "basic-agent@0.0.5:81795ea9",
+                "2026-11-04T09:00:00Z",
+            ),
+        ];
+        let ids: Vec<String> = fold_session_rows(&items)
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(
+            ids,
+            ["acode-8ec4cd0251ba", "note-watch-not-notes", "acode-mixed"]
         );
     }
 

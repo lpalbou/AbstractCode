@@ -1,4 +1,5 @@
 import { isConversationTurn } from "../vendor/abstractsessions/session_cards.js";
+import { isNotesRun } from "./notes_work";
 import type { SpeculationValue } from "@abstractframework/ui-kit";
 import {
   streamRepliesRuntime,
@@ -440,6 +441,81 @@ export function resolveRestoredWorkflow(
   return privateMatches.length === 1 ? privateMatches[0] : undefined;
 }
 
+export interface RestoredWorkflowResolution {
+  /** The workflow the conversation's next turn sends; undefined when its bundle (or flow) is gone. */
+  workflow?: WorkflowDefinition;
+  /**
+   * Set when the version the conversation recorded is no longer loaded and `workflow` is the
+   * loaded version of the SAME bundle and flow (a superseded or retired version).
+   */
+  replaced?: { recordedVersion: string; loadedVersion: string };
+}
+
+/** The recorded `{scope, bundle, flow, version}` of a restored run, from its workflow selection,
+ * else from its private workflow id `bundle@version:flow`. */
+function restoredIdentity(options: RestoredWorkflowOptions):
+  | { scope: WorkflowRegistryScope; bundleId: string; flowId: string; bundleVersion?: string }
+  | undefined {
+  const policy = restoredWorkflowPolicy(options.inputData);
+  if (policy) {
+    const scope = text(policy.registry_scope ?? policy.registryScope);
+    const bundleId = text(policy.bundle_id ?? policy.bundleId);
+    const flowId = text(policy.flow_id ?? policy.flowId);
+    const bundleVersion = text(policy.bundle_version ?? policy.bundleVersion);
+    if ((scope === "private" || scope === "tenant_catalog") && bundleId && flowId)
+      return { scope, bundleId, flowId, ...(bundleVersion ? { bundleVersion } : {}) };
+    return undefined;
+  }
+  const workflowId = text(options.runWorkflowId);
+  const colon = workflowId ? workflowId.indexOf(":") : -1;
+  if (!workflowId || colon <= 0) return undefined;
+  const [bundleId, bundleVersion] = workflowId.slice(0, colon).split("@");
+  const flowId = workflowId.slice(colon + 1);
+  if (!bundleId || !flowId) return undefined;
+  return { scope: "private", bundleId, flowId, ...(bundleVersion ? { bundleVersion } : {}) };
+}
+
+/**
+ * The workflow a restored conversation continues with. The exact recorded version when it is
+ * loaded (`resolveRestoredWorkflow`); otherwise the loaded version of the same bundle and flow
+ * in the same registry (the one the gateway prefers for new runs, else the highest), reported in
+ * `replaced`. Nothing when the bundle or the flow itself is gone: then the conversation cannot
+ * continue and the app says so.
+ */
+export function resolveConversationWorkflow(
+  workflows: readonly WorkflowDefinition[],
+  options: RestoredWorkflowOptions,
+): RestoredWorkflowResolution {
+  const exact = resolveRestoredWorkflow(workflows, options);
+  if (exact) return { workflow: exact };
+  const identity = restoredIdentity(options);
+  if (!identity) return {};
+  const same = workflows.filter(
+    (workflow) =>
+      (workflow.registryScope ?? "private") === identity.scope &&
+      workflow.bundleId === identity.bundleId &&
+      workflow.flowId === identity.flowId,
+  );
+  if (!same.length) return {};
+  const loaded = [...same].sort(
+    (a, b) =>
+      Number(Boolean(b.isPreferredVersion)) - Number(Boolean(a.isPreferredVersion)) ||
+      (b.bundleVersion || "").localeCompare(a.bundleVersion || "", undefined, { numeric: true }),
+  )[0];
+  return {
+    workflow: loaded,
+    ...(identity.bundleVersion && loaded.bundleVersion && loaded.bundleVersion !== identity.bundleVersion
+      ? { replaced: { recordedVersion: identity.bundleVersion, loadedVersion: loaded.bundleVersion } }
+      : {}),
+  };
+}
+
+/** Said beside the picker when a conversation continues on another version of its workflow. */
+export function replacedVersionNote(workflow: WorkflowDefinition, replaced: RestoredWorkflowResolution["replaced"]): string {
+  if (!replaced) return "";
+  return `This conversation started with an earlier version of ${workflow.name}, which is no longer available. It continues with the current version, so its next answers may differ.`;
+}
+
 export function normalizeWorkspacePolicy(value: unknown): WorkspacePolicy {
   const raw = record(value) ?? {};
   const policy = record(raw.policy) ?? raw;
@@ -588,10 +664,21 @@ function promptFrom(value: unknown): string | undefined {
   return text(record(input?.context)?.task);
 }
 
+export interface SessionSummaryOptions {
+  /**
+   * Which sessions to fold, by the PURPOSE of the session's root workflow (its oldest listed
+   * turn): "conversations" (default) leaves AbstractNote's background work out, "notes" keeps
+   * only it (a Notes session opened by link). `notes_work.ts` holds the rule.
+   */
+  purpose?: "conversations" | "notes";
+}
+
 export function normalizeSessionSummaries(
   value: unknown,
   inputByRunId: Readonly<Record<string, unknown>> = {},
+  options: SessionSummaryOptions = {},
 ): SessionSummary[] {
+  const wantNotes = options.purpose === "notes";
   const body = record(value);
   const truncated = body?.has_more === true || body?.hasMore === true;
   const runs = responseItems(value, ["items", "runs"]);
@@ -625,6 +712,7 @@ export function normalizeSessionSummaries(
         left.index - right.index
       );
     });
+    if (isNotesRun(oldest[0].run) !== wantNotes) continue;
     const runIds = newest.flatMap(({ run }) => {
       const runId = text(run.run_id ?? run.runId ?? run.id);
       return runId ? [runId] : [];
@@ -672,6 +760,24 @@ export function normalizeSessionSummaries(
       timestampValue(right.updatedAt) - timestampValue(left.updatedAt) ||
       left.sessionId.localeCompare(right.sessionId),
   );
+}
+
+/**
+ * The runs page without AbstractNote's sessions (the rule of `normalizeSessionSummaries`), for the
+ * per-session activity the sidebar's unread and attention marks read: a session the list leaves
+ * out never counts there either.
+ */
+export function withoutNotesSessions(value: unknown): unknown {
+  const notes = new Set(normalizeSessionSummaries(value, {}, { purpose: "notes" }).map((item) => item.sessionId));
+  if (!notes.size) return value;
+  const keep = (rows: unknown[]) => rows.filter((row) => !notes.has(String(record(row)?.session_id ?? record(row)?.sessionId ?? "")));
+  if (Array.isArray(value)) return keep(value);
+  const body = record(value) as JsonObject;
+  return {
+    ...body,
+    ...(Array.isArray(body.items) ? { items: keep(body.items) } : {}),
+    ...(Array.isArray(body.runs) ? { runs: keep(body.runs) } : {}),
+  };
 }
 
 function cloneObject(value: JsonObject | undefined): JsonObject {

@@ -1,0 +1,2811 @@
+{
+ "_comment": "Real-shaped records read from a live AbstractGateway 0.20.2 on 2026-11-07 (GET only), sanitized: a Notes drain occurrence, a Notes capture session (abstractnote@0.3.0, two turns) from the watch and one from the web, a Code conversation on the loaded basic-agent 0.0.5, one recorded on basic-agent 0.0.1 (no longer loaded), and one whose bundle is gone; Notes' automations next to a person's. `views` are GET /runs/{id}/view (replay_view_v1) answers, built from a live capture view (texts replaced). `input_schemas` are GET /bundles/{bundle}/flows/{flow}/input_schema answers.",
+ "runs": {
+  "items": [
+   {
+    "run_id": "a551dc9c-8614-5af5-8544-2e11ee0c1013",
+    "workflow_id": "abstractnote@0.3.1:note-drain",
+    "status": "completed",
+    "current_node": null,
+    "created_at": "2026-11-07T11:46:52.628515+00:00",
+    "updated_at": "2026-11-07T11:46:52.655948+00:00",
+    "actor_id": "gateway",
+    "session_id": "a551dc9c-8614-5af5-8544-2e11ee0c1013",
+    "parent_run_id": "5a8fe473-9c52-5e8a-8336-b43fe57ebb5d",
+    "error": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": null,
+    "run_lifecycle": null,
+    "is_draft": false,
+    "session_kind": "occurrence",
+    "automation_id": "5a8fe473-9c52-5e8a-8336-b43fe57ebb5d",
+    "role": "occurrence",
+    "occurrence_index": 58,
+    "legacy": false,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-5a8fe473-9c52-5e8a-8336-b43fe-15560b7f07be",
+    "steps": 4,
+    "llm_calls": 0,
+    "tool_calls": 2,
+    "tokens_total": 0,
+    "kind": "conversation"
+   },
+   {
+    "run_id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+    "workflow_id": "basic-agent@0.0.5:81795ea9",
+    "status": "completed",
+    "current_node": null,
+    "created_at": "2026-10-31T17:02:51.059729+00:00",
+    "updated_at": "2026-10-31T17:03:31.124322+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-8ec4cd0251ba",
+    "parent_run_id": null,
+    "error": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": null,
+    "run_lifecycle": null,
+    "is_draft": false,
+    "session_kind": "chat",
+    "automation_id": null,
+    "role": null,
+    "occurrence_index": null,
+    "legacy": false,
+    "workspace_root": "/home/person/tmp/abstractframework",
+    "steps": 18,
+    "llm_calls": 1,
+    "tool_calls": 0,
+    "tokens_total": 5601,
+    "kind": "conversation"
+   },
+   {
+    "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+    "workflow_id": "abstractnote@0.3.0:note-capture",
+    "status": "completed",
+    "current_node": null,
+    "created_at": "2026-11-06T21:45:47.234634+00:00",
+    "updated_at": "2026-11-06T21:45:52.657733+00:00",
+    "actor_id": "gateway",
+    "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+    "parent_run_id": null,
+    "error": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": null,
+    "run_lifecycle": null,
+    "is_draft": false,
+    "session_kind": "chat",
+    "automation_id": null,
+    "role": null,
+    "occurrence_index": null,
+    "legacy": false,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0",
+    "steps": 6,
+    "llm_calls": 1,
+    "tool_calls": 2,
+    "tokens_total": 0,
+    "kind": "conversation"
+   },
+   {
+    "run_id": "3b2137cc-0000-4000-8000-000000000002",
+    "workflow_id": "abstractnote@0.3.0:note-capture",
+    "status": "completed",
+    "current_node": null,
+    "created_at": "2026-11-06T21:40:01.000000+00:00",
+    "updated_at": "2026-11-06T21:40:05.000000+00:00",
+    "actor_id": "gateway",
+    "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+    "parent_run_id": null,
+    "error": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": null,
+    "run_lifecycle": null,
+    "is_draft": false,
+    "session_kind": "chat",
+    "automation_id": null,
+    "role": null,
+    "occurrence_index": null,
+    "legacy": false,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0",
+    "steps": 6,
+    "llm_calls": 1,
+    "tool_calls": 2,
+    "tokens_total": 0,
+    "kind": "conversation"
+   },
+   {
+    "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+    "workflow_id": "abstractnote@0.3.0:note-capture",
+    "status": "completed",
+    "current_node": null,
+    "created_at": "2026-11-06T20:00:00.000000+00:00",
+    "updated_at": "2026-11-06T20:00:04.000000+00:00",
+    "actor_id": "gateway",
+    "session_id": "note-web-0f3c2a9e-5b7d-4c1e-9a6f-2d8b4e1c7a90",
+    "parent_run_id": null,
+    "error": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": null,
+    "run_lifecycle": null,
+    "is_draft": false,
+    "session_kind": "chat",
+    "automation_id": null,
+    "role": null,
+    "occurrence_index": null,
+    "legacy": false,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-note-web-0f3c2a9e",
+    "steps": 6,
+    "llm_calls": 1,
+    "tool_calls": 2,
+    "tokens_total": 0,
+    "kind": "conversation"
+   },
+   {
+    "run_id": "5e1f0c22-0000-4000-8000-000000000004",
+    "workflow_id": "basic-agent@0.0.1:81795ea9",
+    "status": "completed",
+    "current_node": null,
+    "created_at": "2026-11-05T10:00:00.000000+00:00",
+    "updated_at": "2026-11-05T10:03:00.000000+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-4b0e9d7c2f1a",
+    "parent_run_id": null,
+    "error": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": null,
+    "run_lifecycle": null,
+    "is_draft": false,
+    "session_kind": "chat",
+    "automation_id": null,
+    "role": null,
+    "occurrence_index": null,
+    "legacy": false,
+    "workspace_root": "/home/person/tmp/abstractframework",
+    "steps": 18,
+    "llm_calls": 1,
+    "tool_calls": 0,
+    "tokens_total": 5601,
+    "kind": "conversation"
+   },
+   {
+    "run_id": "9c4d2b33-0000-4000-8000-000000000005",
+    "workflow_id": "retired-agent@1.2.0:chat",
+    "status": "completed",
+    "current_node": null,
+    "created_at": "2026-11-04T09:00:00.000000+00:00",
+    "updated_at": "2026-11-04T09:01:00.000000+00:00",
+    "actor_id": "gateway",
+    "session_id": "acode-9f8e7d6c5b4a",
+    "parent_run_id": null,
+    "error": null,
+    "paused": false,
+    "pause_reason": null,
+    "paused_at": null,
+    "resumed_at": null,
+    "waiting": null,
+    "is_scheduled": false,
+    "schedule": null,
+    "limits": null,
+    "run_lifecycle": null,
+    "is_draft": false,
+    "session_kind": "chat",
+    "automation_id": null,
+    "role": null,
+    "occurrence_index": null,
+    "legacy": false,
+    "workspace_root": "/home/person/tmp/abstractframework",
+    "steps": 18,
+    "llm_calls": 1,
+    "tool_calls": 0,
+    "tokens_total": 5601,
+    "kind": "conversation"
+   }
+  ],
+  "count": 7,
+  "offset": 0,
+  "has_more": false,
+  "archived_sessions": 0
+ },
+ "input_data": {
+  "3b2137cc-9799-4100-8a53-6903ceb384ac": {
+   "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+   "workflow_id": "abstractnote@0.3.0:note-capture",
+   "bundle_id": "abstractnote@0.3.0",
+   "flow_id": "note-capture",
+   "pin_ids": [],
+   "input_data": {
+    "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+    "occurred_at": "2026-11-06T21:45:46Z",
+    "source": {
+     "client": "watch"
+    },
+    "idempotency_key": "c291f854-60c4-46ce-bd99-3c7e199e1081",
+    "process_inline": false,
+    "text": "Remember to compare the two tokenizer runs before Friday.",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads",
+    "workflow_selection": {
+     "source": "client",
+     "workflow_id": "abstractnote@0.3.0:note-capture",
+     "bundle_id": "abstractnote",
+     "bundle_version": "0.3.0",
+     "flow_id": "note-capture",
+     "registry_scope": "private",
+     "name": "Capture a note",
+     "interface": null
+    },
+    "workspace_builtin_deny_prefixes": [
+     "/srv/abstractgateway/data",
+     "/home/person/.ssh",
+     "/home/person/.aws",
+     "/home/person/.gnupg",
+     "/home/person/.config/gcloud",
+     "/home/person/.kube",
+     "/home/person/Library/Keychains",
+     "/home/person/.abstractgateway",
+     "/home/person/.abstractcode",
+     "/home/person/.abstractassistant",
+     "/home/person/.abstractcontinuum",
+     "/home/person/.abstractcore"
+    ],
+    "workspace_builtin_allow": [
+     "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0"
+    ]
+   },
+   "workspace": {
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads"
+   }
+  },
+  "3b2137cc-0000-4000-8000-000000000002": {
+   "run_id": "3b2137cc-0000-4000-8000-000000000002",
+   "workflow_id": "abstractnote@0.3.0:note-capture",
+   "bundle_id": "abstractnote@0.3.0",
+   "flow_id": "note-capture",
+   "pin_ids": [],
+   "input_data": {
+    "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+    "occurred_at": "2026-11-06T21:45:46Z",
+    "source": {
+     "client": "watch"
+    },
+    "idempotency_key": "c291f854-60c4-46ce-bd99-3c7e199e1081",
+    "process_inline": false,
+    "text": "Remember to compare the two tokenizer runs before Friday.",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads",
+    "workflow_selection": {
+     "source": "client",
+     "workflow_id": "abstractnote@0.3.0:note-capture",
+     "bundle_id": "abstractnote",
+     "bundle_version": "0.3.0",
+     "flow_id": "note-capture",
+     "registry_scope": "private",
+     "name": "Capture a note",
+     "interface": null
+    },
+    "workspace_builtin_deny_prefixes": [
+     "/srv/abstractgateway/data",
+     "/home/person/.ssh",
+     "/home/person/.aws",
+     "/home/person/.gnupg",
+     "/home/person/.config/gcloud",
+     "/home/person/.kube",
+     "/home/person/Library/Keychains",
+     "/home/person/.abstractgateway",
+     "/home/person/.abstractcode",
+     "/home/person/.abstractassistant",
+     "/home/person/.abstractcontinuum",
+     "/home/person/.abstractcore"
+    ],
+    "workspace_builtin_allow": [
+     "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0"
+    ]
+   },
+   "workspace": {
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads"
+   }
+  },
+  "7a0d5e11-0000-4000-8000-000000000003": {
+   "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+   "workflow_id": "abstractnote@0.3.0:note-capture",
+   "bundle_id": "abstractnote@0.3.0",
+   "flow_id": "note-capture",
+   "pin_ids": [],
+   "input_data": {
+    "session_id": "note-web-0f3c2a9e-5b7d-4c1e-9a6f-2d8b4e1c7a90",
+    "occurred_at": "2026-11-06T21:45:46Z",
+    "source": {
+     "client": "web"
+    },
+    "idempotency_key": "c291f854-60c4-46ce-bd99-3c7e199e1081",
+    "process_inline": false,
+    "text": "Remember to compare the two tokenizer runs before Friday.",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads",
+    "workflow_selection": {
+     "source": "client",
+     "workflow_id": "abstractnote@0.3.0:note-capture",
+     "bundle_id": "abstractnote",
+     "bundle_version": "0.3.0",
+     "flow_id": "note-capture",
+     "registry_scope": "private",
+     "name": "Capture a note",
+     "interface": null
+    },
+    "workspace_builtin_deny_prefixes": [
+     "/srv/abstractgateway/data",
+     "/home/person/.ssh",
+     "/home/person/.aws",
+     "/home/person/.gnupg",
+     "/home/person/.config/gcloud",
+     "/home/person/.kube",
+     "/home/person/Library/Keychains",
+     "/home/person/.abstractgateway",
+     "/home/person/.abstractcode",
+     "/home/person/.abstractassistant",
+     "/home/person/.abstractcontinuum",
+     "/home/person/.abstractcore"
+    ],
+    "workspace_builtin_allow": [
+     "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0"
+    ]
+   },
+   "workspace": {
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-note-watch-e88aa3c2-88fc-4657-8bb1-b3c25-9517c52a7fe0",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads"
+   }
+  },
+  "b64c9a33-d41e-4ff1-ab65-594a765f62d4": {
+   "run_id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+   "workflow_id": "basic-agent@0.0.5:81795ea9",
+   "bundle_id": "basic-agent",
+   "bundle_version": "0.0.5",
+   "flow_id": "81795ea9",
+   "pin_ids": [
+    "use_context",
+    "memory",
+    "context",
+    "provider",
+    "model",
+    "system",
+    "prompt",
+    "tools",
+    "max_iterations",
+    "max_in_tokens",
+    "temperature",
+    "seed",
+    "resp_schema"
+   ],
+   "input_data": {
+    "context": {
+     "task": "can you couple a rtx 5070ti with a rtx 5060ti for AI inference on windows/linux, and if so, which are the bset setup",
+     "messages": []
+    },
+    "prompt": "Fix the failing parser test in src/parse.ts",
+    "tools": [
+     "get_email_attachment",
+     "list_email_accounts",
+     "list_email_folders",
+     "list_emails",
+     "read_email",
+     "reply_email",
+     "search_emails",
+     "send_email",
+     "analyze_code",
+     "analyze_media",
+     "edit_file",
+     "list_files",
+     "open_attachment",
+     "read_file",
+     "search_files",
+     "skim_files",
+     "skim_folders",
+     "write_file",
+     "execute_command",
+     "local_helper_start",
+     "local_helper_status",
+     "local_helper_stop",
+     "browser_probe",
+     "fetch_url",
+     "skim_url",
+     "skim_websearch",
+     "web_search"
+    ],
+    "workflow_selection": {
+     "source": "client",
+     "workflow_id": "basic-agent@0.0.5:81795ea9",
+     "bundle_id": "basic-agent",
+     "bundle_version": "0.0.5",
+     "flow_id": "81795ea9",
+     "registry_scope": "private",
+     "name": "Basic agent",
+     "interface": null
+    }
+   },
+   "workspace": {
+    "workspace_root": "/home/person/tmp/abstractframework",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads"
+   }
+  },
+  "5e1f0c22-0000-4000-8000-000000000004": {
+   "run_id": "5e1f0c22-0000-4000-8000-000000000004",
+   "workflow_id": "basic-agent@0.0.1:81795ea9",
+   "bundle_id": "basic-agent@0.0.1",
+   "bundle_version": "0.0.1",
+   "flow_id": "81795ea9",
+   "pin_ids": [
+    "use_context",
+    "memory",
+    "context",
+    "provider",
+    "model",
+    "system",
+    "prompt",
+    "tools",
+    "max_iterations",
+    "max_in_tokens",
+    "temperature",
+    "seed",
+    "resp_schema"
+   ],
+   "input_data": {
+    "context": {
+     "task": "can you couple a rtx 5070ti with a rtx 5060ti for AI inference on windows/linux, and if so, which are the bset setup",
+     "messages": []
+    },
+    "prompt": "Explain the retry loop in the uploader",
+    "tools": [
+     "get_email_attachment",
+     "list_email_accounts",
+     "list_email_folders",
+     "list_emails",
+     "read_email",
+     "reply_email",
+     "search_emails",
+     "send_email",
+     "analyze_code",
+     "analyze_media",
+     "edit_file",
+     "list_files",
+     "open_attachment",
+     "read_file",
+     "search_files",
+     "skim_files",
+     "skim_folders",
+     "write_file",
+     "execute_command",
+     "local_helper_start",
+     "local_helper_status",
+     "local_helper_stop",
+     "browser_probe",
+     "fetch_url",
+     "skim_url",
+     "skim_websearch",
+     "web_search"
+    ],
+    "workflow_selection": {
+     "source": "client",
+     "workflow_id": "basic-agent@0.0.1:81795ea9",
+     "bundle_id": "basic-agent",
+     "bundle_version": "0.0.1",
+     "flow_id": "81795ea9",
+     "registry_scope": "private",
+     "name": "Basic agent",
+     "interface": null
+    }
+   },
+   "workspace": {
+    "workspace_root": "/home/person/tmp/abstractframework",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads"
+   }
+  },
+  "9c4d2b33-0000-4000-8000-000000000005": {
+   "run_id": "9c4d2b33-0000-4000-8000-000000000005",
+   "workflow_id": "retired-agent@1.2.0:chat",
+   "bundle_id": "retired-agent@1.2.0",
+   "bundle_version": "1.2.0",
+   "flow_id": "chat",
+   "pin_ids": [
+    "use_context",
+    "memory",
+    "context",
+    "provider",
+    "model",
+    "system",
+    "prompt",
+    "tools",
+    "max_iterations",
+    "max_in_tokens",
+    "temperature",
+    "seed",
+    "resp_schema"
+   ],
+   "input_data": {
+    "context": {
+     "task": "can you couple a rtx 5070ti with a rtx 5060ti for AI inference on windows/linux, and if so, which are the bset setup",
+     "messages": []
+    },
+    "prompt": "Draft the release notes",
+    "tools": [
+     "get_email_attachment",
+     "list_email_accounts",
+     "list_email_folders",
+     "list_emails",
+     "read_email",
+     "reply_email",
+     "search_emails",
+     "send_email",
+     "analyze_code",
+     "analyze_media",
+     "edit_file",
+     "list_files",
+     "open_attachment",
+     "read_file",
+     "search_files",
+     "skim_files",
+     "skim_folders",
+     "write_file",
+     "execute_command",
+     "local_helper_start",
+     "local_helper_status",
+     "local_helper_stop",
+     "browser_probe",
+     "fetch_url",
+     "skim_url",
+     "skim_websearch",
+     "web_search"
+    ],
+    "workflow_selection": {
+     "source": "client",
+     "workflow_id": "retired-agent@1.2.0:chat",
+     "bundle_id": "retired-agent",
+     "bundle_version": "1.2.0",
+     "flow_id": "chat",
+     "registry_scope": "private",
+     "name": "Retired agent",
+     "interface": null
+    }
+   },
+   "workspace": {
+    "workspace_root": "/home/person/tmp/abstractframework",
+    "workspace_access_mode": "all_except_ignored",
+    "workspace_allowed_paths": [
+     "/home/person/tmp/abstractframework"
+    ],
+    "workspace_ignored_paths": "/home/person/Pictures\n/home/person/Downloads"
+   }
+  }
+ },
+ "bundles": {
+  "items": [
+   {
+    "bundle_id": "abstractnote",
+    "bundle_version": "0.3.1",
+    "bundle_ref": "abstractnote@0.3.1",
+    "registry_scope": "private",
+    "source": "imported",
+    "owner": {
+     "kind": "gateway",
+     "user_id": null
+    },
+    "shipped": false,
+    "available": true,
+    "archived": false,
+    "description": "Store a note, file it quickly, answer, and queue it for understanding (optionally right away).",
+    "description_edited": false,
+    "version_channel": "published",
+    "is_draft": false,
+    "is_published": true,
+    "latest_published_version": "0.3.1",
+    "latest_any_version": "0.3.1",
+    "created_at": "2026-11-07T08:56:10.782640+00:00",
+    "metadata": {
+     "family": "abstractnote",
+     "purpose": "notes",
+     "min_runtime": "0.10.2"
+    },
+    "automation_defaults": {
+     "note-drain": {
+      "schema_version": 1,
+      "title": "Note processor",
+      "trigger": {
+       "source_id": "schedule",
+       "source_version": 2,
+       "config": {
+        "kind": "every",
+        "every": "2m"
+       }
+      },
+      "context": {
+       "mode": "independent"
+      },
+      "input_data": {
+       "max_items": 20,
+       "budget_s": 90,
+       "_runtime": {
+        "allowed_tools": [
+         "note_capture",
+         "note_file",
+         "note_context",
+         "note_resolve_candidates",
+         "note_apply_revision",
+         "note_queue_lease",
+         "note_queue_ack",
+         "note_queue_stats",
+         "note_search",
+         "note_expand",
+         "note_changes",
+         "note_entity",
+         "note_timeline",
+         "note_open_loops",
+         "note_contradictions",
+         "note_resurface",
+         "note_anniversaries",
+         "note_insight_write",
+         "note_communities_recompute",
+         "note_communities_pending",
+         "note_communities_label",
+         "note_consolidation_begin",
+         "note_consolidation_progress",
+         "note_consolidation_end",
+         "note_entities_normalize",
+         "note_entities_stale_summaries",
+         "note_entities_set_summaries",
+         "note_then_now_refresh",
+         "note_reinterpret_next",
+         "note_mark_reinterpret",
+         "note_filing_context"
+        ]
+       }
+      }
+     },
+     "note-reflect": {
+      "schema_version": 1,
+      "title": "Note reflection",
+      "trigger": {
+       "source_id": "schedule",
+       "source_version": 2,
+       "config": {
+        "kind": "every",
+        "every": "7d"
+       }
+      },
+      "context": {
+       "mode": "independent"
+      },
+      "input_data": {
+       "limit": 10,
+       "_runtime": {
+        "allowed_tools": [
+         "note_capture",
+         "note_file",
+         "note_context",
+         "note_resolve_candidates",
+         "note_apply_revision",
+         "note_queue_lease",
+         "note_queue_ack",
+         "note_queue_stats",
+         "note_search",
+         "note_expand",
+         "note_changes",
+         "note_entity",
+         "note_timeline",
+         "note_open_loops",
+         "note_contradictions",
+         "note_resurface",
+         "note_anniversaries",
+         "note_insight_write",
+         "note_communities_recompute",
+         "note_communities_pending",
+         "note_communities_label",
+         "note_consolidation_begin",
+         "note_consolidation_progress",
+         "note_consolidation_end",
+         "note_entities_normalize",
+         "note_entities_stale_summaries",
+         "note_entities_set_summaries",
+         "note_then_now_refresh",
+         "note_reinterpret_next",
+         "note_mark_reinterpret",
+         "note_filing_context"
+        ]
+       }
+      }
+     },
+     "note-consolidate": {
+      "schema_version": 1,
+      "title": "Note consolidation",
+      "trigger": {
+       "source_id": "schedule",
+       "source_version": 2,
+       "config": {
+        "kind": "every",
+        "every": "1d"
+       }
+      },
+      "context": {
+       "mode": "independent"
+      },
+      "input_data": {
+       "budget_s": 3600,
+       "limit": 10,
+       "_runtime": {
+        "allowed_tools": [
+         "note_capture",
+         "note_file",
+         "note_context",
+         "note_resolve_candidates",
+         "note_apply_revision",
+         "note_queue_lease",
+         "note_queue_ack",
+         "note_queue_stats",
+         "note_search",
+         "note_expand",
+         "note_changes",
+         "note_entity",
+         "note_timeline",
+         "note_open_loops",
+         "note_contradictions",
+         "note_resurface",
+         "note_anniversaries",
+         "note_insight_write",
+         "note_communities_recompute",
+         "note_communities_pending",
+         "note_communities_label",
+         "note_consolidation_begin",
+         "note_consolidation_progress",
+         "note_consolidation_end",
+         "note_entities_normalize",
+         "note_entities_stale_summaries",
+         "note_entities_set_summaries",
+         "note_then_now_refresh",
+         "note_reinterpret_next",
+         "note_mark_reinterpret",
+         "note_filing_context"
+        ]
+       }
+      }
+     }
+    },
+    "default_entrypoint": "note-capture",
+    "entrypoints": [
+     {
+      "flow_id": "note-capture",
+      "name": "Capture a note",
+      "description": "Store a note, file it quickly, answer, and queue it for understanding (optionally right away).",
+      "interfaces": [
+       "abstractnote.capture.v1"
+      ],
+      "triggerable": false,
+      "workflow_id": "abstractnote@0.3.1:note-capture",
+      "is_agent_default": true,
+      "agent_default_interfaces": [
+       "abstractnote.capture.v1"
+      ],
+      "deprecated": false,
+      "deprecated_at": null,
+      "deprecated_reason": null
+     },
+     {
+      "flow_id": "note-drain",
+      "name": "Process queued notes",
+      "description": "Take queued notes by priority and understand them one at a time, within a count and time budget.",
+      "interfaces": [
+       "abstractnote.drain.v1"
+      ],
+      "triggerable": true,
+      "workflow_id": "abstractnote@0.3.1:note-drain",
+      "is_agent_default": true,
+      "agent_default_interfaces": [
+       "abstractnote.drain.v1"
+      ],
+      "deprecated": false,
+      "deprecated_at": null,
+      "deprecated_reason": null
+     },
+     {
+      "flow_id": "note-recall",
+      "name": "Ask your notes",
+      "description": "Answer a question from the notes at the requested effort (quick, standard or deep). Also serves the chat agent contract: prompt in, response out.",
+      "interfaces": [
+       "abstractnote.recall.v1",
+       "abstractcode.agent.v1"
+      ],
+      "triggerable": false,
+      "workflow_id": "abstractnote@0.3.1:note-recall",
+      "is_agent_default": true,
+      "agent_default_interfaces": [
+       "abstractnote.recall.v1"
+      ],
+      "deprecated": false,
+      "deprecated_at": null,
+      "deprecated_reason": null
+     },
+     {
+      "flow_id": "note-reflect",
+      "name": "Reflect on your notes",
+      "description": "Gather open loops, contradictions, resurfacing material and anniversaries; choose what deserves attention and write it down as insights.",
+      "interfaces": [
+       "abstractnote.reflect.v1"
+      ],
+      "triggerable": true,
+      "workflow_id": "abstractnote@0.3.1:note-reflect",
+      "is_agent_default": true,
+      "agent_default_interfaces": [
+       "abstractnote.reflect.v1"
+      ],
+      "deprecated": false,
+      "deprecated_at": null,
+      "deprecated_reason": null
+     },
+     {
+      "flow_id": "note-consolidate",
+      "name": "Consolidate your notes",
+      "description": "Merge duplicate entries, refresh the groups and their names, refresh stale summaries and the then-and-now of what changed, then reflect; every stage reports its progress.",
+      "interfaces": [
+       "abstractnote.consolidate.v1"
+      ],
+      "triggerable": true,
+      "workflow_id": "abstractnote@0.3.1:note-consolidate",
+      "is_agent_default": true,
+      "agent_default_interfaces": [
+       "abstractnote.consolidate.v1"
+      ],
+      "deprecated": false,
+      "deprecated_at": null,
+      "deprecated_reason": null
+     }
+    ]
+   },
+   {
+    "bundle_id": "basic-agent",
+    "bundle_version": "0.0.5",
+    "bundle_ref": "basic-agent@0.0.5",
+    "registry_scope": "private",
+    "source": "shipped",
+    "owner": {
+     "kind": "gateway",
+     "user_id": null
+    },
+    "shipped": true,
+    "available": true,
+    "archived": false,
+    "description": "Chat agent: answers a prompt in one agent loop that can use tools and memory, and returns the reply.",
+    "description_edited": false,
+    "version_channel": "published",
+    "is_draft": false,
+    "is_published": true,
+    "latest_published_version": "0.0.5",
+    "latest_any_version": "0.0.5",
+    "created_at": "2026-09-22T01:37:42.113903+00:00",
+    "metadata": {},
+    "automation_defaults": {},
+    "default_entrypoint": "81795ea9",
+    "entrypoints": [
+     {
+      "flow_id": "81795ea9",
+      "name": "Basic agent",
+      "description": "Chat agent: answers a prompt in one agent loop that can use tools and memory, and returns the reply.",
+      "interfaces": [
+       "abstractcode.agent.v1"
+      ],
+      "triggerable": false,
+      "workflow_id": "basic-agent@0.0.5:81795ea9",
+      "is_agent_default": true,
+      "agent_default_interfaces": [
+       "abstractcode.agent.v1"
+      ],
+      "deprecated": false,
+      "deprecated_at": null,
+      "deprecated_reason": null
+     }
+    ]
+   }
+  ],
+  "default_bundle_id": "basic-agent"
+ },
+ "automations": {
+  "items": [
+   {
+    "automation_id": "5a8fe473-9c52-5e8a-8336-b43fe57ebb5d",
+    "title": "Process my notes",
+    "status": "active",
+    "trigger": {
+     "binding_id": "ff9770b9-1fa5-5d03-ae86-3a62ff0b0782",
+     "source_id": "schedule",
+     "source_version": 2,
+     "config": {
+      "kind": "every",
+      "time_zone": "Europe/Paris",
+      "start_at": "2026-11-07T09:52:52.561850+00:00",
+      "anchor": "2026-11-07T09:52:52.561850+00:00",
+      "every": "2m"
+     }
+    },
+    "target": {
+     "workflow_id": "abstractnote@0.3.1:note-drain",
+     "bundle_ref": "abstractnote@0.3.1",
+     "flow_id": "note-drain"
+    },
+    "flow_name": "Process queued notes",
+    "context_mode": "independent",
+    "growing_max_tokens": 50000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-5a8fe473-9c52-5e8a-8336-b43fe-15560b7f07be",
+    "next_fire_at": "2026-11-07T11:50:52.561850+00:00",
+    "current_occurrence": null,
+    "occurrence_count": 59,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 1,
+    "updated_at": "2026-11-07T11:48:52.670692+00:00",
+    "section": "active",
+    "last_activity_at": "2026-11-07T11:48:52.670692+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "Every 2 minutes (UTC)",
+    "schedule_text": "Every 2 minutes (UTC) · next Sat 7 Nov 12:50 (Europe/Paris)",
+    "next_run_at": "2026-11-07T11:50:52.561850+00:00",
+    "next_run_local": "2026-11-07T12:50:52.561850+01:00",
+    "trigger_text": "Every 2 minutes (UTC)",
+    "last_occurrence": {
+     "run_id": "13eafcb7-3c3e-5e1e-9c6f-c513fb53d612",
+     "index": 59,
+     "status": "completed",
+     "attempts": 1,
+     "fired_at": "2026-11-07T11:48:52.561850+00:00",
+     "excerpt": "Nothing to process.",
+     "notify": null,
+     "finished_at": "2026-11-07T11:48:52.647194+00:00"
+    },
+    "context_used_tokens": null,
+    "last_notification": null
+   },
+   {
+    "automation_id": "6e7a8878-107f-5f69-aa24-03dd8f54754e",
+    "title": "Morning news brief",
+    "status": "active",
+    "trigger": {
+     "binding_id": "8689aed0-59d2-5653-9c5d-398b537e4144",
+     "source_id": "schedule",
+     "source_version": 2,
+     "config": {
+      "kind": "every",
+      "time_zone": "Europe/Paris",
+      "start_at": "2026-11-03T17:42:46.466308+00:00",
+      "anchor": "2026-11-03T17:42:46.466308+00:00",
+      "every": "8h"
+     }
+    },
+    "target": {
+     "workflow_id": "abstractassistant-orchestrator@0.0.17:7d177c93",
+     "bundle_ref": "abstractassistant-orchestrator@0.0.17",
+     "flow_id": "7d177c93"
+    },
+    "flow_name": "AbstractAssistant Orchestrator",
+    "context_mode": "growing",
+    "growing_max_tokens": 200000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-6e7a8878-107f-5f69-aa24-03dd8-ca6d3174b2b6",
+    "next_fire_at": "2026-11-07T17:42:46.466308+00:00",
+    "current_occurrence": null,
+    "occurrence_count": 13,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 1,
+    "updated_at": "2026-11-07T09:44:15.712825+00:00",
+    "section": "active",
+    "last_activity_at": "2026-11-07T09:44:15.712825+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "Every 8 hours (UTC)",
+    "schedule_text": "Every 8 hours (UTC) · next Sat 7 Nov 18:42 (Europe/Paris)",
+    "next_run_at": "2026-11-07T17:42:46.466308+00:00",
+    "next_run_local": "2026-11-07T18:42:46.466308+01:00",
+    "trigger_text": "Every 8 hours (UTC)",
+    "last_occurrence": {
+     "run_id": "d8be5ec8-270d-5b52-a545-ca1ee66b9bb3",
+     "index": 13,
+     "status": "completed",
+     "attempts": 1,
+     "fired_at": "2026-11-07T09:42:46.466308+00:00",
+     "excerpt": "Here is today's summary.",
+     "notify": null,
+     "finished_at": "2026-11-07T09:44:15.632263+00:00"
+    },
+    "context_used_tokens": 43557,
+    "last_notification": null
+   },
+   {
+    "automation_id": "3aaaff4e-57b7-541c-a478-7c7ee287e2d4",
+    "title": "Reflect on my notes",
+    "status": "paused",
+    "trigger": {
+     "binding_id": "4a1cda98-e412-5212-b29a-af50411bbb52",
+     "source_id": "schedule",
+     "source_version": 2,
+     "config": {
+      "kind": "every",
+      "time_zone": "Europe/Paris",
+      "start_at": "2026-11-14T09:52:52.264748+00:00",
+      "anchor": "2026-11-14T09:52:52.264748+00:00",
+      "every": "7d"
+     }
+    },
+    "target": {
+     "workflow_id": "abstractnote@0.3.1:note-reflect",
+     "bundle_ref": "abstractnote@0.3.1",
+     "flow_id": "note-reflect"
+    },
+    "flow_name": "Reflect on your notes",
+    "context_mode": "independent",
+    "growing_max_tokens": 50000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-3aaaff4e-57b7-541c-a478-7c7ee-40b3dd0fb88b",
+    "current_occurrence": null,
+    "occurrence_count": 0,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 1,
+    "updated_at": "2026-11-07T09:52:54.156352+00:00",
+    "section": "paused",
+    "last_activity_at": "2026-11-07T09:52:54.156352+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "Every 7 days (UTC)",
+    "schedule_text": "Every 7 days (UTC)",
+    "trigger_text": "Every 7 days (UTC)",
+    "context_used_tokens": null,
+    "last_notification": null
+   },
+   {
+    "automation_id": "fc24f1f7-a57a-5fff-aafa-9687c2f8d0b6",
+    "title": "Consolidate my notes",
+    "status": "paused",
+    "trigger": {
+     "binding_id": "c0f505d2-1616-5644-a84e-5a49d42a7303",
+     "source_id": "schedule",
+     "source_version": 2,
+     "config": {
+      "kind": "every",
+      "time_zone": "Europe/Paris",
+      "start_at": "2026-11-08T09:52:53.900769+00:00",
+      "anchor": "2026-11-08T09:52:53.900769+00:00",
+      "every": "1d"
+     }
+    },
+    "target": {
+     "workflow_id": "abstractnote@0.3.1:note-consolidate",
+     "bundle_ref": "abstractnote@0.3.1",
+     "flow_id": "note-consolidate"
+    },
+    "flow_name": "Consolidate your notes",
+    "context_mode": "independent",
+    "growing_max_tokens": 50000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-fc24f1f7-a57a-5fff-aafa-9687c-6dcfc216c1c1",
+    "current_occurrence": null,
+    "occurrence_count": 0,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 1,
+    "updated_at": "2026-11-07T09:52:54.140126+00:00",
+    "section": "paused",
+    "last_activity_at": "2026-11-07T09:52:54.140126+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "Every day (UTC)",
+    "schedule_text": "Every day (UTC)",
+    "trigger_text": "Every day (UTC)",
+    "context_used_tokens": null,
+    "last_notification": null
+   },
+   {
+    "automation_id": "15df10ad-5211-59a4-8c68-cf294ad1f13a",
+    "title": "Mailbox watch",
+    "status": "paused",
+    "trigger": {
+     "binding_id": "a18665fe-b153-5b4d-84bc-01e0ca301281",
+     "source_id": "email.received",
+     "source_version": 1,
+     "config": {
+      "account": "self",
+      "folder": "INBOX",
+      "uses_model": true,
+      "every": "60s",
+      "max_batch": 100,
+      "start_at": "2026-10-25T13:05:16.758382+00:00",
+      "auto_submitted": "skip",
+      "filter": {}
+     }
+    },
+    "target": {
+     "workflow_id": "live-mailbox-judge@1.0.2:8ee07990",
+     "bundle_ref": "live-mailbox-judge@1.0.2",
+     "flow_id": "8ee07990"
+    },
+    "flow_name": "Judge what arrived",
+    "context_mode": "independent",
+    "growing_max_tokens": 50000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-15df10ad-5211-59a4-8c68-cf294-945149bd9be7",
+    "current_occurrence": null,
+    "occurrence_count": 0,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 3,
+    "updated_at": "2026-10-27T18:58:38.171411+00:00",
+    "section": "paused",
+    "last_activity_at": "2026-10-27T18:58:38.171411+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "When an email arrives",
+    "schedule_text": "When an email arrives",
+    "trigger_text": "When mail arrives in person@example.org",
+    "context_used_tokens": null,
+    "last_notification": null
+   }
+  ],
+  "next_cursor": null,
+  "paused_automations_count": 3,
+  "archived_automations": 3,
+  "archived_automations_count": 3
+ },
+ "automations_archived": {
+  "items": [
+   {
+    "automation_id": "3e79f2bc-cf92-5fbb-b121-d1a2771f1127",
+    "title": "Reflect on my notes",
+    "status": "archived",
+    "trigger": {
+     "binding_id": "4a1cda98-e412-5212-b29a-af50411bbb52",
+     "source_id": "schedule",
+     "source_version": 2,
+     "config": {
+      "kind": "every",
+      "time_zone": "Europe/Paris",
+      "start_at": "2026-11-14T09:52:52.264748+00:00",
+      "anchor": "2026-11-14T09:52:52.264748+00:00",
+      "every": "7d"
+     }
+    },
+    "target": {
+     "workflow_id": "abstractnote@0.3.0:note-reflect",
+     "bundle_ref": "abstractnote@0.3.0",
+     "flow_id": "note-reflect"
+    },
+    "flow_name": "Reflect on your notes",
+    "context_mode": "independent",
+    "growing_max_tokens": 50000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-3aaaff4e-57b7-541c-a478-7c7ee-40b3dd0fb88b",
+    "current_occurrence": null,
+    "occurrence_count": 0,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 1,
+    "updated_at": "2026-11-07T09:52:54.156352+00:00",
+    "section": "archived",
+    "last_activity_at": "2026-11-07T09:52:54.156352+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "Every 7 days (UTC)",
+    "schedule_text": "Every 7 days (UTC)",
+    "trigger_text": "Every 7 days (UTC)",
+    "context_used_tokens": null,
+    "last_notification": null
+   },
+   {
+    "automation_id": "1f2e3d4c-cf92-5fbb-b121-d1a2771f1128",
+    "title": "Process my notes",
+    "status": "archived",
+    "trigger": {
+     "binding_id": "4a1cda98-e412-5212-b29a-af50411bbb52",
+     "source_id": "schedule",
+     "source_version": 2,
+     "config": {
+      "kind": "every",
+      "time_zone": "Europe/Paris",
+      "start_at": "2026-11-14T09:52:52.264748+00:00",
+      "anchor": "2026-11-14T09:52:52.264748+00:00",
+      "every": "7d"
+     }
+    },
+    "target": {
+     "workflow_id": "abstractnote@0.1.1:note-drain",
+     "bundle_ref": "abstractnote@0.1.1",
+     "flow_id": "note-drain"
+    },
+    "flow_name": "Reflect on your notes",
+    "context_mode": "independent",
+    "growing_max_tokens": 50000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-3aaaff4e-57b7-541c-a478-7c7ee-40b3dd0fb88b",
+    "current_occurrence": null,
+    "occurrence_count": 0,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 1,
+    "updated_at": "2026-11-07T09:52:54.156352+00:00",
+    "section": "archived",
+    "last_activity_at": "2026-11-07T09:52:54.156352+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "Every 7 days (UTC)",
+    "schedule_text": "Every 7 days (UTC)",
+    "trigger_text": "Every 7 days (UTC)",
+    "context_used_tokens": null,
+    "last_notification": null
+   },
+   {
+    "automation_id": "7d6c5b4a-cf92-5fbb-b121-d1a2771f1129",
+    "title": "Memory monitor",
+    "status": "archived",
+    "trigger": {
+     "binding_id": "a18665fe-b153-5b4d-84bc-01e0ca301281",
+     "source_id": "email.received",
+     "source_version": 1,
+     "config": {
+      "account": "self",
+      "folder": "INBOX",
+      "uses_model": true,
+      "every": "60s",
+      "max_batch": 100,
+      "start_at": "2026-10-25T13:05:16.758382+00:00",
+      "auto_submitted": "skip",
+      "filter": {}
+     }
+    },
+    "target": {
+     "workflow_id": "memory-monitor@1.0.0:monitor",
+     "bundle_ref": "memory-monitor@1.0.0",
+     "flow_id": "monitor"
+    },
+    "flow_name": "Judge what arrived",
+    "context_mode": "independent",
+    "growing_max_tokens": 50000,
+    "workspace_root": "/srv/abstractgateway/data/workspaces/session-automation-15df10ad-5211-59a4-8c68-cf294-945149bd9be7",
+    "current_occurrence": null,
+    "occurrence_count": 0,
+    "attention": {
+     "pending_waits": 0,
+     "unread": false,
+     "unseen_count": 0,
+     "cursor": "att1:0",
+     "items": [],
+     "waits": []
+    },
+    "legacy": false,
+    "revision": 3,
+    "updated_at": "2026-10-27T18:58:38.171411+00:00",
+    "section": "archived",
+    "last_activity_at": "2026-10-27T18:58:38.171411+00:00",
+    "capabilities": [
+     "revise",
+     "pause",
+     "resume",
+     "run_now",
+     "stop_current",
+     "archive",
+     "discuss"
+    ],
+    "session_kind": "automation",
+    "time_zone": "Europe/Paris",
+    "schedule_rule_text": "When an email arrives",
+    "schedule_text": "When an email arrives",
+    "trigger_text": "When mail arrives in person@example.org",
+    "context_used_tokens": null,
+    "last_notification": null
+   }
+  ],
+  "next_cursor": null,
+  "paused_automations_count": 3,
+  "archived_automations": 3,
+  "archived_automations_count": 3
+ },
+ "views": {
+  "b64c9a33-d41e-4ff1-ab65-594a765f62d4": {
+   "version": "replay_view_v1",
+   "root_run_id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+   "workflow": {
+    "id": "basic-agent@0.0.5:81795ea9",
+    "bundle_id": "basic-agent",
+    "bundle_version": "0.0.5",
+    "flow_id": "81795ea9",
+    "entrypoint": "81795ea9"
+   },
+   "session_id": "acode-8ec4cd0251ba",
+   "status": "completed",
+   "display_status": null,
+   "cursor": {
+    "token": "3b2137cc:10~224bc6abed",
+    "records": 10,
+    "runs": {
+     "b64c9a33-d41e-4ff1-ab65-594a765f62d4": 10
+    }
+   },
+   "runs": [
+    {
+     "run_id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+     "parent_run_id": null,
+     "workflow_id": "basic-agent@0.0.5:81795ea9",
+     "workflow": {
+      "id": "basic-agent@0.0.5:81795ea9",
+      "bundle_id": "basic-agent",
+      "bundle_version": "0.0.5",
+      "flow_id": "81795ea9"
+     },
+     "status": "completed",
+     "display_status": null,
+     "depth": 0,
+     "order": [
+      "",
+      "",
+      0,
+      "b64c9a33-d41e-4ff1-ab65-594a765f62d4"
+     ],
+     "waiting": null,
+     "holds_interaction": false,
+     "records": 10,
+     "first_seq": 1,
+     "last_seq": 10
+    }
+   ],
+   "interaction": null,
+   "open_waits": [],
+   "messages": [
+    {
+     "id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4:71032c49-0318-47a0-8559-07b58c6d1996:answer_user",
+     "role": "assistant",
+     "kind": "answer",
+     "text": "Done: the change is in place and the tests pass.",
+     "run_id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "seqs": [
+      8
+     ],
+     "source": "answer_user",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.656806+00:00",
+      "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+      8
+     ]
+    },
+    {
+     "id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4:final",
+     "role": "assistant",
+     "kind": "final",
+     "text": "Done: the change is in place and the tests pass.",
+     "run_id": "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+     "step_ids": [
+      "fec5c3a3-e0cb-4926-8339-1c30670efc61"
+     ],
+     "seqs": [
+      9
+     ],
+     "source": "ledger",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.657797+00:00",
+      "b64c9a33-d41e-4ff1-ab65-594a765f62d4",
+      9
+     ],
+     "repeats": "b64c9a33-d41e-4ff1-ab65-594a765f62d4:71032c49-0318-47a0-8559-07b58c6d1996:answer_user"
+    }
+   ],
+   "activities": [],
+   "artifacts": [],
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 180,
+    "total_tokens": 1380,
+    "llm_calls": 1
+   },
+   "warnings": []
+  },
+  "3b2137cc-9799-4100-8a53-6903ceb384ac": {
+   "version": "replay_view_v1",
+   "root_run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+   "workflow": {
+    "id": "abstractnote@0.3.0:note-capture",
+    "bundle_id": "abstractnote",
+    "bundle_version": "0.3.0",
+    "flow_id": "note-capture",
+    "entrypoint": "note-capture"
+   },
+   "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+   "status": "completed",
+   "display_status": null,
+   "cursor": {
+    "token": "3b2137cc:10~224bc6abed",
+    "records": 10,
+    "runs": {
+     "3b2137cc-9799-4100-8a53-6903ceb384ac": 10
+    }
+   },
+   "runs": [
+    {
+     "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+     "parent_run_id": null,
+     "workflow_id": "abstractnote@0.3.0:note-capture",
+     "workflow": {
+      "id": "abstractnote@0.3.0:note-capture",
+      "bundle_id": "abstractnote",
+      "bundle_version": "0.3.0",
+      "flow_id": "note-capture"
+     },
+     "status": "completed",
+     "display_status": null,
+     "depth": 0,
+     "order": [
+      "",
+      "",
+      0,
+      "3b2137cc-9799-4100-8a53-6903ceb384ac"
+     ],
+     "waiting": null,
+     "holds_interaction": false,
+     "records": 10,
+     "first_seq": 1,
+     "last_seq": 10
+    }
+   ],
+   "interaction": null,
+   "open_waits": [],
+   "messages": [
+    {
+     "id": "3b2137cc-9799-4100-8a53-6903ceb384ac:71032c49-0318-47a0-8559-07b58c6d1996:answer_user",
+     "role": "assistant",
+     "kind": "answer",
+     "text": "Saved as a note: “Compare the tokenizer runs”. Related: Tokenizer experiments.",
+     "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "seqs": [
+      8
+     ],
+     "source": "answer_user",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.656806+00:00",
+      "3b2137cc-9799-4100-8a53-6903ceb384ac",
+      8
+     ]
+    },
+    {
+     "id": "3b2137cc-9799-4100-8a53-6903ceb384ac:final",
+     "role": "assistant",
+     "kind": "final",
+     "text": "Saved as a note: “Compare the tokenizer runs”. Related: Tokenizer experiments.",
+     "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+     "step_ids": [
+      "fec5c3a3-e0cb-4926-8339-1c30670efc61"
+     ],
+     "seqs": [
+      9
+     ],
+     "source": "ledger",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.657797+00:00",
+      "3b2137cc-9799-4100-8a53-6903ceb384ac",
+      9
+     ],
+     "repeats": "3b2137cc-9799-4100-8a53-6903ceb384ac:71032c49-0318-47a0-8559-07b58c6d1996:answer_user"
+    }
+   ],
+   "activities": [
+    {
+     "id": "3b2137cc-9799-4100-8a53-6903ceb384ac:e010834d-463b-4399-8ec8-e35be4f65e99",
+     "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+     "execution_id": "e010834d-463b-4399-8ec8-e35be4f65e99",
+     "node_id": "capture",
+     "kind": "tool",
+     "effect_type": "tool_calls",
+     "name": "note_capture",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:47.278948+00:00",
+     "ended_at": "2026-11-06T21:45:47.645978+00:00",
+     "seqs": [
+      1,
+      2
+     ],
+     "step_ids": [
+      "e010834d-463b-4399-8ec8-e35be4f65e99"
+     ],
+     "order": [
+      "2026-11-06T21:45:47.278948+00:00",
+      "3b2137cc-9799-4100-8a53-6903ceb384ac",
+      1
+     ],
+     "tool_calls": [
+      {
+       "id": "rtcall_fe29a9e9afb44df7971efb7cec881e45_1",
+       "name": "note_capture",
+       "arguments": {
+        "text": "Remember to compare the two tokenizer runs before Friday.",
+        "occurred_at": "2026-11-06T21:45:46Z",
+        "source": {
+         "client": "watch"
+        },
+        "idempotency_key": "c291f854-60c4-46ce-bd99-3c7e199e1081",
+        "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+        "attachments": [],
+        "process_inline": false
+       },
+       "status": "completed",
+       "call_id": "capture",
+       "output": {
+        "ok": true,
+        "note_id": "n_7c1d"
+       }
+      }
+     ]
+    },
+    {
+     "id": "3b2137cc-9799-4100-8a53-6903ceb384ac:c62479da-bc86-47ad-8855-9a2d9bd502a9",
+     "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+     "execution_id": "c62479da-bc86-47ad-8855-9a2d9bd502a9",
+     "node_id": "filing",
+     "kind": "llm",
+     "effect_type": "llm_call",
+     "name": "llm_call",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:47.649140+00:00",
+     "ended_at": "2026-11-06T21:45:52.648087+00:00",
+     "seqs": [
+      3,
+      4
+     ],
+     "step_ids": [
+      "c62479da-bc86-47ad-8855-9a2d9bd502a9"
+     ],
+     "order": [
+      "2026-11-06T21:45:47.649140+00:00",
+      "3b2137cc-9799-4100-8a53-6903ceb384ac",
+      3
+     ]
+    },
+    {
+     "id": "3b2137cc-9799-4100-8a53-6903ceb384ac:0bbf8c6b-3633-40bc-8d8c-87e28f4ace18",
+     "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+     "execution_id": "0bbf8c6b-3633-40bc-8d8c-87e28f4ace18",
+     "node_id": "file",
+     "kind": "tool",
+     "effect_type": "tool_calls",
+     "name": "note_file",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:52.652078+00:00",
+     "ended_at": "2026-11-06T21:45:52.654870+00:00",
+     "seqs": [
+      5,
+      6
+     ],
+     "step_ids": [
+      "0bbf8c6b-3633-40bc-8d8c-87e28f4ace18"
+     ],
+     "order": [
+      "2026-11-06T21:45:52.652078+00:00",
+      "3b2137cc-9799-4100-8a53-6903ceb384ac",
+      5
+     ],
+     "tool_calls": [
+      {
+       "id": "rtcall_90a0c66b4e6b12f0c57e80a75bcbba5c_1",
+       "name": "note_file",
+       "arguments": {
+        "note_id": "nt_u74qp7opgsqojb5feslgidbhp5",
+        "title": "Compare the tokenizer runs",
+        "kind": "reflection",
+        "topics": [
+         "tokenizers",
+         "llm"
+        ],
+        "urgency": "normal",
+        "language": "en",
+        "one_line": "Compare the two tokenizer runs before Friday."
+       },
+       "status": "completed",
+       "call_id": "file",
+       "output": {
+        "ok": true,
+        "note_id": "n_7c1d"
+       }
+      }
+     ]
+    },
+    {
+     "id": "3b2137cc-9799-4100-8a53-6903ceb384ac:71032c49-0318-47a0-8559-07b58c6d1996",
+     "run_id": "3b2137cc-9799-4100-8a53-6903ceb384ac",
+     "execution_id": "71032c49-0318-47a0-8559-07b58c6d1996",
+     "node_id": "saved_answer",
+     "kind": "answer",
+     "effect_type": "answer_user",
+     "name": "answer_user",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:52.656664+00:00",
+     "ended_at": "2026-11-06T21:45:52.656806+00:00",
+     "seqs": [
+      7,
+      8
+     ],
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "order": [
+      "2026-11-06T21:45:52.656664+00:00",
+      "3b2137cc-9799-4100-8a53-6903ceb384ac",
+      7
+     ]
+    }
+   ],
+   "artifacts": [],
+   "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "llm_calls": 1
+   },
+   "warnings": []
+  },
+  "3b2137cc-0000-4000-8000-000000000002": {
+   "version": "replay_view_v1",
+   "root_run_id": "3b2137cc-0000-4000-8000-000000000002",
+   "workflow": {
+    "id": "abstractnote@0.3.0:note-capture",
+    "bundle_id": "abstractnote",
+    "bundle_version": "0.3.0",
+    "flow_id": "note-capture",
+    "entrypoint": "note-capture"
+   },
+   "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+   "status": "completed",
+   "display_status": null,
+   "cursor": {
+    "token": "3b2137cc:10~224bc6abed",
+    "records": 10,
+    "runs": {
+     "3b2137cc-0000-4000-8000-000000000002": 10
+    }
+   },
+   "runs": [
+    {
+     "run_id": "3b2137cc-0000-4000-8000-000000000002",
+     "parent_run_id": null,
+     "workflow_id": "abstractnote@0.3.0:note-capture",
+     "workflow": {
+      "id": "abstractnote@0.3.0:note-capture",
+      "bundle_id": "abstractnote",
+      "bundle_version": "0.3.0",
+      "flow_id": "note-capture"
+     },
+     "status": "completed",
+     "display_status": null,
+     "depth": 0,
+     "order": [
+      "",
+      "",
+      0,
+      "3b2137cc-0000-4000-8000-000000000002"
+     ],
+     "waiting": null,
+     "holds_interaction": false,
+     "records": 10,
+     "first_seq": 1,
+     "last_seq": 10
+    }
+   ],
+   "interaction": null,
+   "open_waits": [],
+   "messages": [
+    {
+     "id": "3b2137cc-0000-4000-8000-000000000002:71032c49-0318-47a0-8559-07b58c6d1996:answer_user",
+     "role": "assistant",
+     "kind": "answer",
+     "text": "Saved as a note: “Compare the tokenizer runs”. Related: Tokenizer experiments.",
+     "run_id": "3b2137cc-0000-4000-8000-000000000002",
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "seqs": [
+      8
+     ],
+     "source": "answer_user",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.656806+00:00",
+      "3b2137cc-0000-4000-8000-000000000002",
+      8
+     ]
+    },
+    {
+     "id": "3b2137cc-0000-4000-8000-000000000002:final",
+     "role": "assistant",
+     "kind": "final",
+     "text": "Saved as a note: “Compare the tokenizer runs”. Related: Tokenizer experiments.",
+     "run_id": "3b2137cc-0000-4000-8000-000000000002",
+     "step_ids": [
+      "fec5c3a3-e0cb-4926-8339-1c30670efc61"
+     ],
+     "seqs": [
+      9
+     ],
+     "source": "ledger",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.657797+00:00",
+      "3b2137cc-0000-4000-8000-000000000002",
+      9
+     ],
+     "repeats": "3b2137cc-0000-4000-8000-000000000002:71032c49-0318-47a0-8559-07b58c6d1996:answer_user"
+    }
+   ],
+   "activities": [
+    {
+     "id": "3b2137cc-0000-4000-8000-000000000002:e010834d-463b-4399-8ec8-e35be4f65e99",
+     "run_id": "3b2137cc-0000-4000-8000-000000000002",
+     "execution_id": "e010834d-463b-4399-8ec8-e35be4f65e99",
+     "node_id": "capture",
+     "kind": "tool",
+     "effect_type": "tool_calls",
+     "name": "note_capture",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:47.278948+00:00",
+     "ended_at": "2026-11-06T21:45:47.645978+00:00",
+     "seqs": [
+      1,
+      2
+     ],
+     "step_ids": [
+      "e010834d-463b-4399-8ec8-e35be4f65e99"
+     ],
+     "order": [
+      "2026-11-06T21:45:47.278948+00:00",
+      "3b2137cc-0000-4000-8000-000000000002",
+      1
+     ],
+     "tool_calls": [
+      {
+       "id": "rtcall_fe29a9e9afb44df7971efb7cec881e45_1",
+       "name": "note_capture",
+       "arguments": {
+        "text": "Remember to compare the two tokenizer runs before Friday.",
+        "occurred_at": "2026-11-06T21:45:46Z",
+        "source": {
+         "client": "watch"
+        },
+        "idempotency_key": "c291f854-60c4-46ce-bd99-3c7e199e1081",
+        "session_id": "note-watch-e88aa3c2-88fc-4657-8bb1-b3c250a52f46",
+        "attachments": [],
+        "process_inline": false
+       },
+       "status": "completed",
+       "call_id": "capture",
+       "output": {
+        "ok": true,
+        "note_id": "n_7c1d"
+       }
+      }
+     ]
+    },
+    {
+     "id": "3b2137cc-0000-4000-8000-000000000002:c62479da-bc86-47ad-8855-9a2d9bd502a9",
+     "run_id": "3b2137cc-0000-4000-8000-000000000002",
+     "execution_id": "c62479da-bc86-47ad-8855-9a2d9bd502a9",
+     "node_id": "filing",
+     "kind": "llm",
+     "effect_type": "llm_call",
+     "name": "llm_call",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:47.649140+00:00",
+     "ended_at": "2026-11-06T21:45:52.648087+00:00",
+     "seqs": [
+      3,
+      4
+     ],
+     "step_ids": [
+      "c62479da-bc86-47ad-8855-9a2d9bd502a9"
+     ],
+     "order": [
+      "2026-11-06T21:45:47.649140+00:00",
+      "3b2137cc-0000-4000-8000-000000000002",
+      3
+     ]
+    },
+    {
+     "id": "3b2137cc-0000-4000-8000-000000000002:0bbf8c6b-3633-40bc-8d8c-87e28f4ace18",
+     "run_id": "3b2137cc-0000-4000-8000-000000000002",
+     "execution_id": "0bbf8c6b-3633-40bc-8d8c-87e28f4ace18",
+     "node_id": "file",
+     "kind": "tool",
+     "effect_type": "tool_calls",
+     "name": "note_file",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:52.652078+00:00",
+     "ended_at": "2026-11-06T21:45:52.654870+00:00",
+     "seqs": [
+      5,
+      6
+     ],
+     "step_ids": [
+      "0bbf8c6b-3633-40bc-8d8c-87e28f4ace18"
+     ],
+     "order": [
+      "2026-11-06T21:45:52.652078+00:00",
+      "3b2137cc-0000-4000-8000-000000000002",
+      5
+     ],
+     "tool_calls": [
+      {
+       "id": "rtcall_90a0c66b4e6b12f0c57e80a75bcbba5c_1",
+       "name": "note_file",
+       "arguments": {
+        "note_id": "nt_u74qp7opgsqojb5feslgidbhp5",
+        "title": "Compare the tokenizer runs",
+        "kind": "reflection",
+        "topics": [
+         "tokenizers",
+         "llm"
+        ],
+        "urgency": "normal",
+        "language": "en",
+        "one_line": "Compare the two tokenizer runs before Friday."
+       },
+       "status": "completed",
+       "call_id": "file",
+       "output": {
+        "ok": true,
+        "note_id": "n_7c1d"
+       }
+      }
+     ]
+    },
+    {
+     "id": "3b2137cc-0000-4000-8000-000000000002:71032c49-0318-47a0-8559-07b58c6d1996",
+     "run_id": "3b2137cc-0000-4000-8000-000000000002",
+     "execution_id": "71032c49-0318-47a0-8559-07b58c6d1996",
+     "node_id": "saved_answer",
+     "kind": "answer",
+     "effect_type": "answer_user",
+     "name": "answer_user",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:52.656664+00:00",
+     "ended_at": "2026-11-06T21:45:52.656806+00:00",
+     "seqs": [
+      7,
+      8
+     ],
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "order": [
+      "2026-11-06T21:45:52.656664+00:00",
+      "3b2137cc-0000-4000-8000-000000000002",
+      7
+     ]
+    }
+   ],
+   "artifacts": [],
+   "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "llm_calls": 1
+   },
+   "warnings": []
+  },
+  "7a0d5e11-0000-4000-8000-000000000003": {
+   "version": "replay_view_v1",
+   "root_run_id": "7a0d5e11-0000-4000-8000-000000000003",
+   "workflow": {
+    "id": "abstractnote@0.3.0:note-capture",
+    "bundle_id": "abstractnote",
+    "bundle_version": "0.3.0",
+    "flow_id": "note-capture",
+    "entrypoint": "note-capture"
+   },
+   "session_id": "note-web-0f3c2a9e-5b7d-4c1e-9a6f-2d8b4e1c7a90",
+   "status": "completed",
+   "display_status": null,
+   "cursor": {
+    "token": "3b2137cc:10~224bc6abed",
+    "records": 10,
+    "runs": {
+     "7a0d5e11-0000-4000-8000-000000000003": 10
+    }
+   },
+   "runs": [
+    {
+     "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+     "parent_run_id": null,
+     "workflow_id": "abstractnote@0.3.0:note-capture",
+     "workflow": {
+      "id": "abstractnote@0.3.0:note-capture",
+      "bundle_id": "abstractnote",
+      "bundle_version": "0.3.0",
+      "flow_id": "note-capture"
+     },
+     "status": "completed",
+     "display_status": null,
+     "depth": 0,
+     "order": [
+      "",
+      "",
+      0,
+      "7a0d5e11-0000-4000-8000-000000000003"
+     ],
+     "waiting": null,
+     "holds_interaction": false,
+     "records": 10,
+     "first_seq": 1,
+     "last_seq": 10
+    }
+   ],
+   "interaction": null,
+   "open_waits": [],
+   "messages": [
+    {
+     "id": "7a0d5e11-0000-4000-8000-000000000003:71032c49-0318-47a0-8559-07b58c6d1996:answer_user",
+     "role": "assistant",
+     "kind": "answer",
+     "text": "Saved as a note: “Compare the tokenizer runs”. Related: Tokenizer experiments.",
+     "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "seqs": [
+      8
+     ],
+     "source": "answer_user",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.656806+00:00",
+      "7a0d5e11-0000-4000-8000-000000000003",
+      8
+     ]
+    },
+    {
+     "id": "7a0d5e11-0000-4000-8000-000000000003:final",
+     "role": "assistant",
+     "kind": "final",
+     "text": "Saved as a note: “Compare the tokenizer runs”. Related: Tokenizer experiments.",
+     "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+     "step_ids": [
+      "fec5c3a3-e0cb-4926-8339-1c30670efc61"
+     ],
+     "seqs": [
+      9
+     ],
+     "source": "ledger",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.657797+00:00",
+      "7a0d5e11-0000-4000-8000-000000000003",
+      9
+     ],
+     "repeats": "7a0d5e11-0000-4000-8000-000000000003:71032c49-0318-47a0-8559-07b58c6d1996:answer_user"
+    }
+   ],
+   "activities": [
+    {
+     "id": "7a0d5e11-0000-4000-8000-000000000003:e010834d-463b-4399-8ec8-e35be4f65e99",
+     "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+     "execution_id": "e010834d-463b-4399-8ec8-e35be4f65e99",
+     "node_id": "capture",
+     "kind": "tool",
+     "effect_type": "tool_calls",
+     "name": "note_capture",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:47.278948+00:00",
+     "ended_at": "2026-11-06T21:45:47.645978+00:00",
+     "seqs": [
+      1,
+      2
+     ],
+     "step_ids": [
+      "e010834d-463b-4399-8ec8-e35be4f65e99"
+     ],
+     "order": [
+      "2026-11-06T21:45:47.278948+00:00",
+      "7a0d5e11-0000-4000-8000-000000000003",
+      1
+     ],
+     "tool_calls": [
+      {
+       "id": "rtcall_fe29a9e9afb44df7971efb7cec881e45_1",
+       "name": "note_capture",
+       "arguments": {
+        "text": "Remember to compare the two tokenizer runs before Friday.",
+        "occurred_at": "2026-11-06T21:45:46Z",
+        "source": {
+         "client": "watch"
+        },
+        "idempotency_key": "c291f854-60c4-46ce-bd99-3c7e199e1081",
+        "session_id": "note-web-0f3c2a9e-5b7d-4c1e-9a6f-2d8b4e1c7a90",
+        "attachments": [],
+        "process_inline": false
+       },
+       "status": "completed",
+       "call_id": "capture",
+       "output": {
+        "ok": true,
+        "note_id": "n_7c1d"
+       }
+      }
+     ]
+    },
+    {
+     "id": "7a0d5e11-0000-4000-8000-000000000003:c62479da-bc86-47ad-8855-9a2d9bd502a9",
+     "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+     "execution_id": "c62479da-bc86-47ad-8855-9a2d9bd502a9",
+     "node_id": "filing",
+     "kind": "llm",
+     "effect_type": "llm_call",
+     "name": "llm_call",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:47.649140+00:00",
+     "ended_at": "2026-11-06T21:45:52.648087+00:00",
+     "seqs": [
+      3,
+      4
+     ],
+     "step_ids": [
+      "c62479da-bc86-47ad-8855-9a2d9bd502a9"
+     ],
+     "order": [
+      "2026-11-06T21:45:47.649140+00:00",
+      "7a0d5e11-0000-4000-8000-000000000003",
+      3
+     ]
+    },
+    {
+     "id": "7a0d5e11-0000-4000-8000-000000000003:0bbf8c6b-3633-40bc-8d8c-87e28f4ace18",
+     "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+     "execution_id": "0bbf8c6b-3633-40bc-8d8c-87e28f4ace18",
+     "node_id": "file",
+     "kind": "tool",
+     "effect_type": "tool_calls",
+     "name": "note_file",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:52.652078+00:00",
+     "ended_at": "2026-11-06T21:45:52.654870+00:00",
+     "seqs": [
+      5,
+      6
+     ],
+     "step_ids": [
+      "0bbf8c6b-3633-40bc-8d8c-87e28f4ace18"
+     ],
+     "order": [
+      "2026-11-06T21:45:52.652078+00:00",
+      "7a0d5e11-0000-4000-8000-000000000003",
+      5
+     ],
+     "tool_calls": [
+      {
+       "id": "rtcall_90a0c66b4e6b12f0c57e80a75bcbba5c_1",
+       "name": "note_file",
+       "arguments": {
+        "note_id": "nt_u74qp7opgsqojb5feslgidbhp5",
+        "title": "Compare the tokenizer runs",
+        "kind": "reflection",
+        "topics": [
+         "tokenizers",
+         "llm"
+        ],
+        "urgency": "normal",
+        "language": "en",
+        "one_line": "Compare the two tokenizer runs before Friday."
+       },
+       "status": "completed",
+       "call_id": "file",
+       "output": {
+        "ok": true,
+        "note_id": "n_7c1d"
+       }
+      }
+     ]
+    },
+    {
+     "id": "7a0d5e11-0000-4000-8000-000000000003:71032c49-0318-47a0-8559-07b58c6d1996",
+     "run_id": "7a0d5e11-0000-4000-8000-000000000003",
+     "execution_id": "71032c49-0318-47a0-8559-07b58c6d1996",
+     "node_id": "saved_answer",
+     "kind": "answer",
+     "effect_type": "answer_user",
+     "name": "answer_user",
+     "status": "completed",
+     "started_at": "2026-11-06T21:45:52.656664+00:00",
+     "ended_at": "2026-11-06T21:45:52.656806+00:00",
+     "seqs": [
+      7,
+      8
+     ],
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "order": [
+      "2026-11-06T21:45:52.656664+00:00",
+      "7a0d5e11-0000-4000-8000-000000000003",
+      7
+     ]
+    }
+   ],
+   "artifacts": [],
+   "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "llm_calls": 1
+   },
+   "warnings": []
+  },
+  "5e1f0c22-0000-4000-8000-000000000004": {
+   "version": "replay_view_v1",
+   "root_run_id": "5e1f0c22-0000-4000-8000-000000000004",
+   "workflow": {
+    "id": "basic-agent@0.0.1:81795ea9",
+    "bundle_id": "basic-agent",
+    "bundle_version": "0.0.1",
+    "flow_id": "81795ea9",
+    "entrypoint": "81795ea9"
+   },
+   "session_id": "acode-4b0e9d7c2f1a",
+   "status": "completed",
+   "display_status": null,
+   "cursor": {
+    "token": "3b2137cc:10~224bc6abed",
+    "records": 10,
+    "runs": {
+     "5e1f0c22-0000-4000-8000-000000000004": 10
+    }
+   },
+   "runs": [
+    {
+     "run_id": "5e1f0c22-0000-4000-8000-000000000004",
+     "parent_run_id": null,
+     "workflow_id": "basic-agent@0.0.1:81795ea9",
+     "workflow": {
+      "id": "basic-agent@0.0.1:81795ea9",
+      "bundle_id": "basic-agent",
+      "bundle_version": "0.0.1",
+      "flow_id": "81795ea9"
+     },
+     "status": "completed",
+     "display_status": null,
+     "depth": 0,
+     "order": [
+      "",
+      "",
+      0,
+      "5e1f0c22-0000-4000-8000-000000000004"
+     ],
+     "waiting": null,
+     "holds_interaction": false,
+     "records": 10,
+     "first_seq": 1,
+     "last_seq": 10
+    }
+   ],
+   "interaction": null,
+   "open_waits": [],
+   "messages": [
+    {
+     "id": "5e1f0c22-0000-4000-8000-000000000004:71032c49-0318-47a0-8559-07b58c6d1996:answer_user",
+     "role": "assistant",
+     "kind": "answer",
+     "text": "Done: the change is in place and the tests pass.",
+     "run_id": "5e1f0c22-0000-4000-8000-000000000004",
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "seqs": [
+      8
+     ],
+     "source": "answer_user",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.656806+00:00",
+      "5e1f0c22-0000-4000-8000-000000000004",
+      8
+     ]
+    },
+    {
+     "id": "5e1f0c22-0000-4000-8000-000000000004:final",
+     "role": "assistant",
+     "kind": "final",
+     "text": "Done: the change is in place and the tests pass.",
+     "run_id": "5e1f0c22-0000-4000-8000-000000000004",
+     "step_ids": [
+      "fec5c3a3-e0cb-4926-8339-1c30670efc61"
+     ],
+     "seqs": [
+      9
+     ],
+     "source": "ledger",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.657797+00:00",
+      "5e1f0c22-0000-4000-8000-000000000004",
+      9
+     ],
+     "repeats": "5e1f0c22-0000-4000-8000-000000000004:71032c49-0318-47a0-8559-07b58c6d1996:answer_user"
+    }
+   ],
+   "activities": [],
+   "artifacts": [],
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 180,
+    "total_tokens": 1380,
+    "llm_calls": 1
+   },
+   "warnings": []
+  },
+  "9c4d2b33-0000-4000-8000-000000000005": {
+   "version": "replay_view_v1",
+   "root_run_id": "9c4d2b33-0000-4000-8000-000000000005",
+   "workflow": {
+    "id": "retired-agent@1.2.0:chat",
+    "bundle_id": "retired-agent",
+    "bundle_version": "1.2.0",
+    "flow_id": "chat",
+    "entrypoint": "chat"
+   },
+   "session_id": "acode-9f8e7d6c5b4a",
+   "status": "completed",
+   "display_status": null,
+   "cursor": {
+    "token": "3b2137cc:10~224bc6abed",
+    "records": 10,
+    "runs": {
+     "9c4d2b33-0000-4000-8000-000000000005": 10
+    }
+   },
+   "runs": [
+    {
+     "run_id": "9c4d2b33-0000-4000-8000-000000000005",
+     "parent_run_id": null,
+     "workflow_id": "retired-agent@1.2.0:chat",
+     "workflow": {
+      "id": "retired-agent@1.2.0:chat",
+      "bundle_id": "retired-agent",
+      "bundle_version": "1.2.0",
+      "flow_id": "chat"
+     },
+     "status": "completed",
+     "display_status": null,
+     "depth": 0,
+     "order": [
+      "",
+      "",
+      0,
+      "9c4d2b33-0000-4000-8000-000000000005"
+     ],
+     "waiting": null,
+     "holds_interaction": false,
+     "records": 10,
+     "first_seq": 1,
+     "last_seq": 10
+    }
+   ],
+   "interaction": null,
+   "open_waits": [],
+   "messages": [
+    {
+     "id": "9c4d2b33-0000-4000-8000-000000000005:71032c49-0318-47a0-8559-07b58c6d1996:answer_user",
+     "role": "assistant",
+     "kind": "answer",
+     "text": "Done: the change is in place and the tests pass.",
+     "run_id": "9c4d2b33-0000-4000-8000-000000000005",
+     "step_ids": [
+      "71032c49-0318-47a0-8559-07b58c6d1996"
+     ],
+     "seqs": [
+      8
+     ],
+     "source": "answer_user",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.656806+00:00",
+      "9c4d2b33-0000-4000-8000-000000000005",
+      8
+     ]
+    },
+    {
+     "id": "9c4d2b33-0000-4000-8000-000000000005:final",
+     "role": "assistant",
+     "kind": "final",
+     "text": "Done: the change is in place and the tests pass.",
+     "run_id": "9c4d2b33-0000-4000-8000-000000000005",
+     "step_ids": [
+      "fec5c3a3-e0cb-4926-8339-1c30670efc61"
+     ],
+     "seqs": [
+      9
+     ],
+     "source": "ledger",
+     "artifact_ids": [],
+     "order": [
+      "2026-11-06T21:45:52.657797+00:00",
+      "9c4d2b33-0000-4000-8000-000000000005",
+      9
+     ],
+     "repeats": "9c4d2b33-0000-4000-8000-000000000005:71032c49-0318-47a0-8559-07b58c6d1996:answer_user"
+    }
+   ],
+   "activities": [],
+   "artifacts": [],
+   "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 180,
+    "total_tokens": 1380,
+    "llm_calls": 1
+   },
+   "warnings": []
+  }
+ },
+ "input_schemas": {
+  "basic-agent@0.0.5:81795ea9": {
+   "bundle_id": "basic-agent",
+   "bundle_version": "0.0.5",
+   "bundle_ref": "basic-agent@0.0.5",
+   "flow_id": "81795ea9",
+   "workflow_id": "basic-agent@0.0.5:81795ea9",
+   "version": 1,
+   "inputs": [
+    {
+     "id": "use_context",
+     "label": "use_context",
+     "type": "boolean",
+     "required": false,
+     "default": false,
+     "schema": {
+      "type": "boolean",
+      "x-abstract-type": "boolean",
+      "default": false
+     }
+    },
+    {
+     "id": "memory",
+     "label": "memory",
+     "type": "memory",
+     "required": false,
+     "schema": {
+      "x-abstract-type": "memory"
+     }
+    },
+    {
+     "id": "context",
+     "label": "context",
+     "type": "object",
+     "required": false,
+     "schema": {
+      "type": "object",
+      "x-abstract-type": "object"
+     }
+    },
+    {
+     "id": "provider",
+     "label": "provider",
+     "type": "provider",
+     "required": false,
+     "schema": {
+      "type": "string",
+      "x-abstract-type": "provider"
+     }
+    },
+    {
+     "id": "model",
+     "label": "model",
+     "type": "model",
+     "required": false,
+     "schema": {
+      "type": "string",
+      "x-abstract-type": "model"
+     }
+    },
+    {
+     "id": "system",
+     "label": "system",
+     "type": "string",
+     "required": false,
+     "schema": {
+      "type": "string",
+      "x-abstract-type": "string"
+     }
+    },
+    {
+     "id": "prompt",
+     "label": "prompt",
+     "type": "string",
+     "required": false,
+     "schema": {
+      "type": "string",
+      "x-abstract-type": "string"
+     }
+    },
+    {
+     "id": "tools",
+     "label": "tools",
+     "type": "tools",
+     "required": false,
+     "default": [
+      "edit_file",
+      "analyze_code",
+      "execute_command",
+      "fetch_url",
+      "list_files",
+      "read_file",
+      "search_files",
+      "web_search",
+      "write_file",
+      "list_email_accounts",
+      "list_email_folders",
+      "send_email",
+      "reply_email",
+      "list_emails",
+      "search_emails",
+      "read_email",
+      "get_email_attachment"
+     ],
+     "schema": {
+      "x-abstract-type": "tools",
+      "default": [
+       "edit_file",
+       "analyze_code",
+       "execute_command",
+       "fetch_url",
+       "list_files",
+       "read_file",
+       "search_files",
+       "web_search",
+       "write_file",
+       "list_email_accounts",
+       "list_email_folders",
+       "send_email",
+       "reply_email",
+       "list_emails",
+       "search_emails",
+       "read_email",
+       "get_email_attachment"
+      ]
+     }
+    },
+    {
+     "id": "max_iterations",
+     "label": "max_iterations",
+     "type": "number",
+     "required": false,
+     "default": 20,
+     "schema": {
+      "type": "number",
+      "x-abstract-type": "number",
+      "default": 20
+     }
+    },
+    {
+     "id": "max_in_tokens",
+     "label": "max_in_tokens",
+     "type": "number",
+     "required": false,
+     "schema": {
+      "type": "number",
+      "x-abstract-type": "number"
+     }
+    },
+    {
+     "id": "temperature",
+     "label": "temperature",
+     "type": "number",
+     "required": false,
+     "default": 0.7,
+     "schema": {
+      "type": "number",
+      "x-abstract-type": "number",
+      "default": 0.7
+     }
+    },
+    {
+     "id": "seed",
+     "label": "seed",
+     "type": "number",
+     "required": false,
+     "default": -1,
+     "schema": {
+      "type": "number",
+      "x-abstract-type": "number",
+      "default": -1
+     }
+    },
+    {
+     "id": "resp_schema",
+     "label": "resp_schema",
+     "type": "object",
+     "required": false,
+     "schema": {
+      "type": "object",
+      "x-abstract-type": "object"
+     }
+    }
+   ],
+   "defaults": {
+    "use_context": false,
+    "tools": [
+     "edit_file",
+     "analyze_code",
+     "execute_command",
+     "fetch_url",
+     "list_files",
+     "read_file",
+     "search_files",
+     "web_search",
+     "write_file",
+     "list_email_accounts",
+     "list_email_folders",
+     "send_email",
+     "reply_email",
+     "list_emails",
+     "search_emails",
+     "read_email",
+     "get_email_attachment"
+    ],
+    "max_iterations": 20,
+    "temperature": 0.7,
+    "seed": -1
+   },
+   "input_data_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+     "use_context": {
+      "type": "boolean",
+      "x-abstract-type": "boolean",
+      "default": false
+     },
+     "memory": {
+      "x-abstract-type": "memory"
+     },
+     "context": {
+      "type": "object",
+      "x-abstract-type": "object"
+     },
+     "provider": {
+      "type": "string",
+      "x-abstract-type": "provider"
+     },
+     "model": {
+      "type": "string",
+      "x-abstract-type": "model"
+     },
+     "system": {
+      "type": "string",
+      "x-abstract-type": "string"
+     },
+     "prompt": {
+      "type": "string",
+      "x-abstract-type": "string"
+     },
+     "tools": {
+      "x-abstract-type": "tools",
+      "default": [
+       "edit_file",
+       "analyze_code",
+       "execute_command",
+       "fetch_url",
+       "list_files",
+       "read_file",
+       "search_files",
+       "web_search",
+       "write_file",
+       "list_email_accounts",
+       "list_email_folders",
+       "send_email",
+       "reply_email",
+       "list_emails",
+       "search_emails",
+       "read_email",
+       "get_email_attachment"
+      ]
+     },
+     "max_iterations": {
+      "type": "number",
+      "x-abstract-type": "number",
+      "default": 20
+     },
+     "max_in_tokens": {
+      "type": "number",
+      "x-abstract-type": "number"
+     },
+     "temperature": {
+      "type": "number",
+      "x-abstract-type": "number",
+      "default": 0.7
+     },
+     "seed": {
+      "type": "number",
+      "x-abstract-type": "number",
+      "default": -1
+     },
+     "resp_schema": {
+      "type": "object",
+      "x-abstract-type": "object"
+     }
+    }
+   }
+  }
+ }
+}

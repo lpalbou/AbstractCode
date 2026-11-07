@@ -188,17 +188,17 @@ fn newest_gateway_session(conn: &config::Connection) -> Result<String, String> {
             e.compact_reason()
         )
     })?;
-    page.get("items")
+    // The board's own fold (newest first), so AbstractNote's background
+    // work is never the session `--resume` reopens.
+    let items = page
+        .get("items")
         .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    runner::fold_session_rows(items)
         .into_iter()
-        .flatten()
-        .find_map(|run| {
-            run.get("session_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        })
+        .next()
+        .map(|row| row.id)
         .ok_or_else(|| "the gateway holds no conversation to resume yet".to_string())
 }
 

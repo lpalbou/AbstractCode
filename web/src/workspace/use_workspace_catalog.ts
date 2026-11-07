@@ -12,6 +12,7 @@ import {
   normalizeWorkspacePolicy,
   normalizeToolCatalog,
   normalizeSessionSummaries,
+  withoutNotesSessions,
   type WorkflowDefinition,
   type WorkspacePolicy,
   type ToolSpec,
@@ -46,6 +47,11 @@ type CatalogState = {
   policy: WorkspacePolicy | null;
   tools: ToolSpec[];
   sessions: SessionSummary[];
+  /**
+   * AbstractNote's sessions in the same runs page (`notes_work.ts`): never listed, kept only so a
+   * link naming one opens it (read-only) on its latest turn.
+   */
+  notesSessions: SessionSummary[];
   sessionActivity: Record<string, SessionActivity>;
   capabilities: Record<string, any>;
   capabilitiesLoading: boolean;
@@ -81,6 +87,7 @@ const empty: CatalogState = {
   policy: null,
   tools: [],
   sessions: [],
+  notesSessions: [],
   sessionActivity: {},
   capabilities: {},
   capabilitiesLoading: true,
@@ -179,7 +186,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         ...s,
         loading: false,
         sessions: page.sessions,
-        sessionActivity: sessionActivityFromRuns(runs),
+        notesSessions: normalizeSessionSummaries(runs, {}, { purpose: "notes" }),
+        sessionActivity: sessionActivityFromRuns(withoutNotesSessions(runs)),
         sessionsLoaded: true,
         hasMore: page.hasMore,
         archivedSessions: archivedSessionCount(runs),
@@ -266,7 +274,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       policy: value(1) ? normalizeWorkspacePolicy(value(1)) : null,
       tools: normalizeToolCatalog(value(2)),
       sessions: listCurrent && value(3) ? page.sessions : previous.sessions,
-      sessionActivity: listCurrent && value(3) ? sessionActivityFromRuns(value(3)) : previous.sessionActivity,
+      notesSessions: listCurrent && value(3) ? normalizeSessionSummaries(value(3), {}, { purpose: "notes" }) : previous.notesSessions,
+      sessionActivity: listCurrent && value(3) ? sessionActivityFromRuns(withoutNotesSessions(value(3))) : previous.sessionActivity,
       sessionsLoaded: previous.sessionsLoaded || Boolean(listCurrent && value(3)),
       capabilities: capabilityContracts(value(4)),
       capabilitiesLoading: false,

@@ -48,6 +48,7 @@ import {
   type TriggerSpec,
 } from "@abstractframework/ui-kit";
 
+import { isNotesAutomation } from "./notes_work";
 import { withServedSummaries } from "./served_summary";
 import { csrfHeaders, gatewayRequest } from "./transport";
 import { CODE_AGENT_INTERFACE, GATEWAY_DEFAULT } from "./workflow_selection";
@@ -312,22 +313,44 @@ export class AutomationsController {
     return (await this.listPages(status)).items;
   }
 
+  /**
+   * Every page of one listing, without AbstractNote's own automations ("Process my notes",
+   * "Reflect on my notes", "Consolidate my notes": Notes' background work, `notes_work.ts`).
+   * The served paused count is lowered by the Notes automations the listing held paused, so the
+   * `Paused · N` footer counts the rows it folds.
+   */
   private async listPages(status?: "archived"): Promise<{ items: AutomationSummary[]; archivedCount: number; pausedCount: number | null }> {
     const out: AutomationSummary[] = [];
     let cursor: string | undefined;
     let archivedCount = 0;
     let pausedCount: number | null = null;
+    let notesPaused = 0;
     for (let guard = 0; guard < 200; guard += 1) {
       const page = await this.client.listAutomations({ ...(status ? { status } : {}), ...(cursor ? { cursor } : {}), limit: AUTOMATIONS_PAGE_LIMIT });
       if (!cursor) {
         archivedCount = archivedAutomationCount(page);
         pausedCount = pausedAutomationCount(page);
       }
-      out.push(...page.items);
-      if (!page.next_cursor) return { items: out, archivedCount, pausedCount };
+      for (const item of page.items) {
+        if (!isNotesAutomation(item)) out.push(item);
+        else if (item.status === "paused") notesPaused += 1;
+      }
+      if (!page.next_cursor)
+        return { items: out, archivedCount, pausedCount: pausedCount === null ? null : Math.max(0, pausedCount - notesPaused) };
       cursor = page.next_cursor;
     }
     throw new Error("GET /api/gateway/automations kept returning next_cursor after 200 pages.");
+  }
+
+  /**
+   * The `Archived · N` count without Notes' automations. The gateway counts every archived
+   * automation and lists them only when asked, so when it counts any, the archived listing is read
+   * (the same pages the footer shows) and counted here; it is kept when the footer is open.
+   */
+  private async archivedWithoutNotes(servedCount: number): Promise<{ count: number; items: AutomationSummary[] | null }> {
+    if (servedCount <= 0) return { count: 0, items: null };
+    const { items } = await this.listPages("archived");
+    return { count: items.length, items };
   }
 
   /** The `Archived · N` footer opened: list the archived automations (re-read on every refresh from then on). */
@@ -360,13 +383,30 @@ export class AutomationsController {
     const seq = ++this.listSeq;
     this.set({ loading: true });
     try {
-      const { items, archivedCount, pausedCount } = await this.listPages();
+      const { items, archivedCount: servedArchived, pausedCount } = await this.listPages();
       void this.loadEmailStatus();
+      let archived: { count: number; items: AutomationSummary[] | null };
+      let archivedError: ApiError | null = null;
+      try {
+        archived = await this.archivedWithoutNotes(servedArchived);
+      } catch (e) {
+        // The list itself loaded: show it, with the archived read's error and the served count.
+        archived = { count: servedArchived, items: this.state.archived };
+        archivedError = toApiError(e);
+      }
       if (seq !== this.listSeq) return;
       const detail = this.state.detail;
       const fresh = detail ? items.find((s) => s.automation_id === detail.automationId) : undefined;
-      this.set({ items, archivedCount, pausedCount, loaded: true, loading: false, listError: null, ...(detail && fresh ? { detail: { ...detail, summary: fresh } } : {}) });
-      if (this.state.archived !== null) void this.loadArchived();
+      this.set({
+        items,
+        archivedCount: archived.count,
+        pausedCount,
+        loaded: true,
+        loading: false,
+        listError: archivedError,
+        ...(this.state.archived !== null ? { archived: archived.items ?? [] } : {}),
+        ...(detail && fresh ? { detail: { ...detail, summary: fresh } } : {}),
+      });
       if (detail) await this.reloadDetail(detail.automationId);
     } catch (e) {
       if (seq !== this.listSeq) return;
