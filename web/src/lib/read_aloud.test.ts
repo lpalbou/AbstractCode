@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { READ_ALOUD_INITIAL, readAloudStep } from "./read_aloud";
+import { READ_ALOUD_INITIAL, readAloudStep } from "@abstractframework/panel-chat";
 import { codeReadAloudInput } from "../workspace/read_aloud_input";
 
 /** The operator's case (2026-10-29), through Code's own wiring: read aloud on, a session with

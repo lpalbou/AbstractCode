@@ -138,7 +138,7 @@ import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
 import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
-import { READ_ALOUD_INITIAL, readAloudStep } from "../lib/read_aloud";
+import { READ_ALOUD_INITIAL, readAloudStep } from "@abstractframework/panel-chat";
 import { codeReadAloudInput } from "./read_aloud_input";
 import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
 import {

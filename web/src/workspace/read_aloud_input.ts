@@ -1,4 +1,4 @@
-import { readAloudPhase, type ReadAloudInput, type ReadAloudReply } from "../lib/read_aloud";
+import { readAloudPhase, type ReadAloudInput, type ReadAloudReply } from "@abstractframework/panel-chat";
 
 /**
  * What Code's conversation tells the read-aloud rule: its scope (principal + session), the phase
