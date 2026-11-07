@@ -16,7 +16,7 @@ describe("chat tool policy", () => {
   });
 
   it("binds the kit client to this conversation only when supported; a failed read is said", () => {
-    expect(appSource).toMatch(/sessionPolicyCapability\?\.supported === true && session\.sessionId\s*\?\s*createSessionToolPolicyClient\(/);
+    expect(appSource).toMatch(/sessionPolicyCapability\?\.supported === true && session\.sessionId\s*\?\s*createCodeSessionPolicyClient\(session\.sessionId, sessionPolicyCapability\)/);
     expect(appSource).toContain("controller.setSessionToolPolicyClient(null, { reason: catalog.capabilitiesError })");
     expect(appSource).toMatch(/sessionPolicy: true,/);
   });

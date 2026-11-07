@@ -4512,8 +4512,9 @@ links, files and structured results like the conversation.
 preserves the current draft and attachments.
 
 Permission requests explain the action, its destinations and the assistant’s stated
-reason, with labeled Deny/Allow once icons. “Review details” opens Conversation mode
-for technical arguments and broader permission choices. A reason is shown only when
+reason, with the same three labeled choices as the Conversation view: Deny, Allow (that
+tool, for the rest of this conversation) and Allow All (every tool, for the rest of this
+conversation). “Review details” opens Conversation mode for the technical arguments. A reason is shown only when
 the backend attached a public explanation to that exact request; older requests may
 have none. Avatar mode also uses the compact multiline composer and omits technical
 execution counters from its status strip.
@@ -4574,6 +4575,11 @@ web 0.15.4.
   session"). "Allow once", "Allow for this chat", "Allow all <toolset> tools for this chat", "Allow all enabled
   tools", "More" and the paragraphs about what the broader choices allow are gone; the card keeps its title,
   what the tool will do and **Review full tool arguments (JSON)**.
+
+### Fixed
+
+- **Allow and Allow All never hang on a gateway that does not answer.** Storing the choice for the session waits at
+  most 15 seconds; then the card says the gateway did not answer, and you can try again or Deny.
 
 ### Removed
 

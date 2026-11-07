@@ -9,9 +9,9 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkflowChat, WorkflowSessionController, presentInteraction, workflowPendingInteraction } from "@abstractframework/panel-chat";
-import { createSessionToolPolicyClient, sessionToolPolicyCapability } from "@abstractframework/ui-kit";
+import { sessionToolPolicyCapability } from "@abstractframework/ui-kit";
 import { createWorkflowTransport } from "./session_transport";
-import { gatewayRequest } from "./transport";
+import { createCodeSessionPolicyClient, SESSION_POLICY_TIMEOUT_MS } from "./session_policy_client";
 import view from "../lib/fixtures/replay_view/a_delegated_child_approval/view.json";
 
 const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
@@ -22,13 +22,15 @@ const SESSION = view.session_id as string;
 const ETAG = `"${view.cursor.token}"`;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
-function fakeGateway() {
-  const requests: { url: string; method: string; body?: string }[] = [];
+function fakeGateway(options: { hangPolicy?: boolean } = {}) {
+  const requests: { url: string; method: string; body?: string; signal?: AbortSignal | null }[] = [];
   let revision = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
     const method = init.method || "GET";
-    requests.push({ url, method, body: typeof init.body === "string" ? init.body : undefined });
+    requests.push({ url, method, body: typeof init.body === "string" ? init.body : undefined, signal: init.signal });
+    // A gateway that never answers the policy write (and ignores the abort).
+    if (options.hangPolicy && url.includes("/tool-policy")) return new Promise<Response>(() => {});
     if (url.includes(`/sessions/${SESSION}/tool-policy`)) {
       const body = typeof init.body === "string" ? JSON.parse(init.body) : {};
       revision += 1;
@@ -64,19 +66,12 @@ function fakeGateway() {
   return { requests, storage };
 }
 
-async function openApproval() {
-  const gw = fakeGateway();
+async function openApproval(options: { hangPolicy?: boolean; timeoutMs?: number } = {}) {
+  const gw = fakeGateway(options);
   const controller = new WorkflowSessionController(createWorkflowTransport({ onDeltaError: () => {} }));
-  // The session-policy client exactly as app.tsx builds it for a gateway that serves the capability.
+  // The session-policy client app.tsx injects (createCodeSessionPolicyClient, pinned in session_policy.test.ts).
   const capability = sessionToolPolicyCapability({ capabilities: { session_tool_policy: { supported: true, version: 1, methods: ["GET", "PUT", "POST", "DELETE"] } } });
-  controller.setSessionToolPolicyClient(
-    createSessionToolPolicyClient(
-      (path, init) => gatewayRequest(path, { method: init.method, ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }) }),
-      SESSION,
-      capability,
-      { client: "abstractcode-web" },
-    ),
-  );
+  controller.setSessionToolPolicyClient(createCodeSessionPolicyClient(SESSION, capability, options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}));
   await controller.load(ROOT);
   for (let i = 0; i < 20 && controller.getSnapshot().connection !== "connected"; i += 1) await tick();
   const snapshot = controller.getSnapshot();
@@ -131,6 +126,21 @@ describe("the tool permission card: Deny, Allow, Allow All, for this session onl
     expect(writes.map((r) => [r.method, JSON.parse(r.body!)])).toEqual([["POST", { approve: { all: true }, client: "panel-chat" }]]);
     expect(JSON.parse(requests.find((r) => r.url.endsWith("/commands"))!.body!)).toMatchObject({ run_id: CHILD, payload: { payload: { approved: true } } });
     expect(storage.setItem).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("a gateway that never answers the policy write: the click fails with the reason after the bound, nothing is answered, Deny still works", async () => {
+    expect(SESSION_POLICY_TIMEOUT_MS).toBe(15_000);
+    const { controller, requests, interaction } = await openApproval({ hangPolicy: true, timeoutMs: 60 });
+    const started = Date.now();
+    await expect(interaction.onApprove()).rejects.toThrow(/did not answer within/);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    const write = requests.find((r) => r.url.includes("/tool-policy"));
+    expect(write?.signal?.aborted).toBe(true);
+    expect(requests.some((r) => r.url.endsWith("/commands"))).toBe(false);
+    await expect(interaction.onApproveAll!()).rejects.toThrow(/did not answer within/);
+    await interaction.onDeny();
+    expect(JSON.parse(requests.find((r) => r.url.endsWith("/commands"))!.body!)).toMatchObject({ run_id: CHILD, payload: { payload: { approved: false } } });
     controller.dispose();
   });
 

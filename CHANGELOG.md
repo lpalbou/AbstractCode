@@ -31,6 +31,11 @@ web 0.15.4.
   tools", "More" and the paragraphs about what the broader choices allow are gone; the card keeps its title,
   what the tool will do and **Review full tool arguments (JSON)**.
 
+### Fixed
+
+- **Allow and Allow All never hang on a gateway that does not answer.** Storing the choice for the session waits at
+  most 15 seconds; then the card says the gateway did not answer, and you can try again or Deny.
+
 ### Removed
 
 - **"Allow all enabled tools" and its "Auto: every enabled tool · this browser · Revoke" line.** The card no

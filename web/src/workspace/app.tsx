@@ -10,7 +10,6 @@ import { CodeDocsAssistant } from "./app_assistant";
 import { LoadingStatus } from "./loading_status";
 import {
   automationToolSelection,
-  createSessionToolPolicyClient,
   createToolLayerStore,
   gatewayApiPath,
   hasToolChoices,
@@ -76,6 +75,7 @@ import {
   useWorkspaceCatalog,
 } from "./use_workspace_catalog";
 import { gateway, gatewayRequest, formatError, newId, csrfHeaders } from "./transport";
+import { createCodeSessionPolicyClient } from "./session_policy_client";
 import { createWorkflowTransport } from "./session_transport";
 import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
 import { AccountWorkflowDefault } from "./account_workflow_default";
@@ -447,12 +447,7 @@ export function CodeWorkspace() {
     }
     controller.setSessionToolPolicyClient(
       sessionPolicyCapability?.supported === true && session.sessionId
-        ? createSessionToolPolicyClient(
-            (path, init) => gatewayRequest(path, { method: init.method, ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }) }),
-            session.sessionId,
-            sessionPolicyCapability,
-            { client: "abstractcode-web" },
-          )
+        ? createCodeSessionPolicyClient(session.sessionId, sessionPolicyCapability)
         : null,
     );
   }, [controller, connection.connected, catalog.capabilitiesLoading, catalog.capabilitiesError, sessionPolicyCapability, session.sessionId]);
