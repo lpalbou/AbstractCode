@@ -852,8 +852,11 @@ fn the_wording_is_the_code_webs() {
     ] {
         assert!(app.contains(s), "{s:?} is not the web's wording");
     }
-    // The match rule itself: `${item.prompt || ""} ${item.sessionId}` lower-cased.
-    assert!(app.contains("`${item.prompt || \"\"} ${item.sessionId}`"));
+    // The match rule itself: `${item.prompt || ""} ${item.sessionId}` lower-cased
+    // (web 0.15.3: `searchConversations` in sidebar_cards.tsx, which app.tsx calls).
+    assert!(app.contains("searchConversations(catalog.sessions, search)"));
+    let cards = read("sidebar_cards.tsx");
+    assert!(cards.contains("`${item.prompt || \"\"} ${item.sessionId}`"));
     let header = read("automations_view.tsx");
     assert!(header.contains(
         "st.items.reduce((n, s) => n + s.attention.pending_waits + s.attention.unseen_count, 0)"
