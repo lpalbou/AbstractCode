@@ -454,7 +454,7 @@ export interface RestoredWorkflowResolution {
 /** The recorded `{scope, bundle, flow, version}` of a restored run, from its workflow selection,
  * else from its private workflow id `bundle@version:flow`. */
 function restoredIdentity(options: RestoredWorkflowOptions):
-  | { scope: WorkflowRegistryScope; bundleId: string; flowId: string; bundleVersion?: string }
+  | { scope: WorkflowRegistryScope; bundleId: string; flowId: string; fromSelection: boolean; bundleVersion?: string }
   | undefined {
   const policy = restoredWorkflowPolicy(options.inputData);
   if (policy) {
@@ -463,7 +463,7 @@ function restoredIdentity(options: RestoredWorkflowOptions):
     const flowId = text(policy.flow_id ?? policy.flowId);
     const bundleVersion = text(policy.bundle_version ?? policy.bundleVersion);
     if ((scope === "private" || scope === "tenant_catalog") && bundleId && flowId)
-      return { scope, bundleId, flowId, ...(bundleVersion ? { bundleVersion } : {}) };
+      return { scope, bundleId, flowId, fromSelection: true, ...(bundleVersion ? { bundleVersion } : {}) };
     return undefined;
   }
   const workflowId = text(options.runWorkflowId);
@@ -472,7 +472,7 @@ function restoredIdentity(options: RestoredWorkflowOptions):
   const [bundleId, bundleVersion] = workflowId.slice(0, colon).split("@");
   const flowId = workflowId.slice(colon + 1);
   if (!bundleId || !flowId) return undefined;
-  return { scope: "private", bundleId, flowId, ...(bundleVersion ? { bundleVersion } : {}) };
+  return { scope: "private", bundleId, flowId, fromSelection: false, ...(bundleVersion ? { bundleVersion } : {}) };
 }
 
 /**
@@ -490,12 +490,13 @@ export function resolveConversationWorkflow(
   if (exact) return { workflow: exact };
   const identity = restoredIdentity(options);
   if (!identity) return {};
-  const same = workflows.filter(
-    (workflow) =>
-      (workflow.registryScope ?? "private") === identity.scope &&
-      workflow.bundleId === identity.bundleId &&
-      workflow.flowId === identity.flowId,
+  const sameFlow = workflows.filter(
+    (workflow) => workflow.bundleId === identity.bundleId && workflow.flowId === identity.flowId,
   );
+  // The same registry first; the other one (a private copy now published to the shared catalog,
+  // or the reverse) only when the recorded selection names its registry and nothing is left there.
+  const sameScope = sameFlow.filter((workflow) => (workflow.registryScope ?? "private") === identity.scope);
+  const same = sameScope.length ? sameScope : identity.fromSelection ? sameFlow : [];
   if (!same.length) return {};
   const loaded = [...same].sort(
     (a, b) =>
@@ -513,7 +514,7 @@ export function resolveConversationWorkflow(
 /** Said beside the picker when a conversation continues on another version of its workflow. */
 export function replacedVersionNote(workflow: WorkflowDefinition, replaced: RestoredWorkflowResolution["replaced"]): string {
   if (!replaced) return "";
-  return `This conversation started with an earlier version of ${workflow.name}, which is no longer available. It continues with the current version, so its next answers may differ.`;
+  return `This conversation started with a version of ${workflow.name} that is no longer available. It continues with the version available now, so its next answers may differ.`;
 }
 
 export function normalizeWorkspacePolicy(value: unknown): WorkspacePolicy {

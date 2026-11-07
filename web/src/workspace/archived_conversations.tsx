@@ -40,6 +40,28 @@ export function archivedSessionCount(runs: unknown): number {
   return typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+/**
+ * The `Archived · N` count without AbstractNote's sessions (`notes_work.ts`): the gateway counts
+ * every archived session and lists them only when asked, so when it counts any, the archived
+ * listing (the one the footer opens) is read and its Notes sessions are taken off the count. A
+ * failed read keeps the gateway's count.
+ */
+export async function archivedConversationCount(
+  runs: unknown,
+  request: (path: string, init?: { signal?: AbortSignal }) => Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<number> {
+  const served = archivedSessionCount(runs);
+  if (!served) return 0;
+  try {
+    const archived = await request(gatewayApiPath(ARCHIVED_RUNS_PATH), { signal });
+    return Math.max(0, served - normalizeSessionSummaries(archived, {}, { purpose: "notes" }).length);
+  } catch (reason) {
+    if (signal?.aborted) throw reason;
+    return served;
+  }
+}
+
 export function ArchivedConversations(props: {
   /** Fetch only while the footer is open and connected. */
   enabled: boolean;

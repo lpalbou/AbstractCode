@@ -27,14 +27,17 @@ Same dependencies and gateways as web 0.15.2. No gateway change is needed.
   captured from the watch or the web, showing as "Conversation note-wat…" with two tools) are no
   longer in **Conversations**, and search no longer finds them. Notes' automations ("Process my
   notes", "Reflect on my notes", "Consolidate my notes") are no longer in **Automations**, and the
-  `Paused · N` and `Archived · N` counts no longer count them. Opened from a link, such a session
-  can be read, with a note that it is part of Notes' background work, but it cannot be continued
-  from AbstractCode. The rule is what the session runs (any AbstractNote workflow), never which
-  app created it.
+  `Paused · N` and `Archived · N` counts (of both lists) no longer count them. Opened from a link,
+  such a session can be read, with a note that it is part of Notes' background work, but it cannot
+  be continued from AbstractCode. The rule is what the session's first turn runs (any AbstractNote
+  workflow), never which app created it, so a conversation stays a conversation whatever a later
+  turn runs. For the same reason, AbstractNote's "Ask your notes" is no longer offered in the
+  workflow picker: a conversation started with it would have left the list after its first answer.
 - **An older conversation continues when its workflow was updated.** A conversation recorded on a
   version that is no longer available showed "This conversation's exact workflow version is
   unavailable…" and refused to send. It now continues with the available version of the same
-  workflow, and a line above it says so in plain words. The refusal remains only when the workflow
+  workflow (from the shared catalog when only that copy is left), and a line above it says so in
+  plain words until you choose another workflow. The refusal remains only when the workflow
   itself is gone, and it now says so plainly: "The workflow this conversation used is no longer
   available, so it cannot be continued here. Start a new conversation to keep working."
 - **Conversations are never named by their session ID.** A conversation whose first message is not

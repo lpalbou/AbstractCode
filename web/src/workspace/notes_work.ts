@@ -54,6 +54,16 @@ export function isNotesRunInput(inputData: unknown): boolean {
   return bundle === NOTES_BUNDLE_ID;
 }
 
+/**
+ * The header picker's list (`GET /bundles?executable_for=abstractcode.agent.v1`) without
+ * AbstractNote's flows. Notes' "Ask your notes" declares the chat contract, but a session whose
+ * root workflow is Notes' is Notes' work (left out of Conversations and read-only here), so Code
+ * does not start one: a conversation started with it would leave the list after its first turn.
+ */
+export function withoutNotesEntries<T extends { entries: Array<{ bundleId?: string }> }>(workflows: T): T {
+  return { ...workflows, entries: workflows.entries.filter((entry) => entry.bundleId !== NOTES_BUNDLE_ID) };
+}
+
 /** An automation of `GET /automations` runs an AbstractNote workflow. */
 export function isNotesAutomation(summary: unknown): boolean {
   const target = record(record(summary)?.target);

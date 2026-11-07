@@ -12,7 +12,8 @@ import { normalizeSessionSummaries, normalizeWorkflowCatalog, resolveConversatio
 import { fetchConversationRuns } from "./conversation_paging";
 import { WORKFLOW_GONE, conversationRestore } from "./conversation_restore";
 import { AutomationsController, automationSections } from "./automations";
-import { NOTES_SESSION_NOTICE, isNotesAutomation, isNotesRun, isNotesRunInput, workflowBundleId } from "./notes_work";
+import { NOTES_SESSION_NOTICE, isNotesAutomation, isNotesRun, isNotesRunInput, withoutNotesEntries, workflowBundleId } from "./notes_work";
+import { archivedConversationCount } from "./archived_conversations";
 import { ConversationCard, UNTITLED_CONVERSATION, conversationTitle, searchConversations } from "./sidebar_cards";
 
 const F = JSON.parse(readFileSync(join(__dirname, "fixtures/notes_background.json"), "utf8"));
@@ -102,6 +103,7 @@ describe("restoring an opened conversation", () => {
       restoredInputs: F.input_data[r.run_id],
       run: r,
       workflows: workflows(),
+      conversationSessions: [],
       notesSessions: [],
       catalogLoading: false,
       ...extra,
@@ -113,7 +115,7 @@ describe("restoring an opened conversation", () => {
     expect(r.error).toBe("");
     expect(r.workflow?.workflowId).toBe("basic-agent@0.0.5:81795ea9");
     expect(r.versionNote).toBe(
-      "This conversation started with an earlier version of Basic agent, which is no longer available. It continues with the current version, so its next answers may differ.",
+      "This conversation started with a version of Basic agent that is no longer available. It continues with the version available now, so its next answers may differ.",
     );
     const old = run(OLD_VERSION_SESSION);
     const resolution = resolveConversationWorkflow(workflows(), { inputData: F.input_data[old.run_id], runWorkflowId: old.workflow_id });
@@ -140,9 +142,50 @@ describe("restoring an opened conversation", () => {
     expect(viaRun).toMatchObject({ notesSession: true, readOnlyNotice: NOTES_SESSION_NOTICE, error: "", versionNote: "" });
     expect(viaRun.workflow).toBeUndefined();
     // A link naming only the session: known from the runs page before its run loads.
-    const viaList = conversationRestore({ sessionId: WEB_CAPTURE_SESSION, runId: "", restoredInputs: null, run: null, workflows: workflows(), notesSessions: [{ sessionId: WEB_CAPTURE_SESSION }], catalogLoading: false });
+    const viaList = conversationRestore({ sessionId: WEB_CAPTURE_SESSION, runId: "", restoredInputs: null, run: null, workflows: workflows(), conversationSessions: [], notesSessions: [{ sessionId: WEB_CAPTURE_SESSION }], catalogLoading: false });
     expect(viaList.readOnlyNotice).toBe(NOTES_SESSION_NOTICE);
     expect(NOTES_SESSION_NOTICE).not.toMatch(/session|workflow|bundle|gateway/i);
+  });
+
+  it("a listed conversation whose LATEST turn ran a Notes flow stays continuable (the root decides)", () => {
+    const code = run(CODE_SESSION);
+    const recallRun = { ...code, run_id: "recall-turn", workflow_id: "abstractnote@0.3.1:note-recall" };
+    const recallInput = { ...F.input_data[code.run_id], run_id: "recall-turn", workflow_id: "abstractnote@0.3.1:note-recall", bundle_id: "abstractnote@0.3.1" };
+    const listed = conversationRestore({
+      sessionId: CODE_SESSION, runId: "recall-turn", restoredInputs: recallInput, run: recallRun, workflows: workflows(),
+      conversationSessions: [{ sessionId: CODE_SESSION }], notesSessions: [], catalogLoading: false,
+    });
+    expect(listed.notesSession).toBe(false);
+    expect(listed.readOnlyNotice).toBe("");
+  });
+
+  it("falls back across registries only for a recorded selection, never for a bare run id", () => {
+    const shared = workflows().map((w) => ({ ...w, id: w.id.replace("private:", "tenant_catalog:"), registryScope: "tenant_catalog" as const }));
+    const old = run(OLD_VERSION_SESSION);
+    const input = F.input_data[old.run_id];
+    const selection = { ...input, workflow_selection: input.input_data.workflow_selection };
+    expect(resolveConversationWorkflow(shared, { inputData: selection }).workflow?.registryScope).toBe("tenant_catalog");
+    expect(resolveConversationWorkflow(shared, { runWorkflowId: old.workflow_id }).workflow).toBeUndefined();
+  });
+});
+
+describe("Code does not start Notes' work", () => {
+  it("the workflow picker leaves Notes' flows out (\"Ask your notes\" serves the chat contract)", () => {
+    const listed = { interfaceId: "abstractcode.agent.v1", gatewayDefault: { status: "unavailable" as const, reason: "x" }, entries: [{ bundleId: "abstractnote", flowId: "note-recall" }, { bundleId: "basic-agent", flowId: "81795ea9" }] };
+    expect(withoutNotesEntries(listed).entries.map((e) => e.bundleId)).toEqual(["basic-agent"]);
+  });
+});
+
+describe("Conversations Archived · N", () => {
+  it("does not count Notes' archived sessions; nothing archived means no extra read", async () => {
+    const archived = { ...F.runs, items: F.runs.items.filter((r: any) => r.session_kind === "chat") };
+    const request = vi.fn(async () => archived);
+    // Served 5: the archived listing holds 2 Notes sessions (watch and web captures).
+    expect(await archivedConversationCount({ ...F.runs, archived_sessions: 5 }, request)).toBe(3);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(await archivedConversationCount({ ...F.runs, archived_sessions: 0 }, request)).toBe(0);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(await archivedConversationCount({ ...F.runs, archived_sessions: 4 }, vi.fn(async () => Promise.reject(new Error("down"))))).toBe(4);
   });
 });
 

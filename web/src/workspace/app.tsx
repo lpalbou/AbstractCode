@@ -553,10 +553,11 @@ export function CodeWorkspace() {
         restoredInputs,
         run: snapshot.run,
         workflows: catalog.workflows,
+        conversationSessions: catalog.sessions,
         notesSessions: catalog.notesSessions,
         catalogLoading: catalog.loading,
       }),
-    [session.sessionId, session.runId, restoredInputs, snapshot.run, catalog.workflows, catalog.notesSessions, catalog.loading],
+    [session.sessionId, session.runId, restoredInputs, snapshot.run, catalog.workflows, catalog.sessions, catalog.notesSessions, catalog.loading],
   );
   const notesSession = restore.notesSession;
   const restoredWorkflow = restore.workflow;
@@ -1879,7 +1880,7 @@ export function CodeWorkspace() {
                 </details>
               </div>
             ) : null}
-            {restoredVersionNote ? (
+            {restoredVersionNote && selection === restoredWorkflow?.id ? (
               <div className="code-notice" role="status" data-field="version-note">
                 {restoredVersionNote}
               </div>

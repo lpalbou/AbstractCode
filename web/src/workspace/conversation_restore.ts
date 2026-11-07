@@ -35,13 +35,20 @@ export function conversationRestore(options: {
   /** The open run's record (`snapshot.run`), when loaded. */
   run: { workflow_id?: unknown } | null | undefined;
   workflows: readonly WorkflowDefinition[];
-  /** Notes' sessions of the runs page (`catalog.notesSessions`). */
+  /** The conversations of the runs page (`catalog.sessions`): their ROOT workflow is not Notes'. */
+  conversationSessions: readonly Pick<SessionSummary, "sessionId">[];
+  /** Notes' sessions of the runs page (`catalog.notesSessions`): their ROOT workflow is Notes'. */
   notesSessions: readonly Pick<SessionSummary, "sessionId">[];
   catalogLoading: boolean;
 }): ConversationRestore {
+  // The rule is the session's ROOT workflow, which the runs page decides for a listed session: a
+  // conversation whose later turn ran a Notes flow stays a conversation. Only a session the page
+  // does not hold (an old link) is judged by the run it opens on.
+  const listedConversation = options.conversationSessions.some((item) => item.sessionId === options.sessionId);
   const notesSession =
-    options.notesSessions.some((item) => item.sessionId === options.sessionId) ||
-    (Boolean(options.runId) && (isNotesRunInput(options.restoredInputs) || isNotesRun(options.run)));
+    !listedConversation &&
+    (options.notesSessions.some((item) => item.sessionId === options.sessionId) ||
+      (Boolean(options.runId) && (isNotesRunInput(options.restoredInputs) || isNotesRun(options.run))));
   if (notesSession)
     return { notesSession, readOnlyNotice: NOTES_SESSION_NOTICE, versionNote: "", error: "" };
   const resolution = resolveConversationWorkflow(options.workflows, {

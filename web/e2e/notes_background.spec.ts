@@ -102,7 +102,7 @@ test("a conversation on a retired version continues on the loaded one and says s
   const old = runOf("acode-4b0e9d7c2f1a");
   await signIn(page, `#session=${old.session_id}&run=${old.run_id}`);
   await expect(page.locator('[data-field="version-note"]')).toHaveText(
-    "This conversation started with an earlier version of Basic agent, which is no longer available. It continues with the current version, so its next answers may differ.",
+    "This conversation started with a version of Basic agent that is no longer available. It continues with the version available now, so its next answers may differ.",
   );
   await expect(page.getByText(/exact workflow version is unavailable/)).toHaveCount(0);
   await expect(page.locator(".code-alert")).toHaveCount(0);

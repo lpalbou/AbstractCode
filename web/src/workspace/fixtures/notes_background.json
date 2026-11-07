@@ -1,5 +1,5 @@
 {
- "_comment": "Real-shaped records read from a live AbstractGateway 0.20.2 on 2026-11-07 (GET only), sanitized: a Notes drain occurrence, a Notes capture session (abstractnote@0.3.0, two turns) from the watch and one from the web, a Code conversation on the loaded basic-agent 0.0.5, one recorded on basic-agent 0.0.1 (no longer loaded), and one whose bundle is gone; Notes' automations next to a person's. `views` are GET /runs/{id}/view (replay_view_v1) answers, built from a live capture view (texts replaced). `input_schemas` are GET /bundles/{bundle}/flows/{flow}/input_schema answers.",
+ "_comment": "Real-shaped records read from a live AbstractGateway 0.20.2 on 2026-11-07 (GET only), sanitized (texts and paths replaced): a Notes drain occurrence, a Notes capture session (abstractnote@0.3.0, two turns) from the watch and one from the web, a Code conversation on the loaded basic-agent 0.0.5, one recorded on basic-agent 0.0.1 (no longer loaded), and one whose bundle is gone; Notes' automations next to a person's. `views` are GET /runs/{id}/view (replay_view_v1) answers, built from a live capture view (texts replaced). `input_schemas` are GET /bundles/{bundle}/flows/{flow}/input_schema answers.",
  "runs": {
   "items": [
    {
@@ -434,7 +434,7 @@
    ],
    "input_data": {
     "context": {
-     "task": "can you couple a rtx 5070ti with a rtx 5060ti for AI inference on windows/linux, and if so, which are the bset setup",
+     "task": "Fix the failing parser test in src/parse.ts",
      "messages": []
     },
     "prompt": "Fix the failing parser test in src/parse.ts",
@@ -510,7 +510,7 @@
    ],
    "input_data": {
     "context": {
-     "task": "can you couple a rtx 5070ti with a rtx 5060ti for AI inference on windows/linux, and if so, which are the bset setup",
+     "task": "Explain the retry loop in the uploader",
      "messages": []
     },
     "prompt": "Explain the retry loop in the uploader",
@@ -586,7 +586,7 @@
    ],
    "input_data": {
     "context": {
-     "task": "can you couple a rtx 5070ti with a rtx 5060ti for AI inference on windows/linux, and if so, which are the bset setup",
+     "task": "Draft the release notes",
      "messages": []
     },
     "prompt": "Draft the release notes",
