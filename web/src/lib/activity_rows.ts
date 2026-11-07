@@ -59,6 +59,8 @@ export type RecordDescription = {
   kind: ActivityKind;
   title: string;
   detail: string;
+  /** `detail` is the run's whole answer, Markdown, uncut (see `ActivityRow.detailMarkdown`). */
+  detailMarkdown?: boolean;
   /** `abstract.progress` — feeds progress UI, never a row of its own. */
   isProgress: boolean;
   /** `abstract.status` — the status-bar text, never a row of its own. */
@@ -77,6 +79,12 @@ export type ActivityRow = {
   kind: ActivityKind;
   title: string;
   detail: string;
+  /**
+   * True when `detail` is a run's final answer: the model's whole text, Markdown, never cut
+   * (the panel renders it with the chat's Markdown, folded to a few lines). Every other detail
+   * is a short plain line.
+   */
+  detailMarkdown?: boolean;
   /** running | waiting | completed | failed */
   status: string;
   statusLabel: string;
@@ -669,14 +677,12 @@ export function describe_record(record: unknown): RecordDescription {
       const answer = [output.answer, output.response, output.result].find(
         (value) => typeof value === "string" && value.trim(),
       );
+      if (!outcome && typeof answer === "string")
+        return { kind: "run", title: "run finished", detail: answer, detailMarkdown: true, ...visible };
       return {
         kind: "run",
         title: "run finished",
-        detail:
-          outcome ||
-          (typeof answer === "string"
-            ? one_line(answer, 110)
-            : preview_value(output, 110)),
+        detail: outcome || preview_value(output, 110),
         ...visible,
       };
     }
@@ -945,6 +951,7 @@ export function activity_rows(entries: readonly ActivityEntry[], rootRunId?: str
           ? "subflow finished"
           : description.title,
       detail: description.detail,
+      ...(description.detailMarkdown ? { detailMarkdown: true } : {}),
       status: state.status,
       statusLabel: state.statusLabel,
       nodeId: String(merged.node_id || ""),
@@ -1181,6 +1188,7 @@ export function activity_rows_from_view(
         kind: description.kind,
         title: description.title,
         detail: description.detail,
+        ...(description.detailMarkdown ? { detailMarkdown: true } : {}),
         status: state.status,
         statusLabel: state.statusLabel,
         nodeId: String(activity.node_id || ""),
@@ -1213,7 +1221,8 @@ export function activity_rows_from_view(
         cursor: Number(run.last_seq || 0),
         kind: "run",
         title: runId === root ? "run finished" : "subflow finished",
-        detail: text ? one_line(text, 110) : "",
+        // The whole answer, Markdown, uncut: the panel folds it, it is never truncated here.
+        ...(text.trim() ? { detail: text, detailMarkdown: true } : { detail: "" }),
         status: "completed",
         statusLabel: "completed",
         nodeId: "",

@@ -1,9 +1,10 @@
 import { gatewayApiPath, formatExactTime, formatRelativeTime, fileViewerKind, fileViewerNeedsText, formatFileSize } from "@abstractframework/ui-kit";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Icon, type IconName } from "@abstractframework/ui-kit";
 import {
   FileViewer,
   JsonViewer,
+  Markdown,
   ToolActivityGroup,
   PREVIEW_TEXT_LIMIT,
   partialPreviewNote,
@@ -199,15 +200,15 @@ const ACTIVITY_ICONS: Record<ActivityKind, IconName> = {
 function ActivityRowView({ row }: { row: ActivityRow }) {
   const merged = row.merged as Record<string, any>;
   const effect = (merged.effect || {}) as Record<string, any>;
-  return (
-    <details className={`code-activity-row code-activity-row--${row.kind}`}>
+  const disclosure = (className: string) => (
+    <details className={className}>
       <summary>
         <span className="code-activity-icon" aria-hidden="true">
           <Icon name={ACTIVITY_ICONS[row.kind]} size={14} />
         </span>
         <span className="code-activity-text">
           <span className="code-activity-title">{row.title}</span>
-          {row.detail ? <span className="code-activity-sub">{row.detail}</span> : null}
+          {row.detail && !row.detailMarkdown ? <span className="code-activity-sub">{row.detail}</span> : null}
           {row.progress ? <span className="code-activity-progress">{row.progress}</span> : null}
         </span>
         <span className={`code-step-dot is-${row.status}`} />
@@ -231,6 +232,83 @@ function ActivityRowView({ row }: { row: ActivityRow }) {
         />
       </div>
     </details>
+  );
+  const rowClass = `code-activity-row code-activity-row--${row.kind}`;
+  if (!row.detailMarkdown || !row.detail) return disclosure(rowClass);
+  // The answer sits outside the <summary>: its links and its Show more button are controls of
+  // their own, never nested inside the row's disclosure button.
+  return (
+    <div className={`${rowClass} code-activity-row--answer`}>
+      {disclosure("code-activity-disclosure")}
+      <ActivityAnswer text={row.detail} />
+    </div>
+  );
+}
+
+/**
+ * A run's final answer in its Activity row: the whole text, rendered with the chat's Markdown
+ * (React elements, no raw HTML; remote images stay links), folded to a few lines. "Show more"
+ * appears only when the text is taller than the fold.
+ */
+export function ActivityAnswer({ text }: { text: string }) {
+  const id = useId();
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || expanded) return;
+    const measure = () => setOverflows(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, expanded]);
+  return (
+    <ActivityAnswerView
+      id={id}
+      bodyRef={bodyRef}
+      text={text}
+      expanded={expanded}
+      overflows={overflows}
+      onToggle={() => setExpanded((value) => !value)}
+    />
+  );
+}
+
+/** The answer's markup for a given fold state (`ActivityAnswer` owns the state). */
+export function ActivityAnswerView({ id, bodyRef, text, expanded, overflows, onToggle }: {
+  id: string;
+  bodyRef?: React.Ref<HTMLDivElement>;
+  text: string;
+  expanded: boolean;
+  /** The text is taller than the fold: the toggle is offered. */
+  overflows: boolean;
+  onToggle: () => void;
+}) {
+  const folded = !expanded && overflows;
+  return (
+    <div className="code-activity-answer">
+      <div
+        id={id}
+        ref={bodyRef}
+        className={`code-activity-answer-body${expanded ? " is-expanded" : ""}${folded ? " is-folded" : ""}`}
+      >
+        <Markdown text={text} images="link" />
+      </div>
+      {overflows ? (
+        <button
+          type="button"
+          className="code-text-button code-activity-answer-toggle"
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={onToggle}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

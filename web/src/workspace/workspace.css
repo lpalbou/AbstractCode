@@ -1123,6 +1123,44 @@ select option {
   padding-bottom: 12px;
   overflow: auto;
 }
+/* A run's final answer (Markdown, whole text): folded to about four lines with a fade,
+   "Show more" unfolds it. Indented under the row title (icon 14px + gap 7px). */
+.code-activity-row--answer .code-activity-disclosure > summary {
+  padding-bottom: 4px;
+}
+.code-activity-answer {
+  padding: 0 0 10px 21px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.code-activity-answer-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.code-activity-answer-body:not(.is-expanded) {
+  max-height: 5.8em;
+  overflow: hidden;
+}
+.code-activity-answer-body.is-folded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.code-activity-answer .pc-md {
+  font-size: inherit;
+  line-height: 1.45;
+}
+.code-activity-answer .pc-md > :first-child {
+  margin-top: 0;
+}
+.code-activity-answer .pc-md > :last-child {
+  margin-bottom: 0;
+}
+.code-activity-answer .pc-md strong {
+  color: var(--text-primary);
+}
+.code-activity-answer-toggle {
+  padding: 4px 0 0;
+}
 .code-artifact {
   display: flex;
   align-items: center;
