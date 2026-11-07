@@ -2671,18 +2671,6 @@ function submitWorkflowInteraction(interaction, submission) {
       return interaction.onDeny();
     if (submission.kind === "approve-all" && interaction.onApproveAll)
       return interaction.onApproveAll();
-    if (submission.kind === "approve-session" && interaction.onApproveForSession)
-      return interaction.onApproveForSession();
-    if (submission.kind === "deny-chat") {
-      const option = interaction.denyOptions?.find((item) => item.key === submission.key);
-      if (option)
-        return option.onDeny();
-    }
-    if (submission.kind === "approve-kind") {
-      const entry = interaction.approveKinds?.find((item) => item.kind === submission.toolset);
-      if (entry)
-        return entry.onApprove();
-    }
     throw new Error("Invalid submission for tool-approval interaction");
   }
   if (submission.kind === "event")
@@ -2693,25 +2681,14 @@ function submitWorkflowInteraction(interaction, submission) {
 // dist/workflow_interaction.js
 var WORKFLOW_INTERACTION_LABELS = {
   deny: "Deny",
-  allowOnce: "Allow once",
-  allowForChat: "Allow for this chat",
-  allowAll: "Allow all enabled tools",
-  /** Approve one toolset (a `GET discovery/tools` row's `toolset`) for the conversation. */
-  allowKindForChat: (toolset) => `Allow all ${toolset} tools for this chat`,
-  /** The labeled line when the gateway cannot store conversation policies (no silent hedge). */
-  /** The local, run-scoped grant (no gateway chat policy): says what it does. */
-  allowForRun: "Allow for this run",
-  localChatPolicyNote: "Allowed for this chat in this browser only \u2014 the gateway cannot store chat policies.",
-  localRunPolicyNote: "Allowed until this run ends, in this browser only \u2014 the gateway cannot store chat policies.",
-  /** Deny for the chat (session policy, gateway mode); offered under "More". */
-  denyToolForChat: (tool) => `Always deny ${tool} in this chat`,
-  denyKindForChat: (toolset) => `Always deny ${toolset} tools in this chat`,
-  /** What a deny reaches, stated before the click and in its confirmation (contract §4.3). */
-  denyForChatNote: "Always deny applies to every run of this chat, automations and runs that read other people's text included, until the policy is reset; a request shown before it is refused even if approved later.",
-  /** No `scope` was served: said so, never composed. */
-  noScopeNote: "The gateway did not say where this grant applies.",
-  /** The capability read failed: no chat grant is offered. */
-  unavailablePolicyNote: (reason) => `Allow for this chat is unavailable: ${reason || "the gateway's capabilities could not be read."} Allow once still works.`,
+  allow: "Allow",
+  allowAll: "Allow All",
+  /** Tooltips of the two allow buttons: what each one reaches. */
+  allowTitle: (tools) => `Allow ${tools} for the rest of this session`,
+  allowAllTitle: "Allow every tool for the rest of this session",
+  /** No session grant here (the host did not ask for one, or the gateway cannot keep it). */
+  allowThisRequestNote: "Allow covers this request only.",
+  noSessionGrantNote: "This gateway cannot keep a choice for the session, so Allow covers this request only.",
   decideLater: "Decide later",
   submit: "Submit",
   skip: "Continue without answering",
@@ -2831,16 +2808,9 @@ function WorkflowInteractionPanel(props) {
   } else if (interaction.kind === "tool-approval" && conversation) {
     const request = interaction.publicRequest;
     const needsReview = !request || request.reviewRequired;
-    body = _jsxs13("div", { className: "pc-workflow-interaction__body pc-public-approval", children: [_jsxs13("div", { className: "pc-public-approval__context", children: [_jsxs13("div", { className: "pc-public-approval__reason", children: [_jsx16("p", { className: "pc-public-approval__reason-label", children: "Why I\u2019m asking" }), _jsx16("p", { children: request?.explanation?.text || "The reason for this request isn\u2019t available here." })] }), request?.actions.length ? _jsx16("ul", { className: "pc-public-approval__targets", "aria-label": "What this will do", "data-uniform": request.actions.every((a) => a.kind === request.actions[0].kind) && !["write", "edit", "unknown"].includes(request.actions[0].kind) || void 0, children: request.actions.map((action, index) => _jsxs13("li", { children: [_jsx16(Icon8, { name: action.kind === "page" || action.kind === "search" ? "book" : action.kind === "write" || action.kind === "edit" ? "edit" : action.kind === "folder" ? "folder" : action.kind === "unknown" ? "info" : "file", size: 20 }), _jsxs13("span", { children: [_jsx16("span", { className: "pc-public-approval__action", children: action.label }), action.target ? _jsx16("span", { className: "pc-public-approval__target", children: action.target }) : null] })] }, index)) }) : null, needsReview ? _jsx16("p", { className: "pc-public-approval__note", children: "I can\u2019t describe this request clearly here. Review the details before allowing it." }) : _jsx16("p", { className: "pc-public-approval__note", children: "Allow once covers only what is shown here. I\u2019ll ask again for later requests." })] }, interactionKey), _jsxs13("div", { className: "pc-workflow-interaction__buttons pc-public-approval__buttons", children: [deferButton(interaction.onDefer, interaction.deferLabel || L.decideLater), _jsxs13("button", { type: "button", className: "pc-workflow-interaction__deny", "data-decision": "deny", disabled, onClick: () => void run({ kind: "deny" }, interaction.onDeny), children: [_jsx16(Icon8, { name: "x", size: 18 }), pending?.kind === "deny" ? "Declining\u2026" : interaction.denyLabel || L.deny] }), !needsReview ? _jsxs13("button", { type: "button", className: "pc-btn", "data-decision": "approve", disabled, onClick: () => void run({ kind: "approve" }, interaction.onApprove), children: [_jsx16(Icon8, { name: "check", size: 18 }), pending?.kind === "approve" ? "Allowing\u2026" : interaction.approveLabel || L.allowOnce] }) : null, props.onReviewTechnical ? _jsxs13("button", { type: "button", className: "pc-public-approval__review", disabled, onClick: props.onReviewTechnical, children: [_jsx16(Icon8, { name: "list", size: 18 }), "Review details"] }) : null] }), needsReview && !props.onReviewTechnical ? _jsx16("p", { className: "pc-public-approval__note", children: "Switch to the conversation\u2019s detailed view to review this request." }) : null, interaction.deniedNote ? _jsx16("p", { className: "pc-public-approval__note", role: "note", children: "Some of these actions are blocked by your saved permissions. Allow once cannot override that choice. Review details to see what is blocked." }) : null] });
+    body = _jsxs13("div", { className: "pc-workflow-interaction__body pc-public-approval", children: [_jsxs13("div", { className: "pc-public-approval__context", children: [_jsxs13("div", { className: "pc-public-approval__reason", children: [_jsx16("p", { className: "pc-public-approval__reason-label", children: "Why I\u2019m asking" }), _jsx16("p", { children: request?.explanation?.text || "The reason for this request isn\u2019t available here." })] }), request?.actions.length ? _jsx16("ul", { className: "pc-public-approval__targets", "aria-label": "What this will do", "data-uniform": request.actions.every((a) => a.kind === request.actions[0].kind) && !["write", "edit", "unknown"].includes(request.actions[0].kind) || void 0, children: request.actions.map((action, index) => _jsxs13("li", { children: [_jsx16(Icon8, { name: action.kind === "page" || action.kind === "search" ? "book" : action.kind === "write" || action.kind === "edit" ? "edit" : action.kind === "folder" ? "folder" : action.kind === "unknown" ? "info" : "file", size: 20 }), _jsxs13("span", { children: [_jsx16("span", { className: "pc-public-approval__action", children: action.label }), action.target ? _jsx16("span", { className: "pc-public-approval__target", children: action.target }) : null] })] }, index)) }) : null, needsReview ? _jsx16("p", { className: "pc-public-approval__note", children: "I can\u2019t describe this request clearly here. Review the details before allowing it." }) : null] }, interactionKey), _jsxs13("div", { className: "pc-workflow-interaction__buttons pc-public-approval__buttons", children: [deferButton(interaction.onDefer, interaction.deferLabel || L.decideLater), _jsxs13("button", { type: "button", className: "pc-workflow-interaction__deny", "data-decision": "deny", disabled, onClick: () => void run({ kind: "deny" }, interaction.onDeny), children: [_jsx16(Icon8, { name: "x", size: 18 }), pending?.kind === "deny" ? "Declining\u2026" : interaction.denyLabel || L.deny] }), !needsReview ? _jsxs13("button", { type: "button", className: "pc-btn", "data-decision": "approve", disabled, title: interaction.approveTitle, onClick: () => void run({ kind: "approve" }, interaction.onApprove), children: [_jsx16(Icon8, { name: "check", size: 18 }), pending?.kind === "approve" ? "Allowing\u2026" : interaction.approveLabel || L.allow] }) : null, !needsReview && interaction.onApproveAll ? _jsxs13("button", { type: "button", className: "pc-workflow-interaction__allow-all", "data-decision": "approve-all", disabled, title: interaction.approveAllTitle, onClick: () => void run({ kind: "approve-all" }, interaction.onApproveAll), children: [_jsx16(Icon8, { name: "wrench", size: 18 }), pending?.kind === "approve-all" ? "Allowing\u2026" : interaction.approveAllLabel || L.allowAll] }) : null, props.onReviewTechnical ? _jsxs13("button", { type: "button", className: "pc-public-approval__review", disabled, onClick: props.onReviewTechnical, children: [_jsx16(Icon8, { name: "list", size: 18 }), "Review details"] }) : null] }), needsReview && !props.onReviewTechnical ? _jsx16("p", { className: "pc-public-approval__note", children: "Switch to the conversation\u2019s detailed view to review this request." }) : null, interaction.scopeNote ? _jsx16("p", { className: "pc-public-approval__note", role: "note", children: interaction.scopeNote }) : null, interaction.deniedNote ? _jsx16("p", { className: "pc-public-approval__note", role: "note", children: "Some of these actions are blocked by this session\u2019s permissions. Allow cannot override that choice. Review details to see what is blocked." }) : null] });
   } else if (interaction.kind === "tool-approval") {
-    const reason = String(interaction.disabledReason || "").trim();
-    const broadDisabled = disabled || Boolean(reason);
-    const scopes = [
-      !reason && interaction.onApproveForSession && interaction.approveForSessionDescription ? interaction.approveForSessionDescription : "",
-      !reason && interaction.onApproveAll && interaction.approveAllDescription ? interaction.approveAllDescription : ""
-    ].filter(Boolean);
-    const scopeSummary = scopes.length ? String(interaction.broadScopeSummary || "").trim() : "";
-    body = _jsxs13("div", { className: "pc-workflow-interaction__body", children: [_jsxs13("div", { className: "pc-workflow-interaction__prompt", children: ["Allow ", _jsx16("strong", { children: interaction.toolName }), " to run?"] }), interaction.detail ? card ? _jsxs13("details", { className: "pc-workflow-interaction__review", children: [_jsx16("summary", { children: "Review" }), _jsx16("div", { className: "pc-workflow-interaction__detail", children: interaction.detail })] }) : _jsx16("div", { className: "pc-workflow-interaction__detail", children: interaction.detail }) : null, _jsxs13("div", { className: "pc-workflow-interaction__buttons", children: [deferButton(interaction.onDefer, interaction.deferLabel || L.decideLater), _jsx16("button", { type: "button", className: "pc-workflow-interaction__deny", "data-decision": "deny", disabled, onClick: () => void run({ kind: "deny" }, interaction.onDeny), children: pending?.kind === "deny" ? "Denying\u2026" : interaction.denyLabel || L.deny }), _jsx16("button", { type: "button", className: "pc-btn", "data-decision": "approve", disabled, onClick: () => void run({ kind: "approve" }, interaction.onApprove), children: pending?.kind === "approve" ? "Allowing\u2026" : interaction.approveLabel || L.allowOnce }), interaction.onApproveForSession ? _jsx16("button", { type: "button", className: "pc-workflow-interaction__allow-session", "data-decision": "approve-session", disabled: broadDisabled, title: reason || interaction.approveForSessionDescription || void 0, onClick: () => void run({ kind: "approve-session" }, interaction.onApproveForSession), children: pending?.kind === "approve-session" ? "Allowing\u2026" : interaction.approveForSessionLabel || L.allowForChat }) : null, (interaction.approveKinds || []).map((entry) => _jsx16("button", { type: "button", className: "pc-workflow-interaction__allow-session pc-workflow-interaction__allow-kind", "data-decision": "approve-kind", "data-kind": entry.kind, disabled: broadDisabled, title: reason || interaction.approveForSessionDescription || void 0, onClick: () => void run({ kind: "approve-kind", toolset: entry.kind }, entry.onApprove), children: pending?.kind === "approve-kind" && pending.toolset === entry.kind ? "Allowing\u2026" : entry.label || L.allowKindForChat(entry.kind) }, entry.kind)), interaction.onApproveAll ? _jsx16("button", { type: "button", className: "pc-workflow-interaction__allow-all", "data-decision": "approve-all", disabled: broadDisabled, title: reason || interaction.approveAllDescription || void 0, onClick: () => void run({ kind: "approve-all" }, interaction.onApproveAll), children: pending?.kind === "approve-all" ? "Allowing\u2026" : interaction.approveAllLabel || L.allowAll }) : null] }), scopeSummary ? _jsx16("p", { className: "pc-workflow-interaction__scope", "data-scope-summary": "", children: scopeSummary }) : null, interaction.remember ? _jsxs13("label", { className: "pc-workflow-interaction__remember", children: [_jsx16("input", { type: "checkbox", checked: interaction.remember.checked, disabled, onChange: (event) => interaction.remember.onChange(event.target.checked) }), _jsx16("span", { children: interaction.remember.label })] }) : null, interaction.deniedNote ? _jsx16("p", { className: "pc-workflow-interaction__unavailable", role: "note", "data-denied-note": "", children: interaction.deniedNote }) : null, interaction.denyOptions?.length ? _jsxs13("details", { className: "pc-workflow-interaction__more", "data-more": "", children: [_jsx16("summary", { children: "More" }), _jsx16("p", { className: "pc-workflow-interaction__scope", children: L.denyForChatNote }), _jsx16("div", { className: "pc-workflow-interaction__buttons", children: interaction.denyOptions.map((option) => _jsx16("button", { type: "button", className: "pc-workflow-interaction__deny", "data-decision": "deny-chat", "data-key": option.key, disabled, onClick: () => void run({ kind: "deny-chat", key: option.key }, option.onDeny), children: pending?.kind === "deny-chat" && pending.key === option.key ? "Denying\u2026" : option.label }, option.key)) })] }) : null, interaction.policySummary ? _jsx16("p", { className: "pc-workflow-interaction__scope", "data-policy-summary": "", children: interaction.policySummary }) : null, interaction.scopeNote ? _jsx16("p", { className: "pc-workflow-interaction__scope-note", role: "note", "data-scope-note": "", children: interaction.scopeNote }) : null, interaction.notCovered ? _jsx16("p", { className: "pc-workflow-interaction__unavailable", role: "note", "data-not-covered": "", children: interaction.notCovered }) : null, reason && (interaction.onApproveAll || interaction.onApproveForSession || interaction.approveKinds?.length) ? _jsx16("p", { className: "pc-workflow-interaction__unavailable", role: "note", children: reason }) : null, scopeSummary && scopes.length ? _jsxs13("details", { className: "pc-workflow-interaction__scope-details", "data-scope-details": "", children: [_jsx16("summary", { children: "What the broader choices allow" }), scopes.map((text5) => _jsx16("p", { className: "pc-workflow-interaction__scope", children: text5 }, text5))] }) : scopes.map((text5) => _jsx16("p", { className: "pc-workflow-interaction__scope", children: text5 }, text5))] });
+    body = _jsxs13("div", { className: "pc-workflow-interaction__body", children: [_jsxs13("div", { className: "pc-workflow-interaction__prompt", children: ["Allow ", _jsx16("strong", { children: interaction.toolName }), " to run?"] }), interaction.detail ? card ? _jsxs13("details", { className: "pc-workflow-interaction__review", children: [_jsx16("summary", { children: "Review" }), _jsx16("div", { className: "pc-workflow-interaction__detail", children: interaction.detail })] }) : _jsx16("div", { className: "pc-workflow-interaction__detail", children: interaction.detail }) : null, _jsxs13("div", { className: "pc-workflow-interaction__buttons", children: [deferButton(interaction.onDefer, interaction.deferLabel || L.decideLater), _jsx16("button", { type: "button", className: "pc-workflow-interaction__deny", "data-decision": "deny", disabled, onClick: () => void run({ kind: "deny" }, interaction.onDeny), children: pending?.kind === "deny" ? "Denying\u2026" : interaction.denyLabel || L.deny }), _jsx16("button", { type: "button", className: "pc-btn", "data-decision": "approve", disabled, title: interaction.approveTitle, onClick: () => void run({ kind: "approve" }, interaction.onApprove), children: pending?.kind === "approve" ? "Allowing\u2026" : interaction.approveLabel || L.allow }), interaction.onApproveAll ? _jsx16("button", { type: "button", className: "pc-workflow-interaction__allow-all", "data-decision": "approve-all", disabled, title: interaction.approveAllTitle, onClick: () => void run({ kind: "approve-all" }, interaction.onApproveAll), children: pending?.kind === "approve-all" ? "Allowing\u2026" : interaction.approveAllLabel || L.allowAll }) : null] }), interaction.scopeNote ? _jsx16("p", { className: "pc-workflow-interaction__scope-note", role: "note", "data-scope-note": "", children: interaction.scopeNote }) : null, interaction.deniedNote ? _jsx16("p", { className: "pc-workflow-interaction__unavailable", role: "note", "data-denied-note": "", children: interaction.deniedNote }) : null] });
   } else {
     body = _jsxs13("div", { className: "pc-workflow-interaction__body", children: [_jsx16("div", { className: "pc-workflow-interaction__prompt", children: interaction.prompt }), _jsxs13("label", { className: "pc-workflow-interaction__entry", children: [_jsx16("span", { children: interaction.payloadLabel || (interaction.eventName ? `Payload for ${interaction.eventName}` : "Event payload") }), _jsx16("textarea", { value: payload, onChange: (event) => setPayload(event.target.value), placeholder: interaction.payloadPlaceholder || "Enter payload", rows: card ? 1 : 2, "aria-label": interaction.payloadLabel || (interaction.eventName ? `Payload for ${interaction.eventName}` : "Event payload"), disabled }, `${interactionKey}:payload`)] }), _jsx16("div", { className: "pc-workflow-interaction__buttons", children: _jsx16("button", { type: "button", className: "pc-btn", "data-decision": "send-event", disabled, onClick: () => void run({ kind: "event", payload }, () => interaction.onSend(payload)), children: pending?.kind === "event" ? "Sending\u2026" : interaction.sendLabel || L.sendEvent }) })] });
   }
@@ -4852,9 +4822,9 @@ var WorkflowSessionController = class {
   gatewayPolicy() {
     const client = this.sessionToolPolicy;
     if (this.sessionPolicyMode() === "unavailable")
-      throw new Error(`${this.sessionPolicyUnavailableReason} Allow once still works.`);
+      throw new Error(`This session's permissions cannot be changed: ${this.sessionPolicyUnavailableReason}`);
     if (!client || client.supported !== true)
-      throw new Error("This gateway cannot store chat tool policies (session_tool_policy is not supported).");
+      throw new Error("This gateway cannot store session tool policies (session_tool_policy is not supported).");
     return client;
   }
   adoptSessionPolicy(policy) {
@@ -4946,7 +4916,19 @@ var WorkflowSessionController = class {
     return policy;
   }
   /**
-   * "Allow for this chat". Gateway mode: merge `{approve:{all:true}}` into the
+   * "Allow" on the approval card: the named tools for the rest of this session. Gateway mode
+   * only: merge `{approve:{tools}}` into the session's policy, then answer the shown wait
+   * `{approved:true}`. The gateway stores only tools it authorizes for the caller; the rest
+   * come back in `clamped`.
+   */
+  approveToolsForSession(target2, tools, options = {}) {
+    const names = [...new Set(tools.map((name) => text2(name)).filter(Boolean))];
+    if (!names.length)
+      return Promise.reject(new Error("No tool to allow for this session."));
+    return this.writeThenAnswer(target2, { approve: { tools: names } }, true, options.ask);
+  }
+  /**
+   * "Allow All" on the approval card (every tool for the session). Gateway mode: merge `{approve:{all:true}}` into the
    * conversation's policy, then answer the shown wait `{approved:true}`; later
    * calls of every run of the conversation run without a wait. Local fallback
    * (no supported client): the existing client-side grant
@@ -4956,14 +4938,14 @@ var WorkflowSessionController = class {
   async approveAllForSession(target2, options = {}) {
     const mode = this.sessionPolicyMode();
     if (mode === "unavailable")
-      throw new Error(`${this.sessionPolicyUnavailableReason} Allow once still works.`);
+      throw new Error(`This session's permissions cannot be changed: ${this.sessionPolicyUnavailableReason}`);
     if (mode !== "gateway") {
       await this.allowAllToolsForRun(target2);
       return null;
     }
     return this.writeThenAnswer(target2, { approve: { all: true, ...typeof options.maxRiskRank === "number" ? { max_risk_rank: options.maxRiskRank } : {} } }, true, options.ask);
   }
-  /** "Allow all <toolset> tools for this chat": merge `{approve:{kinds:[kind]}}`, then answer `{approved:true}`. Gateway mode only. */
+  /** Allow one toolset for the session: merge `{approve:{kinds:[kind]}}`, then answer `{approved:true}`. Gateway mode only; no panel control (hosts expose it). */
   approveKindForSession(target2, kind, options = {}) {
     return this.writeThenAnswer(target2, { approve: { kinds: [kind] } }, true, options.ask);
   }
@@ -6760,132 +6742,56 @@ function presentInteraction(input, controller, options = {}) {
     const calls = Array.isArray(details.tool_calls) ? details.tool_calls : [];
     const target2 = { runId: raw.runId, waitKey: String(wait.wait_key || ""), stepId: raw.stepId };
     const names = [...new Set(calls.map((call) => String(call?.name || "tool")))];
-    const onPermissionsAll = options.onPermissionsAll;
-    const onAllowForSession = options.onAllowForSession;
-    const scope2 = String(options.approveAllScope || "").trim();
-    const remember = options.remember?.(names) || void 0;
     const L2 = WORKFLOW_INTERACTION_LABELS;
-    const hostChatGrant = onAllowForSession ? {
-      approveForSessionLabel: L2.allowForChat,
-      approveForSessionDescription: "Allow for this chat approves this batch and the enabled tools for the rest of this chat. Unchecked tools stay unavailable; questions still need your answer.",
-      onApproveForSession: async () => {
-        let grant;
-        await controller.approveWithPolicyChange(target2, () => {
-          grant = onAllowForSession();
-        });
-        if (grant)
-          await grant.catch((error) => {
-            throw new Error(`This batch was allowed, but "Allow for this chat" could not be turned on: ${error instanceof Error ? error.message : String(error)}`);
-          });
-      }
-    } : {};
-    let sessionFields = hostChatGrant;
+    const tools = names.join(", ") || "the requested tools";
+    const answerOnce = async () => {
+      await controller.approve(true, target2);
+    };
+    let onApprove = answerOnce;
+    let onApproveAll;
+    let scopeNote = L2.allowThisRequestNote;
     let refusedByPolicy = [];
-    const policy = options.sessionPolicy;
-    if (policy) {
+    if (options.sessionPolicy) {
+      const approveToolsForSession = controller.approveToolsForSession;
       const approveAllForSession = controller.approveAllForSession;
-      const approveKindForSession = controller.approveKindForSession;
-      const denyToolForSession = controller.denyToolForSession;
-      const denyKindForSession = controller.denyKindForSession;
       const sessionPolicyStatus = controller.sessionPolicyStatus;
-      if (typeof approveAllForSession !== "function" || typeof approveKindForSession !== "function" || typeof denyToolForSession !== "function" || typeof denyKindForSession !== "function" || typeof sessionPolicyStatus !== "function")
-        throw new Error("presentInteraction: sessionPolicy needs a WorkflowSessionController (approveAllForSession, approveKindForSession, denyToolForSession, denyKindForSession, sessionPolicyStatus).");
+      if (typeof approveToolsForSession !== "function" || typeof approveAllForSession !== "function" || typeof sessionPolicyStatus !== "function")
+        throw new Error("presentInteraction: sessionPolicy needs a WorkflowSessionController (approveToolsForSession, approveAllForSession, sessionPolicyStatus).");
       const status = sessionPolicyStatus.call(controller);
-      const ask = policy.ask ? [...policy.ask] : void 0;
-      const applies = (stored, which) => {
-        const words = String(stored?.scope?.[which] || "").trim();
-        return words ? `Applies: ${words}` : L2.noScopeNote;
-      };
-      const covered = (result) => ({
-        outcomeNote: [sessionPolicyClampedText(result?.clamped), applies(result, "approve")].filter(Boolean).join(" ")
-      });
-      const denied = (result) => ({ outcomeNote: `${L2.denyForChatNote} ${applies(result, "deny")}` });
-      const notCovered = sessionPolicyClampedText(status.clamped);
-      if (status.mode === "unavailable") {
-        sessionFields = { scopeNote: L2.unavailablePolicyNote(status.reason || "") };
-      } else if (status.mode === "gateway") {
-        const toolsets = [
-          ...new Set(calls.map((call) => String(call?.toolset || "").trim() || String(policy.toolsetOf?.(String(call?.name || "")) || "").trim()).filter(Boolean))
-        ];
-        const askNames = (ask || []).map((name) => String(name).trim()).filter(Boolean);
-        const asking = askNames.length ? `Tools set to Ask keep asking: ${askNames.join(", ")}.` : "Nothing is set to Ask, so tools that reach destinations the model picks (fetch_url, browser_probe, send_email) are included.";
+      if (status.mode === "gateway") {
         const stored = status.policy;
         refusedByPolicy = stored ? names.filter((name) => Object.prototype.hasOwnProperty.call(stored.deny || {}, name)) : [];
-        sessionFields = {
-          approveForSessionLabel: L2.allowForChat,
-          // The real button labels, never a "<toolset>" placeholder; alternatives, each with
-          // its reach (release-closing polish).
-          approveForSessionDescription: toolsets.length ? `Each of ${(() => {
-            const items = [`\u201C${L2.allowForChat}\u201D (every tool)`, ...toolsets.map((kind) => `\u201C${L2.allowKindForChat(kind)}\u201D (that toolset only)`)];
-            return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
-          })()} approves this batch and stores a policy for this chat on the gateway: the later tool calls it covers, in every run of this chat, run without asking, until the policy is reset. ${asking} Tools the gateway does not authorize stay uncovered.` : `\u201C${L2.allowForChat}\u201D approves this batch and stores a policy for this chat on the gateway: later tool calls of every run of this chat run without asking, until the policy is reset. ${asking} Tools the gateway does not authorize stay uncovered.`,
-          // Always visible under the decisions (the full sentences are in the disclosure): what
-          // a broad grant reaches, and the Ask warning, before any click.
-          broadScopeSummary: `The broader choices keep allowing later tool calls of this chat until the policy is reset. ${asking}`,
-          onApproveForSession: async () => covered(await approveAllForSession.call(controller, target2, { ...policy.maxRiskRank !== void 0 ? { maxRiskRank: policy.maxRiskRank } : {}, ...ask ? { ask } : {} })),
-          approveKinds: toolsets.map((kind) => ({
-            kind,
-            label: L2.allowKindForChat(kind),
-            onApprove: async () => covered(await approveKindForSession.call(controller, target2, kind, ask ? { ask } : {}))
-          })),
-          denyOptions: [
-            ...names.map((name) => ({
-              key: `tool:${name}`,
-              label: L2.denyToolForChat(name),
-              onDeny: async () => denied(await denyToolForSession.call(controller, target2, name, ask ? { ask } : {}))
-            })),
-            ...toolsets.map((kind) => ({
-              key: `kind:${kind}`,
-              label: L2.denyKindForChat(kind),
-              onDeny: async () => denied(await denyKindForSession.call(controller, target2, kind, ask ? { ask } : {}))
-            }))
-          ],
-          ...refusedByPolicy.length ? { deniedNote: `Denied by this chat's policy: ${refusedByPolicy.join(", ")}. The gateway refuses ${refusedByPolicy.length === 1 ? "it" : "them"} even if allowed once.` } : {},
-          ...stored ? {
-            policySummary: `This chat's policy: ${Object.keys(stored.approve || {}).length} tools allowed without asking, ${Object.keys(stored.deny || {}).length} denied. ${applies(stored, "approve")}`
-          } : {},
-          ...notCovered ? { notCovered } : {}
+        const covered = (result) => {
+          const notCovered = sessionPolicyClampedText(result?.clamped);
+          return notCovered ? { outcomeNote: notCovered } : void 0;
         };
+        onApprove = async () => {
+          const result = await approveToolsForSession.call(controller, target2, names);
+          return refusedByPolicy.length ? { outcomeNote: `The gateway refuses ${refusedByPolicy.join(", ")}: denied by this session's policy.` } : covered(result);
+        };
+        onApproveAll = async () => covered(await approveAllForSession.call(controller, target2, {}));
+        scopeNote = void 0;
       } else {
-        sessionFields = onAllowForSession ? { ...hostChatGrant, scopeNote: L2.localChatPolicyNote } : {
-          // The grant ends with the run: the button says so (ADR 0001 §5).
-          approveForSessionLabel: L2.allowForRun,
-          onApproveForSession: async () => {
-            await approveAllForSession.call(controller, target2, {});
-          },
-          scopeNote: L2.localRunPolicyNote
-        };
+        scopeNote = L2.noSessionGrantNote;
       }
     }
     return {
       id,
       kind: "tool-approval",
       title: `${calls.length || "Requested"} ${calls.length === 1 ? "action needs" : "actions need"} permission`,
-      toolName: names.join(", ") || "the requested tools",
+      toolName: tools,
       publicRequest: publicApprovalRequest(calls, details.public_action, raw.runId),
-      description: "Review the targets below. Allow once approves this batch only.",
       detail: _jsxs16("div", { className: "pc-approval-summary", children: [_jsx19(ToolCallWordsList, { calls: calls.map((call) => {
         const args = toolArguments(call?.arguments);
         return { name: String(call?.name || "tool"), arguments: args && typeof args === "object" && !Array.isArray(args) ? args : null };
       }), label: "Tool calls to approve", heading: "The assistant wants to use these tools:" }), _jsxs16("details", { children: [_jsx19("summary", { children: "Review full tool arguments (JSON)" }), _jsx19(JsonViewer, { value: calls.length ? calls : details })] })] }),
-      approveLabel: WORKFLOW_INTERACTION_LABELS.allowOnce,
-      denyLabel: WORKFLOW_INTERACTION_LABELS.deny,
-      approveAllLabel: onPermissionsAll ? WORKFLOW_INTERACTION_LABELS.allowAll : void 0,
-      approveAllDescription: onPermissionsAll ? `Sets permissions: all${scope2 ? ` ${scope2}` : ""}, including future turns. Unchecked tools stay unavailable; explicit Ask overrides and Gateway restrictions remain enforced. Questions still need your answer.` : void 0,
-      ...onPermissionsAll ? { broadScopeSummary: `\u201C${WORKFLOW_INTERACTION_LABELS.allowAll}\u201D changes your tool permissions for future turns too.` } : {},
-      ...sessionFields,
-      ...options.approveAllDisabledReason ? { disabledReason: options.approveAllDisabledReason } : {},
-      ...remember ? { remember } : {},
+      approveLabel: L2.allow,
+      denyLabel: L2.deny,
+      ...onApproveAll ? { approveTitle: L2.allowTitle(tools), approveAllLabel: L2.allowAll, approveAllTitle: L2.allowAllTitle, onApproveAll } : {},
+      ...scopeNote ? { scopeNote } : {},
+      ...refusedByPolicy.length ? { deniedNote: `Denied by this session's policy: ${refusedByPolicy.join(", ")}. The gateway refuses ${refusedByPolicy.length === 1 ? "it" : "them"} even if allowed.` } : {},
       ...options.onDefer ? { onDefer: options.onDefer } : {},
-      onApproveAll: onPermissionsAll ? async () => {
-        await controller.approveWithPolicyChange(target2, () => {
-          void onPermissionsAll();
-        });
-      } : void 0,
-      onApprove: async () => {
-        await controller.approve(true, target2);
-        return refusedByPolicy.length ? { outcomeNote: `The gateway refuses ${refusedByPolicy.join(", ")}: denied by this chat's policy.` } : void 0;
-      },
+      onApprove,
       onDeny: async () => {
         await controller.approve(false, target2);
       }

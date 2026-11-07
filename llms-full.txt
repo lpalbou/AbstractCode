@@ -1635,7 +1635,7 @@ If the gateway sends a live update the app cannot read, the transcript shows one
 
 For an agent, type a task and press Enter; Shift+Enter inserts a newline. For a structured workflow, configure its required inputs and select **Run workflow**. Text, structured JSON results, and workflow messages appear in the transcript.
 
-Answer questions in their dedicated cards. Tool approvals show requested arguments and offer **Allow once** and **Deny**. On a gateway that serves the chat tool policy (AbstractGateway 0.16.0, `capabilities.session_tool_policy`), **Allow for this chat** and **Allow all <toolset> tools for this chat** store the grant on the gateway for this conversation, so later calls run without a gate from every client; on an older gateway the button says what it does instead (**Allow for this run**, this browser only). **Allow all enabled tools** sets every enabled tool to Auto in Agent → Tools (this browser). Gateway and workflow policy determine which operations need a decision.
+Answer questions in their dedicated cards. A tool approval shows what the tool will do (the full arguments are under **Review full tool arguments (JSON)**) and offers three choices: **Deny** refuses the request; **Allow** allows that tool for the rest of this conversation; **Allow All** allows every tool for the rest of this conversation. Both allows are stored on the gateway for this session only (AbstractGateway 0.16.0 or later, `capabilities.session_tool_policy`), so later calls run without asking in every client of the conversation; they never change your tool settings in Agent → Tools. On a gateway without the session tool policy, Allow covers the request shown and the card says so. Gateway and workflow policy determine which operations need a decision.
 
 An event-driven workflow stays attached while waiting for its trigger. Its wait card can also submit an explicit JSON event through the gateway's durable command path. Messages and status updates emitted by workflow nodes are replayable. See the [UI event contract](ui_events.md).
 
@@ -4559,6 +4559,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Reflect on my notes", "Consolidate my notes") leave the automations list and its counts.
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
+
+## [web 0.15.5] - 2026-11-07
+
+On AbstractUIC 0.10.7 (`@abstractframework/panel-chat` ^0.9.0, floor raised from ^0.8.2). Same gateways as
+web 0.15.4.
+
+### Changed
+
+- **A tool approval offers three choices: Deny, Allow and Allow All.** Deny refuses the request. Allow allows
+  that tool for the rest of this conversation; Allow All allows every tool for the rest of this conversation.
+  Both are kept on the gateway for this session only and never change your tool settings in Agent → Tools
+  (operator 2026-11-07: "it NEVER changes the default of abstractcode, it only changes the permissions for a
+  session"). "Allow once", "Allow for this chat", "Allow all <toolset> tools for this chat", "Allow all enabled
+  tools", "More" and the paragraphs about what the broader choices allow are gone; the card keeps its title,
+  what the tool will do and **Review full tool arguments (JSON)**.
+
+### Removed
+
+- **"Allow all enabled tools" and its "Auto: every enabled tool · this browser · Revoke" line.** The card no
+  longer turns every enabled tool to Auto in this browser's tool settings (backlog 0006, closed by the
+  operator's decision).
 
 ## [web 0.15.4] - 2026-11-07
 

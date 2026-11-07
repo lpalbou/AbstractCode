@@ -15,8 +15,8 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 | State | Items | IDs |
 |---|---|---|
 | Planned | 3 | 0001, 0002, 0003 |
-| Proposed | 8 | 0004, 0005, 0006, 0010, 0011, 0018, 0019, 0020 |
-| Completed | 19 | 0007, 0008, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030 |
+| Proposed | 7 | 0004, 0005, 0010, 0011, 0018, 0019, 0020 |
+| Completed | 20 | 0006, 0007, 0008, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030 |
 | Deprecated | 0 |  |
 | Recurrent | 0 |  |
 
@@ -41,9 +41,9 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 - [0009](completed/0009_terminal_topbar_parity_and_modal_dismissal.md) completed 2026-10-30: top-bar parity, grouped Tools/Skills/MCP and protected outside-click dismissal; installed locally, no release.
 - [0010](proposed/0010_btw_contextual_side_question.md): contextual /btw side questions; [0011](proposed/0011_evaluate_existing_goal_workflow_surface.md): evaluate the existing workflow-owned /goal lane.
 
-0. [0006](proposed/0006_allow_all_enabled_tools_kept_pending_operator_decision.md) — OPERATOR DECISION GATE: "Allow all enabled tools"
-   (per-browser app layer) stays in Code web until the operator says remove (AbstractUIC 0039). Counts recounted 2026-10-28
-   (0005 had been added without a count update).
+0. [0006](completed/0006_allow_all_enabled_tools_kept_pending_operator_decision.md) completed 2026-11-07 in web 0.15.5: the operator
+   decided — the approval card is Deny / Allow / Allow All, for this session only; the per-browser "Allow all enabled tools"
+   layer and its Revoke line are removed (AbstractUIC 0039).
 
 1. [0001](planned/0001_automations_wui_section_and_tui_commands.md) — Automations in the WUI and TUI. Phase after v1:
    starts only after the gateway API (G), ui-kit panel and fixtures (U), and the Observer and Assistant integrations
@@ -74,7 +74,6 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 |---|---|---|---|
 | 0004 | [A session's tool choices live on the gateway](proposed/0004_session_tool_choices_on_the_gateway.md) | gateway + tui + web | operator decision (deferred 2026-10-10): store-and-serve record vs. also applied at run start; whether a run may override its session; what a new session starts with |
 | 0005 | [Rendering and chrome](proposed/0005_tool_result_blocks_prompt_inset_clickable_chrome.md) | tui | JSON remains proposed; input inset completed in0012 |
-| 0006 | [Allow-all decision](proposed/0006_allow_all_enabled_tools_kept_pending_operator_decision.md) | web | Operator decision |
 | 0010 | [/btw side question](proposed/0010_btw_contextual_side_question.md) | tui + workflows | Context/authority design |
 | 0011 | [Evaluate /goal](proposed/0011_evaluate_existing_goal_workflow_surface.md) | tui + workflows | Existing abstractcode.goal.v1 lane |
 | 0018 | [Shared visual and voice identity](proposed/0018_shared_agent_visual_and_voice_identity.md) | cross-client | Existing entity settings |
@@ -85,6 +84,7 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 
 | ID | Item | Area |
 |---|---|---|
+| 0006 | [Approval card: Deny / Allow / Allow All for this session](completed/0006_allow_all_enabled_tools_kept_pending_operator_decision.md) — completed 2026-11-07 in web 0.15.5; per-browser allow-all removed | web |
 | 0007 | [Shared message footer](completed/0007_kit_message_footer_spec.md) | web |
 | 0009 | [Terminal top-bar parity](completed/0009_terminal_topbar_parity_and_modal_dismissal.md) — completed 2026-10-30, e4eedbe; full suite 1,155 passed, local Gateway/terminal checks passed | tui |
 | 0012 | [tool modes scrolling and composer inset](completed/0012_tool_modes_scrolling_and_composer_inset.md) — completed 2026-10-30; tested and installed locally, no release | tui + engine/console |

@@ -81,7 +81,7 @@ async function selectWorkflow(page: Page, name: string): Promise<void> {
 async function expectGate(page: Page, who: string): Promise<void> {
   await expect(page.getByRole("heading", { name: "1 action needs permission" }), `${who}: the approval card`).toBeVisible();
   await expect(page.getByText(/Allow write_file to run\?/), `${who}: the question`).toBeVisible();
-  await expect(page.getByRole("button", { name: "Allow once", exact: true }), `${who}: Allow once`).toBeVisible();
+  await expect(page.getByRole("button", { name: "Allow", exact: true }), `${who}: Allow`).toBeVisible();
   await expect(page.getByRole("button", { name: "Deny", exact: true }), `${who}: Deny`).toBeVisible();
   const strip = page.locator(".code-run-strip");
   await expect(strip, `${who}: the run strip`).toContainText("Approval needed");

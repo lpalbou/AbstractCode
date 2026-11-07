@@ -142,7 +142,7 @@ import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefault
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
 import { READ_ALOUD_INITIAL, readAloudStep } from "@abstractframework/panel-chat";
 import { codeReadAloudInput } from "./read_aloud_input";
-import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
+import { TOOLS_MIGRATION_NOTICE, migrateLegacyTools, toolsMigrationKey } from "./tool_layers";
 import {
   advanceQueueIntents,
   queueIntentMatches,
@@ -434,10 +434,10 @@ export function CodeWorkspace() {
     authScopeKey: identity,
     toolApprovalPolicy: currentToolPermissions,
   });
-  // "Allow for this chat" is stored on the gateway when it serves the chat tool policy
-  // (capabilities.session_tool_policy.supported; backlog 0032, contract v1): the kit client is
-  // bound to this conversation's session. Otherwise the kit's local fallback says what it does
-  // ("Allow for this run", this browser only); a failed capability read says why.
+  // The approval card's Allow (this tool) and Allow All (every tool) last for this session only,
+  // stored on the gateway when it serves the session tool policy
+  // (capabilities.session_tool_policy.supported; contract v1): the kit client is bound to this
+  // conversation's session. Otherwise Allow covers the shown request and the card says so.
   const sessionPolicyCapability = catalog.sessionToolPolicy;
   useEffect(() => {
     if (!connection.connected || catalog.capabilitiesLoading) return;
@@ -520,22 +520,15 @@ export function CodeWorkspace() {
   const pendingInteraction = workflowPendingInteraction(snapshot);
   const interaction = useMemo(
     () =>
+      // Deny / Allow (this tool) / Allow All (every tool), the two allows for the rest of this
+      // session only (operator ruling 2026-11-07): the card never writes the app's tool defaults.
       presentInteraction(pendingInteraction, controller, {
         records: snapshot.records,
         currentRun: snapshot.run,
-        // "Allow all enabled tools": every enabled tool the kit's bulk rule reaches becomes Auto in
-        // this app's tool layer (this browser), so later runs of every chat send it as Auto.
-        onPermissionsAll: async () => {
-          setAppToolLayer(withAllEnabledAuto(catalog.toolCatalog, appToolLayer));
-        },
-        approveAllScope: "in this browser",
-        sessionPolicy: {
-          toolsetOf: (name: string) => catalog.tools.find((tool) => tool.name === name)?.toolset,
-          ask: Object.entries(appToolLayer).filter(([, mode]) => mode === "ask").map(([name]) => name),
-        },
+        sessionPolicy: true,
       }),
-    // The chat-policy mode is the controller's: re-present when it (or what it stored) changes.
-    [pendingInteraction, snapshot.records, snapshot.run, snapshot.sessionPolicyMode, snapshot.sessionPolicy, snapshot.sessionPolicyClamped, controller, catalog.tools, catalog.toolCatalog, appToolLayer, setAppToolLayer],
+    // The session-policy mode is the controller's: re-present when it (or what it stored) changes.
+    [pendingInteraction, snapshot.records, snapshot.run, snapshot.sessionPolicyMode, snapshot.sessionPolicy, snapshot.sessionPolicyClamped, controller],
   );
   const promptProperty = isAgent
     ? "prompt"
@@ -1925,7 +1918,6 @@ export function CodeWorkspace() {
                 active={active}
                 paused={paused}
                 snapshot={snapshot}
-                permissionsAll={allEnabledAuto(catalog.toolCatalog, appToolLayer)}
                 onInteraction={
                   interaction && !paused
                     ? () => {
@@ -1946,10 +1938,6 @@ export function CodeWorkspace() {
                       }
                     : undefined
                 }
-                onRevokeApproval={() => {
-                  controller.revokeToolApproval();
-                  setAppToolLayer(withoutAutoChoices(catalog.toolCatalog, appToolLayer));
-                }}
                 onCommand={(command) =>
                   act(() => controller.sendCommand(command, {}))
                 }

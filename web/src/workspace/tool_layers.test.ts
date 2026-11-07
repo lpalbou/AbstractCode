@@ -6,14 +6,11 @@ import { describe, expect, it } from "vitest";
 import { normalizeToolCatalog, planRunTools, toWorkflowApprovalPolicy, withRunTools } from "@abstractframework/ui-kit";
 import {
   TOOLS_MIGRATION_NOTICE,
-  allEnabledAuto,
   inputToolLayer,
   legacyToolPreferences,
   migrateLegacyTools,
   toolsMigrationKey,
-  withAllEnabledAuto,
   withToolLayer,
-  withoutAutoChoices,
 } from "./tool_layers";
 import { parsePreferences } from "./preferences";
 
@@ -102,13 +99,6 @@ describe("a run gets the layer through the kit plan", () => {
   });
 });
 
-describe('"Allow all enabled tools" and its Revoke', () => {
-  it("Allow all sets Auto on what the bulk rule reaches; the strip says so; Revoke removes the Auto choices only", () => {
-    const all = withAllEnabledAuto(catalog, { execute_command: "off" });
-    expect(all).toEqual({ execute_command: "off", read_file: "auto", write_file: "auto" });
-    expect(allEnabledAuto(catalog, all)).toBe(true);
-    expect(allEnabledAuto(catalog, {})).toBe(false);
-    expect(withoutAutoChoices(catalog, all)).toEqual({ execute_command: "off" });
-    expect(appSource).toContain('approveAllScope: "in this browser"');
-  });
-});
+// "Allow all enabled tools" (the per-browser bulk Auto from the approval card) and its Revoke strip are
+// gone (operator ruling 2026-11-07, backlog 0006): the card's grants live only in the session
+// (approval_card.test.tsx).

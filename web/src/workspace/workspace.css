@@ -1240,8 +1240,6 @@ select option {
 .code-run-strip--working .code-run-strip__icon { animation: code-progress-spin 1.5s linear infinite; }
 .code-run-strip__detail { flex: 1; min-width: 0; max-width: 420px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
 .code-run-strip__metrics { display: flex; align-items: center; gap: 9px; color: var(--text-secondary); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
-.code-run-strip__consent { flex-basis: 100%; display: flex; align-items: center; gap: 7px; color: var(--warning); border-top: 1px solid var(--ui-border-1); padding-top: 7px; }
-.code-run-strip__consent button { margin-left: auto; text-decoration: underline; }
 .code-run-strip button.code-run-strip__attention { padding: 0; color: var(--run-tone); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 4px; }
 @keyframes code-progress-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .code-run-strip--working .code-run-strip__icon { animation: none; } }
@@ -1692,9 +1690,6 @@ select option {
   }
   .code-run-strip > * {
     flex-shrink: 0;
-  }
-  .code-run-strip:has(.code-run-strip__consent) {
-    flex-wrap: wrap;
   }
   .code-workflow-picker .af-workflow-picker__trigger {
     font-size: var(--font-size-sm);

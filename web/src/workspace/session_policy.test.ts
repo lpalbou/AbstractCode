@@ -1,4 +1,4 @@
-// "Allow for this chat" (backlog 0032, session tool policy contract v1): the kit client, bound to
+// The approval card's session grants (Allow / Allow All; session tool policy contract v1): the kit client, bound to
 // this conversation's session, only when the gateway serves capabilities.session_tool_policy.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ describe("chat tool policy", () => {
   it("binds the kit client to this conversation only when supported; a failed read is said", () => {
     expect(appSource).toMatch(/sessionPolicyCapability\?\.supported === true && session\.sessionId\s*\?\s*createSessionToolPolicyClient\(/);
     expect(appSource).toContain("controller.setSessionToolPolicyClient(null, { reason: catalog.capabilitiesError })");
-    expect(appSource).toMatch(/sessionPolicy: \{\s*toolsetOf:/);
+    expect(appSource).toMatch(/sessionPolicy: true,/);
   });
 
   it("a client for an unsupported gateway never sends a request", async () => {
