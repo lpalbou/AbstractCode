@@ -10,6 +10,7 @@ export { READ_ALOUD_INITIAL, readAloudPhase, readAloudStep } from "./read_aloud.
 export type { ReadAloudInput, ReadAloudPhase, ReadAloudReply, ReadAloudState } from "./read_aloud.js";
 export { formatMessageStamp, messageStampTitle, messageStampIso, localDayKey, useLocalDay } from "./message_footer.js";
 export { ChatThread } from "./chat_thread.js";
+export { WorkingDots } from "./working_dots.js";
 export { ToolActivity, ToolActivityGroup, toolArguments, toolPreview } from "./tool_activity.js";
 export { ToolSandboxLine, toolSandbox, sandboxEvidence, type ToolSandbox, type ToolSandboxRow } from "./sandbox_line.js";
 export { workflowProgress, type WorkflowProgress } from "./workflow_progress.js";
