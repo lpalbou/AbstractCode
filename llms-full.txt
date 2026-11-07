@@ -24,7 +24,7 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
-What's new: browser 0.15.1 highlights the new conversation in the sidebar, and its
+What's new: browser 0.15.2 moves the resting avatar smoothly (24 frames per second, was 6). Browser 0.15.1 highlights the new conversation in the sidebar, and its
 Avatar view uses the composer's microphone and each reply's play button and shows the
 avatar speaking only while you can hear it. Browser 0.15.0 shows one live line and a
 Findings panel in the Avatar view and lists paused automations under `Paused · N`;
@@ -4535,6 +4535,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [web 0.15.2] - 2026-11-07
+
+On `@abstractframework/ui-kit` ^0.9.16 (AbstractUIC 0.10.3). Works with the same gateways as web 0.15.1.
+
+### Fixed
+
+- **The avatar moves smoothly while it rests.** In the Avatar view, a finished or waiting avatar was
+  redrawn only 6 to 10 times per second and looked jerky; it now moves at 24 frames per second, like a
+  speaking one. The small avatar shown beside a question or an approval is drawn at its real size,
+  which costs much less. The picture itself is unchanged.
 
 ## [web 0.15.1] - 2026-11-07
 

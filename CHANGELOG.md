@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.15.2] - 2026-11-07
+
+On `@abstractframework/ui-kit` ^0.9.16 (AbstractUIC 0.10.3). Works with the same gateways as web 0.15.1.
+
+### Fixed
+
+- **The avatar moves smoothly while it rests.** In the Avatar view, a finished or waiting avatar was
+  redrawn only 6 to 10 times per second and looked jerky; it now moves at 24 frames per second, like a
+  speaking one. The small avatar shown beside a question or an approval is drawn at its real size,
+  which costs much less. The picture itself is unchanged.
+
 ## [web 0.15.1] - 2026-11-07
 
 On AbstractUIC `@abstractframework/ui-kit` ^0.9.15 and `@abstractframework/panel-chat` ^0.8.2.
