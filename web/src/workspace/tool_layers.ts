@@ -13,7 +13,6 @@ import {
   effectiveToolLayers,
   hasToolChoices,
   planRunTools,
-  resolveToolModes,
   withRunTools,
   type ToolCatalogItem,
   type ToolMode,
@@ -84,28 +83,6 @@ export function migrateLegacyTools(legacy: LegacyToolPreferences, catalog: reado
     else if (pin === "ask") out[item.name] = "ask";
     else if (tier === "all" ? bulkAutoReaches(item) : tierAuto(item, tier)) out[item.name] = "auto";
   }
-  return effectiveToolLayers(catalog, { app: out }).app;
-}
-
-/** "Allow all enabled tools" (the approval card): every enabled tool the bulk rule reaches → Auto. */
-export function withAllEnabledAuto(catalog: readonly ToolCatalogItem[], layer: ToolModeLayer): ToolModeLayer {
-  const modes = resolveToolModes(catalog, { app: layer });
-  const out: Record<string, ToolMode> = { ...layer };
-  for (const item of catalog) if (bulkAutoReaches(item) && modes[item.name].mode === "ask") out[item.name] = "auto";
-  return effectiveToolLayers(catalog, { app: out }).app;
-}
-
-/** Every enabled tool the bulk rule reaches already runs on Auto (the run strip's "all" line). */
-export function allEnabledAuto(catalog: readonly ToolCatalogItem[], layer: ToolModeLayer): boolean {
-  const modes = resolveToolModes(catalog, { app: layer });
-  const reach = catalog.filter((item) => bulkAutoReaches(item) && modes[item.name].mode !== "off");
-  return reach.length > 0 && reach.some((item) => item.gatewayDefault !== "auto") && reach.every((item) => modes[item.name].mode === "auto");
-}
-
-/** Revoke: the layer's Auto choices go back to the gateway's default (Off and Ask choices stay). */
-export function withoutAutoChoices(catalog: readonly ToolCatalogItem[], layer: ToolModeLayer): ToolModeLayer {
-  const out: Record<string, ToolMode> = {};
-  for (const [name, mode] of Object.entries(layer)) if (mode !== "auto") out[name] = mode;
   return effectiveToolLayers(catalog, { app: out }).app;
 }
 

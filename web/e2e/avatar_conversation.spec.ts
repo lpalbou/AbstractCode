@@ -63,7 +63,7 @@ test('avatar keeps the real approval and compact multiline composer visible',asy
  await expect(input).toHaveCSS('outline-style','none');
  await composer.screenshot({path:testInfo.outputPath('code-compact-multiline.png'),animations:'disabled'});
  await page.getByRole('button',{name:'Send',exact:true}).click();
- const allow=page.getByRole('button',{name:'Allow once',exact:true});await expect(allow).toBeVisible();
+ const allow=page.getByRole('button',{name:'Allow',exact:true});await expect(allow).toBeVisible();
  await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Permission required');
  await expect(page.getByRole('heading',{name:'May I write to this file?',exact:true})).toBeVisible();
  await expect(page.getByText('The reason for this request isn’t available here.',{exact:true})).toBeVisible();
@@ -136,7 +136,7 @@ test('public webpage approval uses a deterministic served-view double with an ex
  });
  await page.locator('.code-conversation .pc-composer textarea').fill('Compare the two restaurant pages');
  await page.getByRole('button',{name:'Send',exact:true}).click();
- const allow=page.getByRole('button',{name:'Allow once',exact:true});
+ const allow=page.getByRole('button',{name:'Allow',exact:true});
  await expect(page.getByRole('heading',{name:'May I read these 2 webpages?',exact:true})).toBeVisible();
  const request=page.locator('.pc-avatar-conversation__request');
  await expect(request).toContainText(WHY);

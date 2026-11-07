@@ -50,8 +50,8 @@ test("works under /apps/code/: automations, approval, folder and discuss", async
   await main.getByLabel("Your message").fill("What did run 1 write?");
   await main.getByRole("button", { name: "Start discussion" }).click();
   await expect(page).toHaveURL(/\/apps\/code\/#session=discussion-session/);
-  await expect(page.getByRole("button", { name: "Allow once" })).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Allow once" }).click();
+  await expect(page.getByRole("button", { name: "Allow", exact: true })).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Allow", exact: true }).click();
 
   // Every gateway call went through the app's own base.
   expect(gatewayRequestsOutsideTheMount).toEqual([]);

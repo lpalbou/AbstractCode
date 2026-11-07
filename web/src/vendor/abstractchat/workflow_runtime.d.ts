@@ -141,12 +141,12 @@ export type SessionToolPolicyClient = {
     }>;
 };
 /**
- * Where "Allow for this chat" is stored:
- * - `"gateway"`: on the gateway (every run and client of the chat);
+ * Where a session grant (the approval card's Allow / Allow All) is stored:
+ * - `"gateway"`: on the gateway (every run and client of the session);
  * - `"local-fallback"`: the gateway has no such capability (older gateway, or no client
- *   injected): the client-side grant, labeled as such;
- * - `"unavailable"`: the capability read failed (`sessionPolicyReason`); no chat grant is
- *   made (Allow once still works).
+ *   injected): no session grant; the card's Allow covers the shown request only;
+ * - `"unavailable"`: the capability read failed (`sessionPolicyReason`); no session grant is
+ *   made (Allow still answers the shown request).
  */
 export type SessionPolicyMode = "gateway" | "local-fallback" | "unavailable";
 /** The controller's session-policy state, the ONE source the approval controls read. */
@@ -400,7 +400,16 @@ export declare class WorkflowSessionController {
      */
     private writeThenAnswer;
     /**
-     * "Allow for this chat". Gateway mode: merge `{approve:{all:true}}` into the
+     * "Allow" on the approval card: the named tools for the rest of this session. Gateway mode
+     * only: merge `{approve:{tools}}` into the session's policy, then answer the shown wait
+     * `{approved:true}`. The gateway stores only tools it authorizes for the caller; the rest
+     * come back in `clamped`.
+     */
+    approveToolsForSession(target: WorkflowApprovalTarget, tools: readonly string[], options?: {
+        ask?: readonly string[];
+    }): Promise<SessionToolPolicy>;
+    /**
+     * "Allow All" on the approval card (every tool for the session). Gateway mode: merge `{approve:{all:true}}` into the
      * conversation's policy, then answer the shown wait `{approved:true}`; later
      * calls of every run of the conversation run without a wait. Local fallback
      * (no supported client): the existing client-side grant
@@ -411,7 +420,7 @@ export declare class WorkflowSessionController {
         maxRiskRank?: number;
         ask?: readonly string[];
     }): Promise<SessionToolPolicy | null>;
-    /** "Allow all <toolset> tools for this chat": merge `{approve:{kinds:[kind]}}`, then answer `{approved:true}`. Gateway mode only. */
+    /** Allow one toolset for the session: merge `{approve:{kinds:[kind]}}`, then answer `{approved:true}`. Gateway mode only; no panel control (hosts expose it). */
     approveKindForSession(target: WorkflowApprovalTarget, kind: string, options?: {
         ask?: readonly string[];
     }): Promise<SessionToolPolicy>;

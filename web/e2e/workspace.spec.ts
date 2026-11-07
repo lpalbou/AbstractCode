@@ -373,7 +373,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(
       page.getByRole("heading", { name: "1 action needs permission" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Allow once", exact: true }).click();
+    await page.getByRole("button", { name: "Allow", exact: true }).click();
     await expect(
       page.locator(".code-run-strip").getByText("Completed", { exact: true }),
     ).toBeVisible();
@@ -395,18 +395,23 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     expect(commands.some((command) => command.type === "resume")).toBeTruthy();
   });
 
-  test("compacts tool evidence and persists enabled-tool permissions with explicit revocation", async ({
+  test("compacts tool evidence and keeps Allow All for this session only", async ({
     page,
   }) => {
     await signIn(page);
     const commands: any[] = [];
+    const policyWrites: any[] = [];
     page.on("request", (request) => {
       if (
         request.method() === "POST" &&
         request.url().includes("/api/gateway/commands")
       )
         commands.push(request.postDataJSON());
+      if (request.url().includes("/tool-policy") && request.method() !== "GET")
+        policyWrites.push({ method: request.method(), url: request.url(), body: request.postDataJSON() });
     });
+    const storedTools = () => page.evaluate(() => Object.keys(localStorage).filter((key) => /tool/i.test(key)).map((key) => [key, localStorage.getItem(key)]));
+    const toolsBefore = await storedTools();
     await selectWorkflow(page, "Tool supervision");
     await sendTurn(page);
     await expect(
@@ -416,11 +421,13 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       "Approval needed",
     );
     const approval = page.locator(".pc-workflow-interaction");
-    await expect(approval.locator(".pc-tool-activity")).toHaveCount(3);
-    await expect(approval).toContainText("this batch only");
+    await expect(approval.locator(".af-toolwords__call")).toHaveCount(3);
+    // Operator ruling 2026-11-07: exactly Deny, Allow (this tool), Allow All (every tool).
+    await expect(approval.locator("[data-decision]")).toHaveText(["Deny", "Allow", "Allow All"]);
+    await expect(approval).not.toContainText("this batch only");
     await capture(page, "compact-tool-approval");
     await page
-      .getByRole("button", { name: "Allow all enabled tools", exact: true })
+      .getByRole("button", { name: "Allow All", exact: true })
       .click();
     await expect(
       page.getByRole("heading", { name: "A question for you" }),
@@ -428,9 +435,13 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(page.locator(".code-run-strip")).toContainText(
       "Your answer is needed",
     );
-    await expect(
-      page.getByRole("button", { name: "Revoke", exact: true }),
-    ).toBeVisible();
+    // Stored for this session on the gateway, never in this browser's tool settings.
+    expect(policyWrites).toHaveLength(1);
+    expect(policyWrites[0].method).toBe("POST");
+    expect(policyWrites[0].url).toMatch(/\/sessions\/[^/]+\/tool-policy$/);
+    expect(policyWrites[0].body).toMatchObject({ approve: { all: true } });
+    expect(await storedTools()).toEqual(toolsBefore);
+    await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
     const group = page.locator(".pc-chat-thread > .pc-tool-group");
     await expect(group).toHaveCount(1);
     await expect(group.locator(".pc-tool-activity")).toHaveCount(6);
@@ -529,25 +540,17 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await capture(page, "compact-tool-supervision-mobile-question");
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.reload();
-    // "Allow all enabled tools" made every bulk-reachable enabled tool Auto in this app's tool layer.
-    await expect(page.locator(".code-run-strip")).toContainText("Auto: every enabled tool");
+    // Allow All is the session's: no app-wide "Auto" line, and the next tool call of this
+    // session runs without asking.
+    await expect(page.locator(".code-run-strip")).not.toContainText("Auto: every enabled tool");
     await expect(page.getByRole("heading", { name: "A question for you" })).toBeVisible();
-    await page.getByRole("button", { name: "Revoke", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "Revoke", exact: true }),
-    ).toBeHidden();
     await page.getByRole("button", { name: "continue", exact: true }).click();
+    await expectPersistedCompletion(page);
     await expect(
       page.getByRole("heading", { name: "1 action needs permission" }),
-    ).toBeVisible();
-    const resumesBefore = commands.filter(
-      (command) => command.type === "resume",
-    ).length;
-    await page.getByRole("button", { name: "Allow once", exact: true }).click();
-    await expectPersistedCompletion(page);
-    expect(commands.filter((command) => command.type === "resume").length).toBe(
-      resumesBefore + 1,
-    );
+    ).toHaveCount(0);
+    expect(policyWrites).toHaveLength(1);
+    expect(await storedTools()).toEqual(toolsBefore);
     const approved = commands.filter(
       (command) => command.payload?.payload?.approved === true,
     );
@@ -559,9 +562,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       ).size,
     ).toBe(approved.length);
     await page.reload();
-    await expect(
-      page.getByRole("button", { name: "Revoke", exact: true }),
-    ).toBeHidden();
+    await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
     await expect(page.locator(".code-run-strip")).toContainText("Completed");
     await expect(
       page.locator(

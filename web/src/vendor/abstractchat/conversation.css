@@ -832,7 +832,6 @@
   margin-top: 4px;
 }
 .pc-workflow-interaction__allow-all { border: 1px solid var(--ui-border-1); background: var(--ui-overlay-bg); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; cursor: pointer; font: 600 var(--font-size-sm) var(--font-sans); }
-.pc-workflow-interaction__scope { margin: 0; color: var(--text-secondary); font-size: var(--font-size-xs); line-height: 1.5; max-width: 70ch; }
 .pc-workflow-interaction__outcome:empty { display: none; }
 
 .pc-workflow-interaction__body {
@@ -2464,8 +2463,7 @@ button.pc-ws__name:hover {
 /* --- ui-primitives (chat) --- */
 /* Questions and approvals (backlog 0032): the one decision set. */
 .pc-workflow-interaction__defer,
-.pc-workflow-interaction__skip,
-.pc-workflow-interaction__allow-session {
+.pc-workflow-interaction__skip {
   border: 1px solid var(--ui-border-1);
   background: transparent;
   color: var(--text-secondary);
@@ -2474,15 +2472,9 @@ button.pc-ws__name:hover {
   cursor: pointer;
   font: 600 var(--font-size-sm) var(--font-sans);
 }
-/* Hierarchy (release-closing polish, 2026-10-28): "Allow once", the narrowest grant, is
- * the one accent-tinted primary (the kit's primary: accent tint + ring, theme text, see
- * ui-kit .af-gateway-signin__primary); the broader grants are neutral secondaries, so the
- * widest choice never looks like the default one. */
-.pc-workflow-interaction__allow-session {
-  border-color: var(--ui-border-1);
-  background: var(--ui-overlay-bg);
-  color: var(--text-primary);
-}
+/* Hierarchy: "Allow" (the requested tool, for this session) is the one accent-tinted primary
+ * (the kit's primary: accent tint + ring, theme text, see ui-kit .af-gateway-signin__primary);
+ * "Allow All" is a neutral secondary, so the widest choice never looks like the default one. */
 .pc-workflow-interaction__buttons > [data-decision="approve"] {
   border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
   border-radius: var(--radius-sm);
@@ -2492,29 +2484,13 @@ button.pc-ws__name:hover {
   padding: 6px 12px;
 }
 .pc-workflow-interaction__buttons > [data-decision="approve"]:hover:not(:disabled),
-.pc-workflow-interaction__allow-session:hover:not(:disabled),
 .pc-workflow-interaction__allow-all:hover:not(:disabled) {
   border-color: var(--ui-border-2, var(--ui-border-1));
   filter: brightness(1.08);
 }
-.pc-workflow-interaction__scope-details > summary {
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-.pc-workflow-interaction__scope-details[open] > summary { margin-bottom: 6px; }
-.pc-workflow-interaction__scope-details > .pc-workflow-interaction__scope + .pc-workflow-interaction__scope { margin-top: 6px; }
 .pc-workflow-interaction__defer { margin-right: auto; border-color: transparent; }
 .pc-workflow-interaction__defer:hover:not(:disabled),
 .pc-workflow-interaction__skip:hover:not(:disabled) { background: var(--ui-overlay-bg-hover); }
-.pc-workflow-interaction__remember {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-}
 .pc-workflow-interaction__unavailable {
   margin: 0;
   color: var(--warning);
@@ -2637,28 +2613,17 @@ button.pc-ws__name:hover {
 @media (pointer: coarse) {
   .pc-attachment-chip__action,
   .pc-workflow-chat__steer-mode { min-height: var(--tap-min, 44px); min-width: var(--tap-min, 44px); }
-  .pc-workflow-interaction__review > summary,
-  .pc-workflow-interaction__remember { min-height: var(--tap-min, 44px); }
+  .pc-workflow-interaction__review > summary { min-height: var(--tap-min, 44px); }
   .pc-workflow-interaction__review > summary { display: flex; align-items: center; }
 }
 
 /* --- ui-primitives (session-policy) --- */
 .pc-workflow-interaction__scope-note {
   margin: 0;
-  color: var(--warning);
+  color: var(--text-secondary);
   font-size: var(--font-size-xs);
   line-height: 1.5;
   max-width: 70ch;
-}
-.pc-workflow-interaction__more > summary {
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-.pc-workflow-interaction__more[open] > summary { margin-bottom: 6px; }
-@media (pointer: coarse) {
-  .pc-workflow-interaction__more > summary,
-  .pc-workflow-interaction__scope-details > summary { min-height: var(--tap-min, 44px); display: flex; align-items: center; }
 }
 
 .pc-message-artifact { display: inline-flex; flex-direction: column; gap: 4px; max-width: 100%; }

@@ -200,7 +200,7 @@ export default {
         await selectWorkflow(page, "Native tool approval");
         await page.getByRole("button", { name: "Run workflow", exact: true }).click();
         await page.getByRole("heading", { name: "1 action needs permission" }).waitFor({ state: "visible", timeout: 30000 });
-        await page.getByRole("button", { name: "Allow once", exact: true }).scrollIntoViewIfNeeded().catch(() => {});
+        await page.getByRole("button", { name: "Allow", exact: true }).scrollIntoViewIfNeeded().catch(() => {});
       },
     },
     {

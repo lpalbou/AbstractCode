@@ -12,21 +12,17 @@ export function RunStatusBar({
   active,
   paused,
   snapshot,
-  onRevokeApproval,
   onCommand,
   onActivity,
   onInteraction,
-  permissionsAll,
   publicView = false,
 }: {
   active: boolean;
   paused: boolean;
   snapshot: WorkflowSessionSnapshot;
-  onRevokeApproval: () => void;
   onCommand: (command: string) => void;
   onActivity: () => void;
   onInteraction?: () => void;
-  permissionsAll?: boolean;
   publicView?: boolean;
 }) {
   const progress = useMemo(() => workflowProgress(snapshot), [snapshot]);
@@ -125,13 +121,6 @@ export function RunStatusBar({
       <button onClick={onActivity}>
         View activity <Icon name="chevronRight" size={12} />
       </button>
-      {permissionsAll ? (
-        <div className="code-run-strip__consent">
-          <Icon name="check" size={13} />
-          <span>{publicView ? "Automatic permissions are on · this browser" : "Auto: every enabled tool · this browser"}</span>
-          <button onClick={onRevokeApproval}>Revoke</button>
-        </div>
-      ) : null}
     </div>
   );
 }

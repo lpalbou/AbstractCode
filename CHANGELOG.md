@@ -16,6 +16,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.5] - 2026-11-07
+
+On AbstractUIC 0.10.7 (`@abstractframework/panel-chat` ^0.9.0, floor raised from ^0.8.2). Same gateways as
+web 0.15.4.
+
+### Changed
+
+- **A tool approval offers three choices: Deny, Allow and Allow All.** Deny refuses the request. Allow allows
+  that tool for the rest of this conversation; Allow All allows every tool for the rest of this conversation.
+  Both are kept on the gateway for this session only and never change your tool settings in Agent → Tools
+  (operator 2026-11-07: "it NEVER changes the default of abstractcode, it only changes the permissions for a
+  session"). "Allow once", "Allow for this chat", "Allow all <toolset> tools for this chat", "Allow all enabled
+  tools", "More" and the paragraphs about what the broader choices allow are gone; the card keeps its title,
+  what the tool will do and **Review full tool arguments (JSON)**.
+
+### Fixed
+
+- **Allow and Allow All never hang on a gateway that does not answer.** Storing the choice for the session waits at
+  most 15 seconds; then the card says the gateway did not answer, and you can try again or Deny.
+
+### Removed
+
+- **"Allow all enabled tools" and its "Auto: every enabled tool · this browser · Revoke" line.** The card no
+  longer turns every enabled tool to Auto in this browser's tool settings (backlog 0006, closed by the
+  operator's decision).
+
 ## [web 0.15.4] - 2026-11-07
 
 On AbstractUIC 0.10.5 (`@abstractframework/ui-kit` ^0.9.18, floor raised from ^0.9.16). Same gateways

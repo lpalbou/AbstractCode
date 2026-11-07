@@ -82,14 +82,14 @@ describe("replay-view mode through the app's transport", () => {
     expect(rows.find((row) => row.statusLabel === "approval needed")?.runId).toBe(CHILD);
 
     // The status strip says what the person is asked.
-    const strip = renderToStaticMarkup(<RunStatusBar active paused={false} snapshot={snapshot} onRevokeApproval={() => {}} onCommand={() => {}} onActivity={() => {}} />);
+    const strip = renderToStaticMarkup(<RunStatusBar active paused={false} snapshot={snapshot} onCommand={() => {}} onActivity={() => {}} />);
     expect(strip).toContain("Approval needed");
 
     // The approval card, answered with the view's command (the CHILD run, its wait key).
     const interaction = presentInteraction(workflowPendingInteraction(snapshot), controller, { records: snapshot.records, currentRun: snapshot.run });
     expect(interaction?.kind).toBe("tool-approval");
     const chat = renderToStaticMarkup(<WorkflowChat messages={snapshot.messages} draft="" onDraftChange={() => {}} onSend={() => {}} interaction={interaction} />);
-    expect(chat).toContain("Allow once");
+    expect(chat).toContain(">Allow<");
     expect(chat).toContain("write_file");
     if (interaction?.kind !== "tool-approval") throw new Error("not an approval");
     await interaction.onApprove();
