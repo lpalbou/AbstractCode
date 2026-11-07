@@ -54,10 +54,8 @@ async function signIn(page) {
   for (;;) {
     if (await dialog.isVisible().catch(() => false)) break;
     if (await select.isEnabled().catch(() => false)) return;
-    // A conversation with a live run locks the workflow select; the status bar still says Connected.
-    if (await page.locator(".code-statusbar").getByText("Connected", { exact: true }).isVisible().catch(() => false)) return;
-    // Phone landscape hides the status bar: the top bar's connection pill says the same.
-    // Signed in: the kit's ONE account widget (ui-kit 0.9.6; no connected pill any more).
+    // Signed in (also while a live run locks the workflow select): the kit's ONE account widget
+    // (ui-kit 0.9.6) in the top bar; there is no status line.
     if (await page.locator(".af-topbar__identity--menu").isVisible().catch(() => false)) return;
     if (Date.now() > end) throw new Error("neither the sign-in dialog nor a connected workspace appeared");
     await page.waitForTimeout(150);

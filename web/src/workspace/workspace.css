@@ -264,7 +264,7 @@ button {
   margin-top: 3px;
   color: var(--text-secondary);
 }
-.code-session > span:not(.code-status-dot) {
+.code-session > span {
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -543,40 +543,6 @@ select option {
   align-items: center;
   justify-content: center;
 }
-.code-conversation .pc-chat-item {
-  width: 100%;
-  max-width: 100%;
-  align-self: stretch;
-  border: 0;
-  border-radius: 0;
-  border-bottom: 1px solid var(--ui-border-1);
-  background: transparent;
-  padding: 22px 0;
-  box-shadow: none;
-}
-.code-conversation .pc-chat-item--user {
-  background: transparent;
-}
-.code-conversation .pc-chat-header {
-  margin-bottom: 12px;
-}
-.code-conversation .pc-chat-avatar {
-  border-radius: 6px;
-  background: var(--accent-subtle);
-  color: var(--accent);
-}
-.code-conversation .pc-chat-role {
-  font-weight: 600;
-  font-size: var(--font-size-md);
-}
-.code-conversation .pc-md {
-  font-size: var(--font-size-base);
-  line-height: 1.8;
-}
-.code-conversation .pc-chat-time {
-  font-size: var(--font-size-xxs);
-  color: var(--text-secondary);
-}
 .code-conversation .pc-workflow-chat__composer {
   padding: 14px max(24px, calc((100% - 800px) / 2)) 0;
   border: 0;
@@ -658,8 +624,7 @@ select option {
   align-items: center;
   gap: 7px;
 }
-.code-small-dot,
-.code-status-dot {
+.code-small-dot {
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -667,16 +632,8 @@ select option {
   background: var(--text-secondary);
   flex-shrink: 0;
 }
-.code-small-dot,
-.code-status-dot.is-online {
+.code-small-dot {
   background: var(--success);
-}
-.code-status-dot.is-working {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-subtle);
-}
-.code-status-dot.is-waiting {
-  background: var(--warning);
 }
 .code-welcome {
   width: 100%;
@@ -1123,6 +1080,45 @@ select option {
   padding-bottom: 12px;
   overflow: auto;
 }
+/* A run's final answer (Markdown, whole text): folded to about five lines with a fade,
+   "Show more" unfolds it. Indented under the row title (icon 14px + gap 7px). */
+.code-activity-row--answer .code-activity-disclosure > summary {
+  padding-bottom: 4px;
+}
+.code-activity-answer {
+  padding: 0 0 10px 21px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.code-activity-answer-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.code-activity-answer-body:not(.is-expanded) {
+  max-height: 7.25em;
+  overflow: hidden;
+}
+.code-activity-answer-body.is-folded {
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.code-activity-answer .pc-md {
+  font-size: inherit;
+  line-height: 1.45;
+}
+.code-activity-answer .pc-md > :first-child {
+  margin-top: 0;
+}
+.code-activity-answer .pc-md > :last-child {
+  margin-bottom: 0;
+}
+.code-activity-answer .pc-md strong {
+  color: var(--text-primary);
+}
+.code-activity-answer-toggle {
+  margin-top: 6px;
+  padding: 2px 0;
+}
 .code-artifact {
   display: flex;
   align-items: center;
@@ -1148,32 +1144,6 @@ select option {
 .code-artifact small {
   font-size: var(--font-size-xxs);
   color: var(--text-secondary);
-}
-.code-statusbar {
-  min-height: calc(28px + var(--safe-bottom, 0px));
-  padding: 0 18px var(--safe-bottom, 0px);
-  border-top: 1px solid var(--ui-border-1);
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  font-size: calc(10px * var(--font-scale));
-  color: var(--text-secondary);
-}
-.code-statusbar > span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.code-statusbar > div {
-  flex: 1;
-}
-.code-statusbar button {
-  font-size: inherit;
-  background: transparent;
-  border: 0;
-  padding: 4px 0;
-  color: inherit;
-  text-transform: capitalize;
 }
 .code-alert,
 .code-notice,
@@ -1623,9 +1593,6 @@ select option {
   .code-conversation .pc-chat-thread {
     padding: 14px var(--gutter, 16px);
   }
-  .code-conversation .pc-chat-item {
-    padding: 16px 0;
-  }
   .code-conversation .pc-workflow-chat__composer {
     padding: 8px var(--gutter, 16px) max(8px, var(--safe-bottom, 0px));
   }
@@ -1641,13 +1608,6 @@ select option {
   }
   .code-suggestions {
     margin-top: 25px;
-  }
-  .code-statusbar {
-    padding-inline: 12px;
-    gap: 10px;
-  }
-  .code-statusbar > span:nth-child(2) {
-    display: none;
   }
   .code-run-strip {
     padding: 6px var(--gutter, 16px);
@@ -1754,7 +1714,7 @@ select option {
     gap: 0;
   }
 }
-/* short (<= 500 px tall: phone landscape): one thin row of chrome, no status bar, a compact
+/* short (<= 500 px tall: phone landscape): one thin row of chrome, a compact
    composer — the transcript gets the height. */
 @media (max-height: 500px) {
   :root {
@@ -1765,11 +1725,10 @@ select option {
   .code-main-shell {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
     grid-template-areas:
       "nav tool actions"
-      "content content content"
-      "foot foot foot";
+      "content content content";
   }
   .code-topbar {
     display: contents;
@@ -1809,24 +1768,15 @@ select option {
     grid-area: content;
     border-top: 1px solid var(--ui-border-1);
   }
-  .code-statusbar {
-    grid-area: foot;
-  }
   .code-toolbar {
     min-height: 40px;
     padding-block: 2px;
-  }
-  .code-statusbar {
-    display: none;
   }
   .code-conversation .pc-workflow-chat__footer {
     display: none;
   }
   .code-conversation .pc-chat-thread {
     padding-block: 10px;
-  }
-  .code-conversation .pc-chat-item {
-    padding: 12px 0;
   }
   .code-conversation .pc-workflow-chat__composer {
     padding-top: 4px;
@@ -1889,7 +1839,6 @@ select option {
   .code-file-list button,
   .code-settings-tabs button,
   .code-run-strip button,
-  .code-statusbar button,
   .code-text-button,
   .code-back,
   .code-artifact,
@@ -1932,10 +1881,8 @@ select option {
     min-height: var(--tap-min, 44px);
     font-size: var(--font-size-input, 16px);
   }
-  .code-statusbar,
   .code-inspector-foot,
-  .code-conversation .pc-workflow-chat__footer,
-  .code-statusbar {
+  .code-conversation .pc-workflow-chat__footer {
     min-height: calc(32px + var(--safe-bottom, 0px));
   }
 }
@@ -1970,13 +1917,12 @@ select option {
   }
 }
 /* On-screen keyboard up (<html data-keyboard="open">, from --keyboard-inset via layout.ts): the
-   visible height is small, so the chrome steps aside while typing — no top bar, toolbar, run
-   strip or status bar; the composer keeps its field (1-2 lines, at most 30 % of the visible
+   visible height is small, so the chrome steps aside while typing — no top bar, toolbar or run
+   strip; the composer keeps its field (1-2 lines, at most 30 % of the visible
    height) and its control row; everything returns with the keyboard down. */
 :root[data-keyboard="open"] .code-topbar,
 :root[data-keyboard="open"] .code-toolbar,
 :root[data-keyboard="open"] .code-run-strip,
-:root[data-keyboard="open"] .code-statusbar,
 :root[data-keyboard="open"] .code-conversation .pc-workflow-chat__footer {
   display: none;
 }
@@ -2542,8 +2488,8 @@ select option {
   align-self: stretch;
   box-sizing: border-box;
 }
-/* User and trigger cards sit on the right; their text reads normally. */
-.code-conversation .pc-chat-item--user,
+/* Trigger cards sit on the right; their text reads normally. (A conversation's messages are
+   panel-chat's default message, unstyled here: the web Assistant and Code look the same.) */
 .code-auto-main-body .af-auto .pc-chat-item--user {
   width: 75%;
   max-width: 75%;
@@ -2557,7 +2503,6 @@ select option {
   padding: 16px;
   text-align: left;
 }
-.code-conversation .pc-chat-item--user .pc-chat-content,
 .code-auto-main-body .pc-chat-item--user .pc-chat-content {
   text-align: left;
 }
@@ -2653,9 +2598,6 @@ select option {
   white-space: nowrap;
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
-}
-.code-session.code-card > .code-status-dot {
-  margin-top: 6px;
 }
 .code-automation-item { margin-bottom: 8px; min-width: 0; }
 .code-switch-icon-only .af-switch__text {

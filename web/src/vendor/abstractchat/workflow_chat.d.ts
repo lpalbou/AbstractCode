@@ -61,6 +61,14 @@ export type WorkflowChatProps = {
         signal: AbortSignal;
     }) => void | Promise<unknown>;
     busy?: boolean;
+    /**
+     * The assistant is working on a reply (the host's run state, e.g. `workflowProgress(...).tone
+     * === "working"`): three rising dots (`WorkingDots`) sit at the transcript's tail, where the
+     * reply will appear. Not shown while an interaction waits on the person, nor in the Avatar view.
+     */
+    working?: boolean;
+    /** Accessible name of the working dots. Default "Working". */
+    workingLabel?: string;
     /** Keep the composer active while busy, for hosts that queue/steer messages. */
     sendWhileBusy?: boolean;
     sendLabel?: string;

@@ -21,7 +21,7 @@ test("works under /apps/code/: automations, approval, folder and discuss", async
   // The handover signs the browser in and lands on the app.
   await page.goto(openUrl);
   await expect(page).toHaveURL(/\/apps\/code\/(#.*)?$/);
-  await expect(page.locator(".code-statusbar").getByText("Connected", { exact: true })).toBeVisible();
+  await expect(page.locator(".af-topbar__identity--menu .af-topbar__dot--connected")).toBeVisible();
 
   // Create an automation with the gateway default agent (the toolbar's default).
   const title = `Mounted automation ${Date.now()}`;

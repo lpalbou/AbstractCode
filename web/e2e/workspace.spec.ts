@@ -84,9 +84,8 @@ async function signIn(page: Page, captureLogin = false): Promise<void> {
   await openWorkspaceSection(page, "Workflow");
   await expect(page.getByRole("combobox", { name: "Workflow", exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
-  await expect(
-    page.locator(".code-statusbar").getByText("Connected", { exact: true }),
-  ).toBeVisible();
+  // Connected: the top bar's account widget (its green dot); there is no status line.
+  await expect(page.locator(".af-topbar__identity--menu .af-topbar__dot--connected")).toBeVisible();
 }
 
 async function selectWorkflow(page: Page, name: string): Promise<void> {

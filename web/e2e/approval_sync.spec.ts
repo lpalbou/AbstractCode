@@ -71,7 +71,7 @@ async function signIn(page: Page): Promise<void> {
   await openWorkspaceSection(page, "Workflow");
   await expect(page.getByRole("combobox", { name: "Workflow", exact: true })).toBeEnabled();
   await closeWorkspaceDrawer(page);
-  await expect(page.locator(".code-statusbar").getByText("Connected", { exact: true })).toBeVisible();
+  await expect(page.locator(".af-topbar__identity--menu .af-topbar__dot--connected")).toBeVisible();
 }
 
 async function selectWorkflow(page: Page, name: string): Promise<void> {

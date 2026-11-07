@@ -62,6 +62,7 @@ import {
   useAttachmentUploads,
   type ComposerAttachment,
   workflowPendingInteraction,
+  workflowProgress,
   type ChatMessage,
 } from "@abstractframework/panel-chat";
 import {
@@ -513,6 +514,11 @@ export function CodeWorkspace() {
   // accepted Allow) is running work, not a question: no card, no "Approval
   // needed". The server still asks, so the raw wait stays in the snapshot.
   const pendingInteraction = workflowPendingInteraction(snapshot);
+  // The assistant is working on a reply: the run's own state (the run strip's "working" tone —
+  // a model call, a tool, a step), or a send still starting. Never while it waits on the person,
+  // a timer or an event, nor while paused. WorkflowChat shows the working dots for it.
+  const progressTone = useMemo(() => workflowProgress(snapshot).tone, [snapshot]);
+  const working = !paused && (sending || (active && progressTone === "working"));
   const interaction = useMemo(
     () =>
       // Deny / Allow (this tool) / Allow All (every tool), the two allows for the rest of this
@@ -2001,6 +2007,8 @@ export function CodeWorkspace() {
               onSend={send}
               busy={locked}
               busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
+              working={working}
+              workingLabel={sending ? "Starting" : "Working"}
               steer={steer}
               toolbar={messages.length ? { exportTranscript: { filename: "conversation.md" } } : undefined}
               onCancel={cancelCurrentRun}
@@ -2119,26 +2127,6 @@ export function CodeWorkspace() {
           {railElement}
           <CodeDocsAssistant key={identity || "signed-out"} connected={connection.connected} open={docsOpen} onClose={() => setDocsOpen(false)} voicePreferences={voicePreferences} />
         </div>
-        <footer className="code-statusbar">
-          <span>
-            <span
-              className={`code-status-dot ${connection.connected ? "is-online" : ""}`}
-            />
-            {connection.connected
-              ? "Connected"
-              : connection.phase === "loading"
-                ? "Connecting"
-                : "Disconnected"}
-          </span>
-          <span>{workflow?.name || "No workflow selected"}</span>
-          <div />
-          <span>
-            {session.runId
-              ? `Run ${session.runId.slice(0, 8)}`
-              : "Ready to start"}
-          </span>
-          <span>{appearance.theme.replace(/-/g, " ")}</span>
-        </footer>
       </div>
       <div className="pc-sr-only" role="status" aria-live="polite">
         {uploads.announcement}
