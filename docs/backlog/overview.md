@@ -14,9 +14,9 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 4 | 0001, 0002, 0003, 0008 |
+| Planned | 3 | 0001, 0002, 0003 |
 | Proposed | 8 | 0004, 0005, 0006, 0010, 0011, 0018, 0019, 0020 |
-| Completed | 18 | 0007, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030 |
+| Completed | 19 | 0007, 0008, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030 |
 | Deprecated | 0 |  |
 | Recurrent | 0 |  |
 
@@ -65,7 +65,6 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0001 | [Automations: WUI section and TUI `/automations` + `/schedule`](planned/0001_automations_wui_section_and_tui_commands.md) | web, tui | Surfaces built on `wave2/automations` (2026-09-28, unreleased); the session-kind filter/toggle on both session lists remains. |
 | 0002 | [TUI session fold defects](planned/0002_tui_session_fold_defects.md) | tui | child runs counted as turns; id-less runs; string timestamp ordering; first run by page order — align with the web fold |
 | 0003 | [Mermaid diagrams in the TUI transcript](planned/0003_mermaid_diagrams_in_the_transcript.md) | tui + abstracttui | an abstracttui release adding a `Feed` fence hook (+ `abstracttui-mermaid` multi-diagram cache); operator to lift the read-only rule on abstracttui |
-| 0008 | [Read aloud and export](planned/0008_adopt_panel_chat_read_aloud_export.md) | web | Shared panel-chat actions |
 
 
 
@@ -104,6 +103,7 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0028 | [Readable, scrollable Skills picker](completed/0028_readable_scrollable_skills_picker.md) — 1221 tests passed; locally installed and native mouse scrolling verified | tui |
 | 0029 | [Shared avatar catalog and rendering](completed/0029_shared_avatar_catalog_and_rendering.md) — six shared models, red X Error and Ready cursor tracking; full suites and native installation verified | tui + ui-kit + engine |
 | 0030 | [Web voice and shared Docs playback](completed/0030_web_voice_docs_playback_and_sidebar_polish.md) — 502 Code tests, shared/Assistant/islands checks, 8 browser tests and 7 live app checks pass; locally deployed | web + shared UI |
+| 0008 | [Read aloud from panel-chat](completed/0008_adopt_panel_chat_read_aloud_export.md) — completed 2026-11-07 in web 0.15.1; inlined copy deleted, 503 web tests pass | web |
 
 ## Deprecated
 

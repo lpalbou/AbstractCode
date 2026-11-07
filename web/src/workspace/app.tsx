@@ -138,7 +138,7 @@ import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
 import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
-import { READ_ALOUD_INITIAL, readAloudStep } from "../lib/read_aloud";
+import { READ_ALOUD_INITIAL, readAloudStep } from "@abstractframework/panel-chat";
 import { codeReadAloudInput } from "./read_aloud_input";
 import { TOOLS_MIGRATION_NOTICE, allEnabledAuto, migrateLegacyTools, toolsMigrationKey, withAllEnabledAuto, withoutAutoChoices } from "./tool_layers";
 import {
@@ -484,6 +484,13 @@ export function CodeWorkspace() {
     },
     onError: setError,
   });
+
+  // Talking in the Avatar view stops a reply that is being read aloud first, so the assistant
+  // never talks over you into the microphone (0.15.0's Talk button did this; the composer
+  // microphone replaced it in 0.15.1).
+  useEffect(() => {
+    if (avatarMode && voice.voice_ptt_recording) voice.stop_tts();
+  }, [avatarMode, voice.voice_ptt_recording, voice.stop_tts]);
   // Read aloud (the Voice panel): a reply is spoken by itself only when it was
   // generated while this conversation is open — its run was seen in progress
   // here (operator 2026-10-29: opening, reloading or switching to a session

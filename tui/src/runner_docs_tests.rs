@@ -39,6 +39,10 @@ impl Server {
                     thread::sleep(Duration::from_millis(3));
                     continue;
                 };
+                // macOS (BSD) hands out accepted sockets that inherit the listener's non-blocking
+                // mode; Linux does not. Reads below must block (with the timeout), or a request
+                // that has not fully arrived fails with WouldBlock on a Mac.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();

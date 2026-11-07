@@ -223,8 +223,9 @@ Essential questions keep waiting. A clarification may state a two-to-five minute
 answer deadline and what will happen without an answer. **Conversation cues** controls
 visual and audio alerts independently for questions, permission requests and completion.
 Audio alerts default off. Voice narration uses the existing voice preference;
-reading history or editing a reply silences automatic narration. Playback can be paused
-or silenced without stopping the task.
+reading history or editing a reply silences automatic narration. Talk with the composer's
+microphone (talking stops a reply that is being read aloud); play or pause a reply (and the live
+line) with its own play button, and stop it with the X in the composer, without stopping the task. The avatar shows the speaking pose only while the reply is audible.
 
 Public updates require a run started in Avatar mode and a backend supporting the public
 conversation protocol. Switching an already active legacy run changes its presentation;
