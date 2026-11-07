@@ -16,6 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.9] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.11 (`@abstractframework/panel-chat` 0.9.4, `@abstractframework/ui-kit` 0.9.22), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.8.
+
+### Fixed
+
+- **Stop pressed right after sending the first message of a new conversation stops it.** It showed "Could not
+  stop the run: No workflow run is loaded" and the reply arrived anyway: the run did not exist yet. Now a Stop
+  before the gateway has started the run starts nothing; a Stop while it is starting stops the run as soon as the
+  gateway returns it ("Stopped" at the top, the message box back to the microphone and Send).
+- **Play and Re-open audio start the sound inside your click** (Safari only lets a page start sound there), and
+  Code keeps at most one audio player open, only while Read aloud is on; turning Read aloud off releases it.
+- **The speaker Test says so when the chime did not finish** instead of "Chime played", and never waits forever.
+
+### Known limits
+
+- Headphones connected while the model is thinking: Safari cannot start the reply by itself; after 1.5 s Code
+  says "Audio playback is paused by the browser. Press Play to try again."
+- The macOS output switched less than 30 s after your last click or key press: the next reply may be silent with
+  no message. Press Play (after 30 s of silence) or pick **Re-open audio** in Voice settings.
+
 ## [web 0.15.8] - 2026-11-07 (local build, not published)
 
 Built on AbstractUIC 0.10.10 (`@abstractframework/panel-chat` 0.9.3, `@abstractframework/ui-kit` 0.9.21), vendored

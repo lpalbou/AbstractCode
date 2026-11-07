@@ -293,6 +293,7 @@ export function CodeWorkspace() {
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const sendLock = useRef(false);
+  const stopWhenLoaded = useRef("");
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -946,7 +947,7 @@ export function CodeWorkspace() {
     return input;
   }
 
-  async function startTurn(text: string): Promise<string> {
+  async function startTurn(text: string, signal?: AbortSignal): Promise<string> {
     if (sendLock.current) throw new Error("A turn is already being submitted.");
     if (!connection.connected)
       throw new Error("Connect to your gateway first.");
@@ -1023,6 +1024,8 @@ export function CodeWorkspace() {
         input,
       });
       if (avatarMode) Object.assign(body, { conversation: true });
+      // Stop pressed before the start left: nothing is started, nothing to cancel.
+      if (signal?.aborted) throw new DOMException("Stopped before the run started.", "AbortError");
       const result = await gatewayRequest(gatewayApiPath("runs/start"), {
         method: "POST",
         body: JSON.stringify(body),
@@ -1037,6 +1040,9 @@ export function CodeWorkspace() {
       )
         throw staleSendAbort();
       attachedRun = String(result.run_id);
+      // Stop pressed while the start was in flight (review 2026-11-08 D1): the gateway has the run
+      // now, so it is shown and stopped as soon as it is loaded (a run nobody sees must not go on).
+      if (signal?.aborted) stopWhenLoaded.current = attachedRun;
       startedRunInput.current = { runId: attachedRun, input };
       // "@default" resolves at every start: refresh the label from each one.
       setResolvedNote({
@@ -1141,8 +1147,8 @@ export function CodeWorkspace() {
       : undefined;
 
   /** A message from outside the composer (the microphone): starts a turn, or steers / queues a busy run. */
-  async function send(text: string) {
-    if (!active) return startTurn(text);
+  async function send(text: string, opts?: { signal?: AbortSignal }) {
+    if (!active) return startTurn(text, opts?.signal);
     const result = avatarMode ? await guideRun(text) : interaction ? queueNextTurn(text) : await guideRun(text);
     if (!result.accepted) throw new Error("The gateway did not accept this message.");
     setDraft("");
@@ -1215,6 +1221,9 @@ export function CodeWorkspace() {
   ]);
 
   async function cancelCurrentRun(): Promise<void> {
+    // A start in flight has no run to cancel yet: WorkflowChat aborted the send's signal, and
+    // startTurn stops the run the gateway returns (never a cancel of the previous run).
+    if (sendLock.current) return;
     const sid = session.sessionId;
     const rid = session.runId;
     const epoch = authEpoch.current;
@@ -1230,6 +1239,14 @@ export function CodeWorkspace() {
       setNotice("");
     }
   }
+  // The run a Stop asked for before it existed (startTurn): cancel it once it is loaded here.
+  useEffect(() => {
+    const runId = stopWhenLoaded.current;
+    if (!runId || session.runId !== runId || String(snapshot.run?.run_id || "") !== runId) return;
+    stopWhenLoaded.current = "";
+    if (terminal(snapshot.status)) return;
+    void controller.cancel().catch((e) => setError(formatError(e)));
+  }, [controller, session.runId, snapshot.run?.run_id, snapshot.status]);
   const act = (callback: () => Promise<unknown>) => {
     const epoch = authEpoch.current;
     const sid = session.sessionId;

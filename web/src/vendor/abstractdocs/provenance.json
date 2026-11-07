@@ -60,7 +60,7 @@
     "dist/markdown.js": "1aa9d0c784c16cc8a59694b98905d98e2a2c7e5fd47fbf5077d9549ab84c0943",
     "dist/file_viewer.js": "6b63888c203f93f9ea13030542d3c797f17f13ba2ecec7770baf9f4aa5cca4af",
     "dist/workspace_browser.js": "6fe4cb01eb624e074ef7ab024ffb3345875b24429dacd24b7f5022fd4045eebf",
-    "dist/docs_voice.js": "39395c890ae4a3bfd0b38d4adb80748871f47c05d1f377edabd4f5d6b3404b23",
+    "dist/docs_voice.js": "f1ff56046959f1472d7b5e93f0656957064aeabdc77bc17be03008be6375169d",
     "dist/artifact_preview.js": "1738ee5ad754e2fdc0838c305d0977f09814d78275ec04d89ea916d5a6130ec3",
     "dist/attachment_uploads.js": "60cb923df3ff9600fe56b7ef8f8578356af2eef234ac647f3888f17a0f627875",
     "dist/artifact_provenance.js": "866671635e943165c1e4ea293e34a115d189de4cbfe59037b8b6569dade125ef",
@@ -80,7 +80,7 @@
     "dist/docs_assistant.js": "be96a9677138185f1ad83241f70f43038de88b99802b52f76d986065e2570f10"
   },
   "artifacts": {
-    "docs_assistant.js": "1f3829cf4b33778c485fc1945d44abee71427f9ebf871755173807259dded7c3",
+    "docs_assistant.js": "756be6b6cb9136ded4566d43fbc4bdd7398b3eda0b78f5c48b01c06bf4b6beb3",
     "artifact_preview.d.ts": "40c581cd1ef271dcb631c23f20898583822581c1c8e7ea0b0a68bbede8414432",
     "artifact_provenance.d.ts": "c4b4f810379ec2bfcde8f60db49fad72953cd07da16f4aff7e2bf22e0d3fe49a",
     "assistant_panel.d.ts": "46bde9b7f3a1e51074ba32c3f6b52cb0f63b0db439f010e0896498a22b1c5202",
