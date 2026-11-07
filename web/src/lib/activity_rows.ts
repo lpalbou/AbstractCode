@@ -656,7 +656,9 @@ export function describe_record(record: unknown): RecordDescription {
     return {
       kind: "message",
       title: "message",
-      detail: one_line(String(payload.message || ""), 110),
+      // The model's words, whole and Markdown like a finished run's answer: the panel folds them.
+      detail: String(payload.message || ""),
+      ...(String(payload.message || "").trim() ? { detailMarkdown: true } : {}),
       ...visible,
     };
 

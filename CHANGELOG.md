@@ -24,8 +24,8 @@ once it is on npm. Same gateways as web 0.15.5.
 
 ### Changed
 
-- **A finished run's answer shows whole in the Activity panel, as Markdown.** The "run finished" and
-  "subflow finished" rows used to flatten the answer to one line and cut it at 110 characters, so bold and
+- **A finished run's answer shows whole in the Activity panel, as Markdown.** The "run finished", "subflow finished"
+  and "message" rows used to flatten the answer to one line and cut it at 110 characters, so bold and
   lists arrived as raw `**` and `-`. The row now carries the whole answer and renders it with the chat's
   Markdown (bold, lists, code, safe links; no raw HTML; remote images stay links), folded to about five lines
   with a fade. **Show more** unfolds it, **Show less** folds it back; the button says which, and works with

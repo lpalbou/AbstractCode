@@ -118,3 +118,16 @@ describe("the answer's fold: Show more / Show less", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("message rows (answer_user): the same whole Markdown answer", () => {
+  const msgRows = (message: string): ActivityRow[] =>
+    activity_rows(
+      [{ runId: "r", cursor: 1, record: { run_id: "r", step_id: "m1", status: "completed", effect: { type: "answer_user", payload: { message } }, result: { message } } }],
+      "r",
+    );
+  it("carries the whole text uncut and marks it Markdown", () => {
+    const row = msgRows(ANSWER).find((r) => r.title === "message");
+    expect(row?.detail).toBe(ANSWER);
+    expect(row?.detailMarkdown).toBe(true);
+  });
+});
