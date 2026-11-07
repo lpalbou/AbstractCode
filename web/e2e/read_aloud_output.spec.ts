@@ -178,3 +178,57 @@ test("after Stop the composer is idle; Read aloud speaks each reply, also after 
   await shot(page, "output-device-400");
   expect(errors).toEqual([]);
 });
+
+// Review 2026-11-08 D1: Stop pressed at once on the first message of a new conversation, while the
+// gateway is still starting the run (its answer is held back 1.2 s here, as on a busy gateway).
+// The run the gateway returns is stopped as soon as it is loaded: no "Could not stop" banner, no
+// reply, "Stopped" at the top, the message box back to the microphone and Send.
+test("Stop pressed while a new conversation's run is starting stops that run", async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const allowed = new URL(appOrigin).origin;
+  let started = 0;
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== allowed) return route.abort("blockedbyclient");
+    if (!url.pathname.endsWith("/api/gateway/runs/start")) return route.continue();
+    started += 1;
+    const response = await route.fetch(); // the gateway starts the run now ...
+    await new Promise((r) => setTimeout(r, 1200)); // ... and its answer arrives later
+    return route.fulfill({ response });
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const dialog = page.getByRole("dialog", { name: "Gateway connection" });
+  await page.locator("#gateway-session-url").fill(fixtureGateway);
+  await page.locator("#gateway-session-user").fill(fixtureUser);
+  await page.locator("#gateway-session-token").fill(fixtureToken);
+  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await chooseWorkflow(page, "Event listener");
+  const composer = page.locator(".code-conversation .pc-composer");
+  const primary = composer.locator(".pc-composer__send--compact");
+  await page.locator(".code-conversation .pc-composer textarea").fill("Stop me at once.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  const sentAt = Date.now();
+  await expect(primary).toHaveAttribute("aria-label", "Stop", { timeout: 1_000 });
+  await primary.click();
+  expect(Date.now() - sentAt).toBeLessThan(400); // pressed while the start is in flight
+  await expect(page.locator(".code-run-strip")).toContainText("Stopped", { timeout: 20_000 });
+  await expect(page.getByText(/Could not stop the run/)).toHaveCount(0);
+  await expect(primary).toHaveAttribute("data-mode", "send");
+  await expect(primary).toHaveAttribute("aria-label", "Send");
+  await expect(composer).not.toContainText("Stopped");
+  expect(await composer.locator('button:visible:not([aria-label="Attach file"])').count()).toBe(2);
+  await expect(page.locator(".pc-chat-item--assistant")).toHaveCount(0);
+  await expect(page.locator(".code-conversation .pc-composer textarea")).toHaveValue(""); // it was sent
+  expect(started).toBe(1);
+  await page.waitForTimeout(3_000); // nothing comes back later
+  await expect(page.getByText(/Could not stop the run/)).toHaveCount(0);
+  await expect(page.locator(".code-run-strip")).toContainText("Stopped");
+  await shot(page, "stop-at-once-new-conversation-desktop");
+  await page.setViewportSize({ width: 400, height: 860 });
+  await expect(primary).toHaveAttribute("data-mode", "send");
+  await shot(page, "stop-at-once-new-conversation-400");
+  expect(errors).toEqual([]);
+});

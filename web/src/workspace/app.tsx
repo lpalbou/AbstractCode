@@ -293,7 +293,7 @@ export function CodeWorkspace() {
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const sendLock = useRef(false);
-  const stopWhenLoaded = useRef("");
+  const [stopWhenLoaded, setStopWhenLoaded] = useState("");
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -1032,17 +1032,19 @@ export function CodeWorkspace() {
       });
       if (!result.run_id)
         throw new Error("The gateway did not return a run identifier.");
+      // Stop pressed while the start was in flight (review 2026-11-08 D1): the gateway has the run
+      // now, so it is stopped as soon as it is loaded here (a run nobody sees must not go on).
+      if (signal?.aborted) setStopWhenLoaded(String(result.run_id));
+      // The conversation may already show this new run (it follows its session's newest run on a
+      // slow start): that is this start, not a change of conversation.
       if (
         sessionRef.current.sessionId !== startedSession ||
-        sessionRef.current.runId !== startedRun ||
+        (sessionRef.current.runId !== startedRun && sessionRef.current.runId !== String(result.run_id)) ||
         identityRef.current !== startedIdentity ||
         authEpoch.current !== startedEpoch
       )
         throw staleSendAbort();
       attachedRun = String(result.run_id);
-      // Stop pressed while the start was in flight (review 2026-11-08 D1): the gateway has the run
-      // now, so it is shown and stopped as soon as it is loaded (a run nobody sees must not go on).
-      if (signal?.aborted) stopWhenLoaded.current = attachedRun;
       startedRunInput.current = { runId: attachedRun, input };
       // "@default" resolves at every start: refresh the label from each one.
       setResolvedNote({
@@ -1241,12 +1243,12 @@ export function CodeWorkspace() {
   }
   // The run a Stop asked for before it existed (startTurn): cancel it once it is loaded here.
   useEffect(() => {
-    const runId = stopWhenLoaded.current;
+    const runId = stopWhenLoaded;
     if (!runId || session.runId !== runId || String(snapshot.run?.run_id || "") !== runId) return;
-    stopWhenLoaded.current = "";
+    setStopWhenLoaded("");
     if (terminal(snapshot.status)) return;
     void controller.cancel().catch((e) => setError(formatError(e)));
-  }, [controller, session.runId, snapshot.run?.run_id, snapshot.status]);
+  }, [controller, stopWhenLoaded, session.runId, snapshot.run?.run_id, snapshot.status]);
   const act = (callback: () => Promise<unknown>) => {
     const epoch = authEpoch.current;
     const sid = session.sessionId;
