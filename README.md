@@ -12,7 +12,7 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
-What's new: browser 0.15.1 highlights the new conversation in the sidebar, and its
+What's new: browser 0.15.2 moves the resting avatar smoothly (24 frames per second, was 6). Browser 0.15.1 highlights the new conversation in the sidebar, and its
 Avatar view uses the composer's microphone and each reply's play button and shows the
 avatar speaking only while you can hear it. Browser 0.15.0 shows one live line and a
 Findings panel in the Avatar view and lists paused automations under `Paused · N`;
