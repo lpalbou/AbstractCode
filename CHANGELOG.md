@@ -16,6 +16,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.6] - 2026-11-07
+
+Needs AbstractUIC 0.10.8 (`@abstractframework/panel-chat` 0.9.1: the shared message look and the working
+dots). The vendored chat snapshot is regenerated from it; the `^0.9.0` floor and the lockfile move to 0.9.1
+once it is on npm. Same gateways as web 0.15.5.
+
+### Changed
+
+- **A finished run's answer shows whole in the Activity panel, as Markdown.** The "run finished" and
+  "subflow finished" rows used to flatten the answer to one line and cut it at 110 characters, so bold and
+  lists arrived as raw `**` and `-`. The row now carries the whole answer and renders it with the chat's
+  Markdown (bold, lists, code, safe links; no raw HTML; remote images stay links), folded to about five lines
+  with a fade. **Show more** unfolds it, **Show less** folds it back; the button says which, and works with
+  the keyboard. Other rows keep their one-line detail.
+- **Messages look the same as in the web Assistant.** Code no longer restyles the chat's messages: the
+  shared AbstractUIC message is a compact card with the speaker's name, the time in the interface font (no
+  longer monospace), the read-aloud and copy buttons, and no avatar tile. Your message is a tinted bubble
+  on the right.
+
+### Added
+
+- **Three dots while the assistant works.** While the run works on a reply (or a send is starting), three
+  dots rise in turn where the reply will appear, like the desktop Assistant's. They stop when the run waits
+  for you, a timer or an event, is paused or ends, and stand still when the system asks for reduced motion.
+
+### Removed
+
+- **The status line at the bottom of the window** ("Connected · workflow · Run … · theme"). The connection
+  is the account widget's dot (upper right), the theme is in **Appearance** there, the workflow in
+  **Agent**, and a run's ID in **Activity** (expand a row). The conversation gets the freed height, on a
+  phone too.
+
 ## [web 0.15.5] - 2026-11-07
 
 On AbstractUIC 0.10.7 (`@abstractframework/panel-chat` ^0.9.0, floor raised from ^0.8.2). Same gateways as
