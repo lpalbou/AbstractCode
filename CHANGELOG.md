@@ -16,6 +16,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.4] - 2026-11-07
+
+On AbstractUIC 0.10.5 (`@abstractframework/ui-kit` ^0.9.18, floor raised from ^0.9.16). Same gateways
+as web 0.15.3.
+
+### Fixed
+
+- **A reasoning level or MTP setting the model cannot use is never sent.** A saved "MTP depth 2"
+  used to be sent with every turn, even after switching to a model without MTP, and the gateway
+  refused each run. Before a turn or a new automation is sent, Code now reads what the model that
+  run will use supports, and leaves out a level or depth it does not. An automation is checked
+  against the model of the workflow it runs, not the conversation's. If the gateway has not
+  described the model after 10 seconds, the turn is sent without an MTP depth (an explicit Off and
+  the reasoning level are kept), so a slow answer never holds up a turn.
+- **Changing the model resets reasoning and MTP.** In the **Model** panel, picking another provider
+  or model puts reasoning and MTP back on **Gateway default** (the shared picker from ui-kit
+  0.9.18). MTP depths, and Off, are offered only when the gateway says the selected model supports
+  MTP; otherwise the control is disabled and says why.
+
+### Changed
+
+- **Code always opens on the Conversation view.** Choosing **Avatar** lasts for the current visit;
+  the next visit opens on **Conversation** again. Your attention cue choices are still remembered.
+
 ## [web 0.15.3] - 2026-11-07
 
 Same dependencies and gateways as web 0.15.2. No gateway change is needed.

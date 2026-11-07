@@ -39,7 +39,10 @@ execution-host defaults, choose **Off** to send an explicit `false`, or request 
 depth. **Off** and the depths appear only when the gateway says the selected model supports
 MTP; otherwise the control is disabled and says why. Changing the provider or the model puts
 reasoning and MTP back on **Gateway default**, and a saved level or depth the current model
-cannot use is never sent. An explicit depth sets `require_acceleration`
+cannot use is never sent. The check reads the model the run will actually use: an automation is
+checked against its own workflow's model, and if the gateway does not describe the model within
+10 seconds the turn is sent without an MTP depth (an explicit **Off** and the reasoning level
+stay). An explicit depth sets `require_acceleration`
 so the host must honor it or report an error. The browser saves this preference locally and
 sends it as `_runtime.speculation`; it does not load models, download heads, or change the
 shared Core default. Fresh Core configurations use depth 2 only for compatible models.
