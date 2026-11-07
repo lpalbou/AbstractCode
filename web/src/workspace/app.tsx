@@ -1,6 +1,6 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { sendableRunOptions } from "./model_options_guard";
+import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import { ActivityAvatar, useVoiceLevel } from "@abstractframework/ui-kit";
 import "../vendor/abstractchat/conversation.css";
@@ -903,12 +903,11 @@ export function CodeWorkspace() {
     panelOpen,
   ]);
 
-  // The model the Model settings name for this conversation (workflow pins, else the gateway default).
-  const runDefaultModel = inputs.provider && inputs.model
-    ? { provider: String(inputs.provider), model: String(inputs.model) }
-    : catalog.defaultModel;
-  // Reasoning and MTP reach a run only when the model's capability card allows them.
-  const runModelOptions = () => sendableRunOptions(preferences, runDefaultModel || undefined);
+  // Reasoning and MTP reach a run only when the capability card of the model THAT run uses allows
+  // them: the input's own provider/model (Settings choice, else the target workflow's pins), else
+  // the gateway default's model.
+  const guardedWorkflowInput = (build: (modelOptions: ModelOptions) => ReturnType<typeof currentWorkflowInput>) =>
+    guardedRunInput(build, preferences, catalog.defaultModel || undefined);
   function currentWorkflowInput(text: string, values: Record<string, unknown>, attachments: AttachmentRef[] = [], forAutomation = false, selectedWorkflow = workflow, selectedSchema = schema, modelOptions: ModelOptions = {}) {
     let input = buildWorkflowInput({
       workflow: selectedWorkflow || undefined,
@@ -1014,7 +1013,7 @@ export function CodeWorkspace() {
     const startedEpoch = authEpoch.current;
     let attachedRun = "";
     try {
-      const input = currentWorkflowInput(text, values, runAttachments, false, workflow, schema, await runModelOptions());
+      const input = await guardedWorkflowInput(options => currentWorkflowInput(text, values, runAttachments, false, workflow, schema, options));
       // Validate the actual outgoing payload, after composer context and
       // explicit Settings overrides. Empty optional pins stay absent so the
       // workflow/Gateway resolves them just as it does for the TUI/Assistant.
@@ -2180,12 +2179,12 @@ export function CodeWorkspace() {
         availableTools={catalog.tools.filter(t => t.enabled).map(t => t.name)}
         initialTools={automationToolSelection(hasToolChoices(catalog.toolCatalog, { app: appToolLayer }) ? { ...inputs, tools: planRunTools(catalog.toolCatalog, { app: appToolLayer }).tools } : inputs)}
         buildInput={async (prompt, target) => {
-          if (!target) return currentWorkflowInput(prompt, { ...schemaDefaults(schema), ...inputs }, [], true, workflow, schema, await runModelOptions());
+          if (!target) return guardedWorkflowInput(options => currentWorkflowInput(prompt, { ...schemaDefaults(schema), ...inputs }, [], true, workflow, schema, options));
           const next = target.flow_id === "@default" ? defaultWorkflow : catalog.workflows.find(w => `${w.bundleId}@${w.bundleVersion}` === ("bundle_ref" in target ? target.bundle_ref : "") && w.flowId === target.flow_id);
           if (!next) throw new Error("The selected workflow is no longer available. Refresh the workflow list.");
           const nextSchema = await fetchWorkflowSchema(next);
                 if (!nextSchema) throw new Error("Workflow inputs could not be checked. Refresh the workflow list and try again.");
-          const input = currentWorkflowInput(prompt, schemaDefaults(nextSchema), [], true, next, nextSchema, await runModelOptions());
+          const input = await guardedWorkflowInput(options => currentWorkflowInput(prompt, schemaDefaults(nextSchema), [], true, next, nextSchema, options));
           const problems = validateWorkflowInputs(nextSchema, input);
           if (problems.length) throw new Error(problems.join(" "));
           return input;

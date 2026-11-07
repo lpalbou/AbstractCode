@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { sendableRunOptions } from "./model_options_guard";
+import { CAPABILITY_WAIT_MS, guardedRunInput, sendableRunOptions } from "./model_options_guard";
 import { buildWorkflowInput } from "./catalog";
 
 // Operator rule 2026-11-07: a saved MTP or reasoning value the current model cannot use is never sent.
@@ -33,5 +33,61 @@ describe("send-time model options", () => {
   it("never sends MTP when the model's card cannot be read", async () => {
     expect(await sendableRunOptions({ provider: "p", model: "m", speculation: DEPTH2 }, undefined, async () => { throw new Error("down"); })).toEqual({});
     expect(await sendableRunOptions({ provider: "", model: "", speculation: DEPTH2 }, undefined, vi.fn())).toEqual({});
+  });
+});
+
+describe("send-time model options: bounded wait", () => {
+  it("does not stall a send on a capability probe that never answers: after the wait, no MTP depth, Off and reasoning kept", async () => {
+    vi.useFakeTimers();
+    try {
+      const never = () => new Promise<unknown>(() => {});
+      const depth = sendableRunOptions({ provider: "p", model: "m", reasoning: "high", speculation: DEPTH2 }, undefined, never);
+      const off = sendableRunOptions({ provider: "p", model: "m", reasoning: "high", speculation: false }, undefined, never);
+      await vi.advanceTimersByTimeAsync(CAPABILITY_WAIT_MS);
+      expect(await depth).toEqual({ reasoning: "high" });
+      expect(await off).toEqual({ reasoning: "high", speculation: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("send-time model options: the model the run will use", () => {
+  const MTP_MODEL = { provider: "mlx", model: "qwen-mtp" };
+  const caps = vi.fn(async (model: string) => (model === "qwen-mtp" ? MTP : NO_MTP));
+  // A workflow that pins its own model (public provider/model inputs).
+  const pinnedWorkflow = { bundleId: "b", bundleVersion: "1", flowId: "pinned", name: "Pinned", interfaces: [] } as never;
+  const pinnedSchema = { type: "object", properties: { prompt: { type: "string" }, provider: { type: "string" }, model: { type: "string" } } };
+
+  it("an automation targeting a workflow pinned to a model without MTP never carries the conversation's depth", async () => {
+    // The conversation runs on an MTP model with depth 2 saved; no model chosen in Settings.
+    const prefs = { provider: "", model: "", speculation: DEPTH2 };
+    const input = await guardedRunInput(
+      (options) => buildWorkflowInput({
+        workflow: pinnedWorkflow,
+        inputSchema: pinnedSchema,
+        schemaInputs: { provider: "airelays", model: "gpt-5.6-terra" },
+        prompt: "nightly",
+        model: { provider: prefs.provider, model: prefs.model },
+        ...options,
+      }),
+      prefs,
+      MTP_MODEL,
+      caps,
+    );
+    expect(caps).toHaveBeenLastCalledWith("gpt-5.6-terra", "airelays");
+    expect((input._runtime as Record<string, unknown> | undefined)?.speculation).toBeUndefined();
+  });
+
+  it("an unpinned workflow is checked on the gateway default's model and keeps a depth it supports", async () => {
+    const prefs = { provider: "", model: "", speculation: DEPTH2 };
+    const input = await guardedRunInput(
+      (options) => buildWorkflowInput({ workflow: pinnedWorkflow, inputSchema: pinnedSchema, schemaInputs: {}, prompt: "x", model: prefs, ...options }),
+      prefs,
+      MTP_MODEL,
+      caps,
+    );
+    expect(caps).toHaveBeenLastCalledWith("qwen-mtp", "mlx");
+    expect((input._runtime as Record<string, unknown>).speculation).toEqual(DEPTH2);
   });
 });
