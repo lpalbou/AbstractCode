@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.15.1] - 2026-11-07
+
+On AbstractUIC `@abstractframework/ui-kit` ^0.9.15 and `@abstractframework/panel-chat` ^0.8.2.
+Works with the same gateways as web 0.15.0.
+
+### Fixed
+
+- **The new conversation is visibly selected.** Before its first message, the **New conversation**
+  card in the sidebar is highlighted like any open conversation, so you can see where you are.
+- **The Avatar view uses the composer's microphone and the message's play button.** The duplicate
+  **Talk** button and the separate pause and silence controls under the avatar are gone; you talk
+  with the composer's microphone and play, pause or stop a reply from its own button, as in the
+  conversation view. The answer no longer carries a coloured side border.
+- **The avatar speaks only while you can hear it.** It shows the speaking pose while audio is
+  actually playing, not while a reply is still being prepared or while the browser holds the
+  sound back. When the browser blocks the sound, the app says so ("Audio playback is paused by the
+  browser. Press Play to try again.") instead of staying silent.
+- **Pressing Play again while a reply is being prepared no longer starts a second request**; the
+  reply plays once.
+
+### Changed
+
+- The read-aloud rule (which reply is spoken by itself) and the voice playback come from the
+  shared AbstractUIC packages instead of copies kept in this app, so every AbstractFramework app
+  behaves the same.
+
 ## [web 0.15.0] - 2026-11-04
 
 On AbstractUIC `@abstractframework/ui-kit` ^0.9.14 and `@abstractframework/panel-chat` ^0.8.1.

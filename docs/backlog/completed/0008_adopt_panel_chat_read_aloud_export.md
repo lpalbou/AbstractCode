@@ -1,6 +1,6 @@
 # 0008 — Adopt panel-chat's `readAloudStep` export; delete the inlined copy
 
-- **Status:** planned (blocked on the next `@abstractframework/panel-chat` release; nothing is released tonight)
+- **Status:** completed 2026-11-07 (web 0.15.1; panel-chat has exported the rule since 0.7.0)
 - **Created:** 2026-10-29
 - **Area:** web (`web/src/lib/read_aloud.ts` — the inlined copy; `web/src/workspace/app.tsx`,
   `web/src/workspace/read_aloud_input.ts`, `web/src/lib/read_aloud.test.ts` — the importers)
@@ -35,3 +35,15 @@ tolerated only until the kit ships the export. This item is the dated debt.
   `@abstractframework/panel-chat` only.
 - `npm test` (web) green; the four read-aloud cases still pass.
 - CHANGELOG entry names the kit version adopted.
+
+## Completion (2026-11-07, web 0.15.1)
+- `web/src/lib/read_aloud.ts` deleted; `workspace/app.tsx`, `workspace/read_aloud_input.ts` and
+  `lib/read_aloud.test.ts` import `READ_ALOUD_INITIAL`, `readAloudStep`, `readAloudPhase` and the types from
+  `@abstractframework/panel-chat`. Code's adapter `read_aloud_input.ts` stays.
+- No pin bump was needed for this item: the copy was identical to panel-chat's `src/read_aloud.ts` apart from its
+  header, and the export has been published since panel-chat 0.7.0 (the app already pinned `^0.8.1`). Web 0.15.1
+  moves to panel-chat ^0.8.2 for its other fixes.
+- `grep -rn "function readAloudStep" web/src` finds only the vendored `.d.ts` declarations.
+- `npm test` (web): 62 files, 503 tests passed, against panel-chat 0.8.1 (npm) and 0.8.2 (release tarball); the
+  four read-aloud cases unchanged.
+

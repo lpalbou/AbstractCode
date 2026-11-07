@@ -12,10 +12,13 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
-What's new: browser 0.15.0 shows one live line and a Findings panel in the Avatar view
-and lists paused automations under `Paused · N`; terminal 0.14.0 gives side questions
-the 50,000-token history window, folds paused automations under `Paused · N` and lists
-only conversations in `/sessions`. See [CHANGELOG.md](CHANGELOG.md).
+What's new: browser 0.15.1 highlights the new conversation in the sidebar, and its
+Avatar view uses the composer's microphone and each reply's play button and shows the
+avatar speaking only while you can hear it. Browser 0.15.0 shows one live line and a
+Findings panel in the Avatar view and lists paused automations under `Paused · N`;
+terminal 0.14.0 gives side questions the 50,000-token history window, folds paused
+automations under `Paused · N` and lists only conversations in `/sessions`. See
+[CHANGELOG.md](CHANGELOG.md).
 
 ## The two clients
 
