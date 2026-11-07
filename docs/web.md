@@ -102,6 +102,10 @@ In an automation's page, **Occurrences** and the folder ("Automation folder", or
 
 Every setting that is either on or off is a switch named after what it controls: **Run queued turns**, each automation's **Active**, and one switch per skill in **Skills**. A switch that is on is highlighted with a check mark and a bold label; off is plain; a switch that cannot change right now is dimmed and says why (for example "Connect to a gateway first." or "A run is in progress." — next to the switch on touch screens, in its tooltip with a mouse). A switch applies at once; there is nothing to save. One-shot actions such as **Pause**, **Resume**, **Conclude**, **Revoke** and read-aloud playback stay buttons.
 
+## Connections
+
+A browser lets all its tabs together hold only six connections to one address. Code's live streams (the conversation's view, its live-reply tail, and the attention tail) are long-lived, so a tab you are not looking at keeps none of them: they close when the tab is hidden and reopen when it is visible again, resuming from the last event each stream delivered. A run has one stream per tab. Short requests, such as answering a permission, are never queued behind a hidden tab's streams.
+
 ## Stream replies
 
 For a conversation, **Model → Limits & streaming → Stream replies** shows the assistant's reply while the model writes it, instead of only when it is complete. Choose:
@@ -123,7 +127,7 @@ If the gateway sends a live update the app cannot read, the transcript shows one
 
 For an agent, type a task and press Enter; Shift+Enter inserts a newline. For a structured workflow, configure its required inputs and select **Run workflow**. Text, structured JSON results, and workflow messages appear in the transcript.
 
-Answer questions in their dedicated cards. A tool approval shows what the tool will do (the full arguments are under **Review full tool arguments (JSON)**) and offers three choices: **Deny** refuses the request; **Allow** allows that tool for the rest of this conversation; **Allow All** allows every tool for the rest of this conversation. Both allows are stored on the gateway for this session only (AbstractGateway 0.16.0 or later, `capabilities.session_tool_policy`), so later calls run without asking in every client of the conversation; they never change your tool settings in Agent → Tools. On a gateway without the session tool policy, Allow covers the request shown and the card says so. Gateway and workflow policy determine which operations need a decision.
+Answer questions in their dedicated cards. A tool approval shows what the tool will do (the full arguments are under **Review full tool arguments (JSON)**) and offers three choices: **Deny** refuses the request; **Allow** allows that tool for the rest of this conversation; **Allow All** allows every tool for the rest of this conversation. Both allows are stored on the gateway for this session only (AbstractGateway 0.16.0 or later, `capabilities.session_tool_policy`), so later calls run without asking in every client of the conversation; they never change your tool settings in Agent → Tools. On a gateway without the session tool policy, Allow covers the request shown and the card says so. Gateway and workflow policy determine which operations need a decision. Saving the allow before it answers has no time limit: a pending permission is a durable wait, so the card shows "Allowing…" for as long as the gateway takes, and shows a failure line with the reason (and Try again) only when the gateway or the network really refuses.
 
 An event-driven workflow stays attached while waiting for its trigger. Its wait card can also submit an explicit JSON event through the gateway's durable command path. Messages and status updates emitted by workflow nodes are replayable. See the [UI event contract](ui_events.md).
 

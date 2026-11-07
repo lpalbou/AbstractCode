@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.7] - 2026-11-07
+
+Same gateways and AbstractUIC floor as web 0.15.6.
+
+### Fixed
+
+- **A permission click waits as long as it takes.** Allow and Allow All save the session's tool policy
+  before they answer the request, and that save was given up after 15 seconds with "the gateway did not
+  answer". A pending permission is a durable wait: no timer fails it any more. While the save is in
+  flight the card says "Allowing…"; if the gateway really refuses (an error, a refused connection) the
+  card still shows the reason and Try again.
+- **Code keeps fewer connections open, so other requests never queue behind its streams.** A browser
+  lets a page hold only six connections to one address, shared by every tab, and Code kept its live
+  streams open in tabs nobody was looking at; a click could then wait for a free connection. A tab you
+  are not looking at now keeps none of Code's conversation streams and reopens them, at the same
+  point, when you come back (nothing lost, nothing shown twice). A run never has two streams open in a tab.
+
 ## [web 0.15.6] - 2026-11-07
 
 Needs AbstractUIC 0.10.8 (`@abstractframework/panel-chat` 0.9.1: the shared message look and the working

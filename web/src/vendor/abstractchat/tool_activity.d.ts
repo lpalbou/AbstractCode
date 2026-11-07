@@ -11,8 +11,10 @@ export declare function ToolActivity({ tool, showCopy, }: {
     showCopy?: boolean;
 }): React.ReactElement;
 /** Consecutive calls share one frame, not one full conversation card per call. */
-export declare function ToolActivityGroup({ tools, showCopy, }: {
+export declare function ToolActivityGroup({ tools, showCopy, notes, }: {
     tools: WorkflowToolActivity[];
     showCopy?: boolean;
+    /** Muted sentences shown directly under the group (the session-policy decision). */
+    notes?: string[];
 }): React.ReactElement;
 //# sourceMappingURL=tool_activity.d.ts.map

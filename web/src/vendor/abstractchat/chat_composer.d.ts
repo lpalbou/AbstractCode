@@ -26,7 +26,18 @@ export type ChatComposerProps = {
     /** Preserve multiline-first chats that submit with Ctrl/Cmd+Enter. */
     submitKey?: "enter" | "mod-enter";
     actions?: React.ReactNode;
-    /** Controls next to Send, such as a microphone or Stop. */
+    /**
+     * The primary round button turns into Stop (compact variant): an arrow-to-square
+     * morph, same size and place. `active` = Stop right now; `stopping` = the stop
+     * was asked and is settling (aria-busy). Absent = the button is only ever Send.
+     */
+    stop?: {
+        active: boolean;
+        stopping?: boolean;
+        onStop: () => void;
+        label?: string;
+    };
+    /** Controls next to Send, such as a microphone. */
     trailingActions?: React.ReactNode;
     /** Shared attachment control; the host owns its file chooser and upload lifecycle. */
     onAttach?: () => void;

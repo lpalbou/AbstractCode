@@ -1302,6 +1302,9 @@ var ChatComposer = React3.forwardRef(function ChatComposer2(props, ref) {
   const disabled = Boolean(props.disabled);
   const busy = Boolean(props.busy);
   const can_submit = !disabled && !busy && (props.canSubmit ?? Boolean(String(props.value || "").trim()));
+  const stopSpec = compact ? props.stop : void 0;
+  const stopMode = Boolean(stopSpec?.active);
+  const stopping = stopMode && Boolean(stopSpec?.stopping);
   const sendLabel = busy ? props.busyLabel || "Thinking\u2026" : props.sendLabel || "Send";
   const textarea = useRef5(null);
   const fallbackSizing = useRef5(false);
@@ -1377,7 +1380,7 @@ var ChatComposer = React3.forwardRef(function ChatComposer2(props, ref) {
         return;
       props.onSubmit();
     }
-  }), _jsxs5("div", { className: "pc-composer__row", children: [_jsxs5("div", { className: "pc-composer__actions", children: [props.onAttach ? _jsxs5("button", { type: "button", className: compact ? "pc-composer__icon-action" : "pc-composer__icon-action pc-workflow-chat__icon-button", "aria-label": props.attachLabel || "Attach files", "data-af-tip": props.attachLabel || "Attach files", "aria-busy": props.attachPending || void 0, disabled: disabled || props.attachDisabled || props.attachPending, onClick: props.onAttach, children: [_jsx7(Icon4, { name: props.attachPending ? "loader" : compact ? "plus" : "paperclip", size: 16 }), _jsx7("span", { className: compact ? "pc-sr-only" : void 0, children: props.attachPending ? "Attaching\u2026" : props.attachLabel || "Attach" })] }) : null, props.actions] }), props.trailingActions ? _jsx7("div", { className: "pc-composer__trailing", children: props.trailingActions }) : null, _jsx7("button", { type: "button", className: [props.sendButtonClassName || "pc-btn", compact ? "pc-composer__send--compact" : ""].filter(Boolean).join(" "), "aria-label": compact ? sendLabel : void 0, "data-af-tip": compact ? sendLabel : void 0, "aria-busy": compact ? busy : void 0, disabled: !can_submit, onClick: () => props.onSubmit(), children: compact ? _jsx7(Icon4, { name: busy ? "loader" : "send", size: 17 }) : sendLabel })] }), props.overlay] });
+  }), _jsxs5("div", { className: "pc-composer__row", children: [_jsxs5("div", { className: "pc-composer__actions", children: [props.onAttach ? _jsxs5("button", { type: "button", className: compact ? "pc-composer__icon-action" : "pc-composer__icon-action pc-workflow-chat__icon-button", "aria-label": props.attachLabel || "Attach files", "data-af-tip": props.attachLabel || "Attach files", "aria-busy": props.attachPending || void 0, disabled: disabled || props.attachDisabled || props.attachPending, onClick: props.onAttach, children: [_jsx7(Icon4, { name: props.attachPending ? "loader" : compact ? "plus" : "paperclip", size: 16 }), _jsx7("span", { className: compact ? "pc-sr-only" : void 0, children: props.attachPending ? "Attaching\u2026" : props.attachLabel || "Attach" })] }) : null, props.actions] }), props.trailingActions ? _jsx7("div", { className: "pc-composer__trailing", children: props.trailingActions }) : null, _jsx7("button", { type: "button", className: [props.sendButtonClassName || "pc-btn", compact ? "pc-composer__send--compact" : ""].filter(Boolean).join(" "), "aria-label": compact ? stopMode ? stopSpec?.label || "Stop" : sendLabel : void 0, "data-af-tip": compact ? stopMode ? stopping ? "Stopping\u2026" : stopSpec?.label || "Stop" : sendLabel : void 0, "aria-busy": compact ? stopMode ? stopping : busy : void 0, "data-mode": stopSpec ? stopping ? "stopping" : stopMode ? "stop" : "send" : void 0, disabled: stopMode ? disabled || stopping : !can_submit, onClick: () => stopMode ? stopSpec?.onStop() : props.onSubmit(), children: compact ? stopSpec ? _jsxs5("span", { className: "pc-composer__morph", "aria-hidden": "true", children: [_jsx7(Icon4, { name: "send", size: 17 }), _jsx7(Icon4, { name: "stop", size: 17 }), _jsx7(Icon4, { name: "loader", size: 17 })] }) : _jsx7(Icon4, { name: busy ? "loader" : "send", size: 17 }) : sendLabel })] }), props.overlay] });
 });
 
 // dist/chat_thread.js
@@ -2145,9 +2148,9 @@ function ToolActivity({ tool, showCopy = true }) {
   const fields = args && typeof args === "object" && !Array.isArray(args) ? Object.entries(args) : null;
   return _jsxs9("details", { className: `pc-tool-activity pc-tool-activity--${tool.status}`, children: [_jsxs9("summary", { className: "pc-tool-activity__summary", children: [_jsx12("span", { className: "pc-tool-activity__state-icon", "aria-hidden": "true", children: _jsx12(Icon5, { name: tool.status === "completed" ? "check" : tool.status === "failed" ? "x" : tool.status === "waiting" ? "warning" : "loader", size: 15 }) }), _jsx12("strong", { children: tool.name }), _jsx12("span", { className: "pc-tool-activity__preview", title: preview.value, children: preview.value ? _jsxs9(_Fragment6, { children: [_jsx12("span", { className: "pc-tool-activity__key", children: preview.label }), _jsx12(TextLinks, { text: previewText })] }) : "No parameters" }), _jsx12("span", { className: "pc-tool-activity__status", children: labels2[tool.status] }), tool.policy ? _jsx12("span", { className: "pc-tool-activity__policy", "data-policy": tool.policy.decision, title: toolPolicyDecisionText(tool.policy), children: tool.policy.decision === "denied" ? "Denied by this chat's policy" : "Allowed by this chat's policy" }) : null, Number.isFinite(duration) && duration >= 0 ? _jsxs9("span", { className: "pc-tool-activity__duration", "data-approval-wait": tool.approvalWait ? "" : void 0, title: tool.approvalWait ? "Timed from request to result: includes the wait for your decision." : void 0, children: [formatDuration(duration), tool.approvalWait ? " incl. approval wait" : ""] }) : null, _jsx12("span", { className: "pc-tool-activity__chevron", "aria-hidden": "true", children: _jsx12(Icon5, { name: "chevronRight", size: 13 }) }), tool.error ? _jsx12("span", { className: "pc-tool-activity__error", title: tool.error, children: errorPreview }) : null] }), _jsxs9("div", { className: "pc-tool-activity__detail", children: [tool.policy ? _jsxs9("p", { className: "pc-tool-activity__policy-line", "data-policy": tool.policy.decision, children: [toolPolicyDecisionText(tool.policy), tool.policy.matched ? ` \xB7 matched ${tool.policy.matched}` : ""] }) : null, _jsx12(ToolSandboxLine, { sandbox: tool.sandbox }), tool.error ? _jsxs9(_Fragment6, { children: [_jsx12("h4", { children: "Error" }), _jsx12("pre", { className: "pc-tool-activity__output", children: _jsx12(TextLinks, { text: tool.error }) })] }) : null, _jsxs9("div", { className: "pc-tool-activity__detail-heading", children: [_jsx12("h4", { children: "Parameters" }), showCopy ? _jsxs9("button", { type: "button", onClick: async () => setCopied(await copyText(JSON.stringify(tool, null, 2))), children: [_jsx12(Icon5, { name: "copy", size: 13 }), copied ? "Copied" : "Copy details"] }) : null] }), fields ? _jsx12("dl", { className: "pc-tool-activity__parameters", children: fields.map(([key, value]) => _jsxs9(React5.Fragment, { children: [_jsx12("dt", { children: key }), _jsx12("dd", { children: value && typeof value === "object" ? _jsx12(JsonViewer, { value }) : _jsx12("code", { children: typeof value === "string" ? _jsx12(TextLinks, { text: value }) : JSON.stringify(value) }) })] }, key)) }) : tool.arguments === void 0 ? _jsx12("p", { children: "Arguments are unavailable in this ledger." }) : _jsx12(JsonViewer, { value: args }), tool.output !== void 0 ? _jsxs9(_Fragment6, { children: [_jsx12("h4", { children: "Result" }), typeof output === "string" ? _jsx12("pre", { className: "pc-tool-activity__output", children: _jsx12(TextLinks, { text: output }) }) : _jsx12("div", { className: "pc-tool-activity__output", children: _jsx12(JsonViewer, { value: output }) })] }) : null] })] });
 }
-function ToolActivityGroup({ tools, showCopy }) {
+function ToolActivityGroup({ tools, showCopy, notes }) {
   const count2 = (status) => tools.filter((tool) => tool.status === status).length;
-  return _jsxs9("section", { className: "pc-tool-group", "aria-label": "Tool activity", children: [_jsxs9("div", { className: "pc-tool-group__heading", children: [_jsx12(Icon5, { name: "terminal", size: 14 }), _jsx12("strong", { children: "Tools" }), _jsxs9("span", { children: [tools.length, " ", tools.length === 1 ? "call" : "calls"] }), _jsx12("div", {}), count2("running") ? _jsxs9("span", { className: "pc-tool-group__running", children: [count2("running"), " running"] }) : null, count2("waiting") ? _jsxs9("span", { className: "pc-tool-group__waiting", children: [count2("waiting"), " need approval"] }) : null, count2("failed") ? _jsxs9("span", { className: "pc-tool-group__failed", children: [count2("failed"), " failed"] }) : null, count2("completed") ? _jsxs9("span", { className: "pc-tool-group__completed", children: [count2("completed"), " done"] }) : null] }), tools.map((tool) => _jsx12(ToolActivity, { tool, showCopy }, tool.id))] });
+  return _jsxs9("div", { className: "pc-tool-stack", children: [_jsxs9("section", { className: "pc-tool-group", "aria-label": "Tool activity", children: [_jsxs9("div", { className: "pc-tool-group__heading", children: [_jsx12(Icon5, { name: "terminal", size: 14 }), _jsx12("strong", { children: "Tools" }), _jsxs9("span", { children: [tools.length, " ", tools.length === 1 ? "call" : "calls"] }), _jsx12("div", {}), count2("running") ? _jsxs9("span", { className: "pc-tool-group__running", children: [count2("running"), " running"] }) : null, count2("waiting") ? _jsxs9("span", { className: "pc-tool-group__waiting", children: [count2("waiting"), " need approval"] }) : null, count2("failed") ? _jsxs9("span", { className: "pc-tool-group__failed", children: [count2("failed"), " failed"] }) : null, count2("completed") ? _jsxs9("span", { className: "pc-tool-group__completed", children: [count2("completed"), " done"] }) : null] }), tools.map((tool) => _jsx12(ToolActivity, { tool, showCopy }, tool.id))] }), notes?.length ? _jsx12("div", { className: "pc-tool-group__notes", children: notes.map((note) => _jsx12("p", { className: "pc-tool-group__policy", children: note }, note)) }) : null] });
 }
 
 // dist/message_footer.js
@@ -2421,15 +2424,35 @@ function ChatThread(props) {
   const [stick, set_stick] = useState12(true);
   const msgs = useMemo6(() => Array.isArray(props.messages) ? props.messages : [], [props.messages]);
   const groups = useMemo6(() => {
+    const toolRuns = /* @__PURE__ */ new Set();
+    for (const message of msgs)
+      if (message.toolActivity && message.runId)
+        toolRuns.add(message.runId);
+    const attachable = (message) => message.kind === "tool_policy_decision" && !message.toolActivity && Boolean(message.runId) && toolRuns.has(message.runId);
     const out = [];
     for (const message of msgs) {
+      if (attachable(message))
+        continue;
       const last = out[out.length - 1];
       if (message.toolActivity && last?.[0]?.toolActivity && last[0].runId === message.runId)
         last.push(message);
       else
         out.push([message]);
     }
-    return out;
+    const notes = /* @__PURE__ */ new Map();
+    for (const message of msgs) {
+      if (!attachable(message))
+        continue;
+      const home = out.find((group) => group[0].toolActivity && group[0].runId === message.runId);
+      if (!home)
+        continue;
+      const list = notes.get(home) || [];
+      const text5 = String(message.content || "").trim();
+      if (text5 && !list.includes(text5))
+        list.push(text5);
+      notes.set(home, list);
+    }
+    return out.map((group) => ({ group, notes: notes.get(group) || [] }));
   }, [msgs]);
   useEffect12(() => {
     if (!auto)
@@ -2483,10 +2506,10 @@ function ChatThread(props) {
       list.removeEventListener("loadedmetadata", follow, true);
     };
   }, [auto, stick]);
-  return _jsxs11("div", { ref: list_ref, className: ["pc-chat-thread", props.className].filter(Boolean).join(" "), children: [!msgs.length ? props.empty || null : null, groups.map((group, idx) => {
+  return _jsxs11("div", { ref: list_ref, className: ["pc-chat-thread", props.className].filter(Boolean).join(" "), children: [!msgs.length ? props.empty || null : null, groups.map(({ group, notes }, idx) => {
     const m = group[0];
     const key = String(m.id || "") || String(m.ts || "") + ":" + String(m.role || "") + ":" + idx;
-    return m.toolActivity ? _jsx14(ToolActivityGroup, { tools: group.map((message) => message.toolActivity), showCopy: props.messageProps?.showCopy }, key) : _jsx14(ChatMessageCard, { message: m, ...props.messageProps || {} }, key);
+    return m.toolActivity ? _jsx14(ToolActivityGroup, { tools: group.map((message) => message.toolActivity), notes, showCopy: props.messageProps?.showCopy }, key) : _jsx14(ChatMessageCard, { message: m, ...props.messageProps || {} }, key);
   }), props.after, _jsx14("div", { ref: bottom_ref })] });
 }
 
@@ -3231,6 +3254,9 @@ function WorkflowChat(props) {
   const steerModes = steer ? steer.modes?.length ? steer.modes : ["guide"] : [];
   const activeSteerMode = steerModes.includes(steerMode) ? steerMode : steerModes[0] || "guide";
   const steering = Boolean(steer) && Boolean(props.busy);
+  const composerBusyNow = steering ? sendPending : composerBusy;
+  const hasDraftText = Boolean(String(props.draft || "").trim());
+  const stopActive = Boolean(sending && props.onCancel) && (!hasDraftText || composerBusyNow);
   const attachmentItems = Array.isArray(props.attachmentItems) ? props.attachmentItems : [];
   useEffect15(() => {
     setSteerStatus(null);
@@ -3554,7 +3580,7 @@ function WorkflowChat(props) {
     if (props.avatarConversation)
       props.avatarConversation.onInterruptSpeech?.();
     props.onDraftChange(draft);
-  }, onSubmit: () => void submit(), placeholder: props.placeholder || "Send a message", ariaLabel: "Message", disabled, busy: steering ? sendPending : composerBusy, sendLabel: steering ? steerLabel : props.sendLabel, busyLabel: steering ? props.avatarConversation ? "Sending\u2026" : activeSteerMode === "queue" ? "Queueing\u2026" : "Steering\u2026" : props.busyLabel, rows: 2, onAttach: props.onAttach ? () => void attach() : void 0, attachLabel: "Attach file", attachPending, leading: props.attachments || attachmentItems.length ? _jsxs16("div", { className: "pc-workflow-chat__attachments", children: [attachmentItems.length ? _jsx19(ComposerAttachmentChips, { items: attachmentItems, onRemove: props.onRemoveAttachment, onRetry: props.onRetryAttachment, disabled }) : null, props.attachments] }) : null, overlay: dropZone, onPaste: acceptsFiles ? onPaste : void 0, actions: _jsxs16(_Fragment8, { children: [props.composerExtras, steering && steerModes.length > 1 ? _jsx19("span", { className: "pc-workflow-chat__steer-modes", role: "group", "aria-label": "While the run is busy", children: steerModes.map((mode) => _jsx19("button", { type: "button", className: "pc-workflow-chat__steer-mode", "data-steer-mode": mode, "aria-pressed": activeSteerMode === mode, disabled: disabled || sendPending, onClick: () => setSteerMode(mode), children: mode === "queue" ? "Queue next turn" : "Guide this run" }, mode)) }) : null] }), trailingActions: props.composerTrailingActions || sending && props.onCancel || stopState ? _jsxs16(_Fragment8, { children: [props.composerTrailingActions, sending && props.onCancel ? _jsxs16("button", { type: "button", className: "pc-workflow-chat__stop", disabled: disabled || cancelPending || stopping, onClick: () => void cancel(), children: [_jsx19(Icon10, { name: "x", size: 14 }), _jsx19("span", { children: cancelPending || stopping ? "Stopping\u2026" : "Stop" })] }) : stopState ? _jsx19("span", { className: `pc-workflow-chat__stop-state pc-workflow-chat__stop-state--${stopState.phase}`, role: "status", "aria-live": "polite", children: stopState.label }) : null] }) : void 0 }), steer ? _jsx19("div", { className: "pc-workflow-chat__steer-status", role: "status", "aria-live": "polite", children: steerNote }) : null, acceptsFiles ? _jsx19("div", { className: "pc-sr-only", role: "status", "aria-live": "polite", children: liveMessage }) : null] }), props.footer ? _jsx19("footer", { className: "pc-workflow-chat__footer", children: props.footer }) : null] });
+  }, onSubmit: () => void submit(), placeholder: props.placeholder || "Send a message", ariaLabel: "Message", disabled, busy: composerBusyNow, stop: props.onCancel && props.composerVariant !== "legacy" ? { active: stopActive, stopping: cancelPending || stopping, onStop: () => void cancel() } : void 0, sendLabel: steering ? steerLabel : props.sendLabel, busyLabel: steering ? props.avatarConversation ? "Sending\u2026" : activeSteerMode === "queue" ? "Queueing\u2026" : "Steering\u2026" : props.busyLabel, rows: 2, onAttach: props.onAttach ? () => void attach() : void 0, attachLabel: "Attach file", attachPending, leading: props.attachments || attachmentItems.length ? _jsxs16("div", { className: "pc-workflow-chat__attachments", children: [attachmentItems.length ? _jsx19(ComposerAttachmentChips, { items: attachmentItems, onRemove: props.onRemoveAttachment, onRetry: props.onRetryAttachment, disabled }) : null, props.attachments] }) : null, overlay: dropZone, onPaste: acceptsFiles ? onPaste : void 0, actions: _jsxs16(_Fragment8, { children: [props.composerExtras, steering && steerModes.length > 1 ? _jsx19("span", { className: "pc-workflow-chat__steer-modes", role: "group", "aria-label": "While the run is busy", children: steerModes.map((mode) => _jsx19("button", { type: "button", className: "pc-workflow-chat__steer-mode", "data-steer-mode": mode, "aria-pressed": activeSteerMode === mode, disabled: disabled || sendPending, onClick: () => setSteerMode(mode), children: mode === "queue" ? "Queue next turn" : "Guide this run" }, mode)) }) : null] }), trailingActions: props.composerTrailingActions || props.composerVariant === "legacy" && sending && props.onCancel || stopState && !(sending && props.onCancel) ? _jsxs16(_Fragment8, { children: [props.composerTrailingActions, props.composerVariant === "legacy" && sending && props.onCancel ? _jsxs16("button", { type: "button", className: "pc-workflow-chat__stop", disabled: disabled || cancelPending || stopping, onClick: () => void cancel(), children: [_jsx19(Icon10, { name: "x", size: 14 }), _jsx19("span", { children: cancelPending || stopping ? "Stopping\u2026" : "Stop" })] }) : stopState && !(sending && props.onCancel) ? _jsx19("span", { className: `pc-workflow-chat__stop-state pc-workflow-chat__stop-state--${stopState.phase}`, role: "status", "aria-live": "polite", children: stopState.label }) : null] }) : void 0 }), steer ? _jsx19("div", { className: "pc-workflow-chat__steer-status", role: "status", "aria-live": "polite", children: steerNote }) : null, acceptsFiles ? _jsx19("div", { className: "pc-sr-only", role: "status", "aria-live": "polite", children: liveMessage }) : null] }), props.footer ? _jsx19("footer", { className: "pc-workflow-chat__footer", children: props.footer }) : null] });
 }
 
 // dist/use_workflow_session.js
@@ -5998,7 +6024,7 @@ var WorkflowSessionController = class {
       if (name === "abstract.tool_policy_decision") {
         const decision = toolPolicyDecision(object(eventPayload));
         if (decision) {
-          this.addMessage({ id: `policy:${runId}:${key}`, role: "system", kind: "tool_policy_decision", title: "Tool policy", content: toolPolicyDecisionText(decision.provenance), ts: timestamp });
+          this.addMessage({ id: `policy:${runId}:${key}`, role: "system", kind: "tool_policy_decision", title: "Tool policy", runId, content: toolPolicyDecisionText(decision.provenance), ts: timestamp });
           for (const call of decision.calls) {
             const provenance = { ...decision.provenance, ...call.matched ? { matched: call.matched } : {} };
             this.toolPolicyByCall.set(`${runId}:${call.callId}`, provenance);
