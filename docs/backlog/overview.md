@@ -65,6 +65,7 @@ Voice preferences completed: [0015](completed/0015_voice_preferences_and_review.
 | 0001 | [Automations: WUI section and TUI `/automations` + `/schedule`](planned/0001_automations_wui_section_and_tui_commands.md) | web, tui | Surfaces built on `wave2/automations` (2026-09-28, unreleased); the session-kind filter/toggle on both session lists remains. |
 | 0002 | [TUI session fold defects](planned/0002_tui_session_fold_defects.md) | tui | child runs counted as turns; id-less runs; string timestamp ordering; first run by page order — align with the web fold |
 | 0003 | [Mermaid diagrams in the TUI transcript](planned/0003_mermaid_diagrams_in_the_transcript.md) | tui + abstracttui | an abstracttui release adding a `Feed` fence hook (+ `abstracttui-mermaid` multi-diagram cache); operator to lift the read-only rule on abstracttui |
+| 1163 | [The page reconnects its live streams after the app server restarts and re-fetches the view](planned/1163_the_page_reconnects_its_live_streams_after_the_app_server_restarts.md) | web + panel-chat | 2026-11-08: a tool approval raised while the Code app server restarted under the page was shown in the tray, never in Code; reconnect without give-up, re-fetch the view, visible Reconnecting state; deploy-under-a-live-run rule |
 
 
 
@@ -114,7 +115,3 @@ None.
 Scan every lifecycle folder for the highest `NNNN_` prefix, take the next one, write the item, and update the counts
 and tables here in the same commit. On completion, move the file to `completed/` and record the date and outcome here.
 
-
-## Planned additions (2026-11-08)
-
-| [1163](planned/1163_the_page_reconnects_its_live_streams_after_the_app_server_restarts.md) | The page reconnects its live streams after the app server restarts and re-fetches the view, so a tool approval raised during the gap is shown (2026-11-08: the tray showed it, Code did not) | Planned | P1 |
