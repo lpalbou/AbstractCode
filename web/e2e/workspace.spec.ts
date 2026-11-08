@@ -443,7 +443,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     expect(policyWrites[0].body).toMatchObject({ approve: { all: true } });
     expect(await storedTools()).toEqual(toolsBefore);
     await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
-    const group = page.locator(".pc-chat-thread > .pc-tool-group");
+    const group = page.locator(".pc-chat-thread > .pc-tool-stack > .pc-tool-group");
     await expect(group).toHaveCount(1);
     await expect(group.locator(".pc-tool-activity")).toHaveCount(6);
     await expect(group.locator(".pc-tool-activity--failed")).toHaveCount(1);
@@ -567,7 +567,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await expect(page.locator(".code-run-strip")).toContainText("Completed");
     await expect(
       page.locator(
-        ".pc-chat-thread > .pc-tool-group .pc-tool-activity--failed",
+        ".pc-chat-thread > .pc-tool-stack > .pc-tool-group .pc-tool-activity--failed",
       ),
     ).toHaveCount(1);
   });
