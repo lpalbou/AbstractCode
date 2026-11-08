@@ -36,6 +36,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the automation's keys, then the selected row's. Phone-width and short terminals stack the
   panels without frames and put the details at the end of the output.
 
+## [web 0.15.19] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.17 (`@abstractframework/panel-chat` 0.9.9, `@abstractframework/ui-kit` 0.9.25), vendored
+from local packs (installed with `--no-save`: the floors and the lockfile follow the kit publish).
+
+### Changed
+
+- **The run status always says what the gateway last said about the run.** While the page cannot reach the gateway it
+  keeps that status unchanged ("Working", "Approval needed", …) with a muted "as of 12:21:34" after it; it never reads
+  "Reconnecting" or "Disconnected".
+- **Not reaching the gateway is one notice, with Retry now and Stop retrying.** The banner says "Can't reach the
+  gateway: <reason>. Retrying…". Stop retrying pauses the attempts ("Not retrying. Retry now to reconnect."); Retry now
+  reconnects at once and reads the conversation again. The page still retries on its own until stopped, backing off to
+  every 30 seconds. The composer says "Can't reach the gateway; your message can be sent when it is back.", and the
+  sidebar no longer adds its own "Failed to fetch" line.
+
 ## [web 0.15.18] - 2026-11-08 (local build, not published)
 
 Built on AbstractUIC 0.10.16 (`@abstractframework/panel-chat` 0.9.8, `@abstractframework/ui-kit` 0.9.25), vendored
