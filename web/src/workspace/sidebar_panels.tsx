@@ -83,7 +83,7 @@ export function PanelHeader(props: {
 }): React.ReactElement {
   const ids = panelIds(props.panel);
   return (
-    <div className="code-panel-header">
+    <div className="code-panel-header" data-panel={props.panel}>
       <button
         type="button"
         className="code-panel-toggle"

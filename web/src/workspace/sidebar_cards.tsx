@@ -113,7 +113,13 @@ export function compactSchedule(s: Pick<AutomationSummary, "status" | "trigger">
  * what left is said in the same tooltip, and stays in the conversation or automation details.
  * `schedule` puts the compact schedule words on the automation's schedule part.
  */
-export function useRevealClampedTitle(title: string, schedule = ""): React.RefObject<HTMLDivElement> {
+export function useRevealClampedTitle(
+  title: string,
+  schedule = "",
+  /** The gateway's counts when its list was cut (`has_more`): the line reads "4+ turns" (the kit's
+   * accessible label keeps "At least 4 turns"). */
+  counts?: { partial?: boolean; turns?: number; tools?: number },
+): React.RefObject<HTMLDivElement> {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const root = ref.current;
@@ -128,6 +134,17 @@ export function useRevealClampedTitle(title: string, schedule = ""): React.RefOb
     if (cadence) {
       if (schedule) cadence.setAttribute("data-short", schedule);
       else cadence.setAttribute("data-drop", "empty");
+    }
+    // Counts the gateway gave as a lower bound: "4+ turns", "2+ tool calls" on the line.
+    for (const el of Array.from(meta?.children || []) as HTMLElement[]) {
+      const label = el.getAttribute("aria-label") || "";
+      if (!label || el.getAttribute("data-field") === "cadence") continue;
+      const isTurns = label.endsWith(" turn") || label.endsWith(" turns");
+      const isTools = label.endsWith(" tool call") || label.endsWith(" tool calls");
+      const n = isTurns ? counts?.turns : isTools ? counts?.tools : undefined;
+      const short = counts?.partial && typeof n === "number" ? `${n}+ ${isTurns ? (n === 1 ? "turn" : "turns") : n === 1 ? "tool call" : "tool calls"}` : "";
+      if (short) { if (el.getAttribute("data-short") !== short) el.setAttribute("data-short", short); }
+      else if (el.hasAttribute("data-short")) el.removeAttribute("data-short");
     }
     // While an automation needs you, "Needs you" says more than the next run time.
     const next = meta?.querySelector<HTMLElement>('[data-field="next"]') || null;
@@ -170,7 +187,7 @@ export function ConversationCard(props: {
 }): React.ReactElement {
   const { item } = props;
   const title = conversationTitle(item);
-  const reveal = useRevealClampedTitle(title);
+  const reveal = useRevealClampedTitle(title, "", { partial: item.truncated, turns: item.turnCount, tools: item.toolCalls });
   return (
     <div ref={reveal} className={`code-session-item${props.confirm ? " is-confirming" : ""}`} data-item-id={item.sessionId}>
       <SessionCard sessionId={item.sessionId} title={title} selected={props.selected} unread={props.unread}

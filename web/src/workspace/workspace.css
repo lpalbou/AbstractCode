@@ -2973,7 +2973,7 @@ select option {
    (sidebar_cards.tsx sets data-drop; the row's tooltip names it), and the automation's schedule
    reads in its compact form (data-short: "Daily 08:00", "Every 8 h"). */
 .code-sidebar .af-session-card__meta > [data-drop] { display: none; }
-.code-sidebar .af-session-card__meta > span[aria-label][data-field="cadence"][data-short]:not(.af-automation-card__unseen)::before { content: attr(data-short); }
+.code-sidebar .af-session-card__meta > span[aria-label][data-short]:not(.af-automation-card__unseen)::before { content: attr(data-short); }
 /* "next 5h": the kit's own short value after one word. */
 .code-sidebar .af-session-card__meta > span[aria-label][data-field="next"]:not(.af-automation-card__unseen)::before { content: "next "; white-space: pre; }
 .code-sidebar .af-session-card__meta > span[aria-label][data-field="next"] > span[aria-hidden="true"] { display: inline; }
@@ -3018,6 +3018,21 @@ select option {
   letter-spacing: 0.01em;
 }
 .code-sidebar .code-panel-header:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+/* Each section its colour (operator 2026-11-08: "at least use some colors for the headers"), kit
+   tokens only: Conversations the info blue, Automations the warning amber "Needs you" already uses.
+   The label keeps its colour on hover (only the background tints); the chevron follows at .85. */
+/* The kit tokens themselves: Code's --accent-blue / --accent-warning aliases live in ui/styles.css,
+   which the workspace does not load. */
+.code-sidebar .code-panel-header[data-panel="conversations"] { --code-panel-tone: var(--info); }
+.code-sidebar .code-panel-header[data-panel="automations"] { --code-panel-tone: var(--warning); }
+.code-sidebar .code-panel-header[data-panel] .code-panel-toggle,
+.code-sidebar .code-panel-header[data-panel]:hover .code-panel-toggle { color: var(--code-panel-tone); }
+.code-sidebar .code-panel-header[data-panel] .code-panel-toggle > svg { color: currentColor; opacity: 0.85; }
+.code-sidebar .code-auto-badge {
+  background: var(--warning-subtle);
+  color: var(--warning);
+  border: 1px solid var(--warning-border);
+}
 .code-sidebar .code-panel-toggle { min-height: 44px; padding-left: 12px; }
 .code-sidebar .code-panel > nav,
 .code-sidebar .code-panel > [role="region"] { padding: 4px 8px 8px; }

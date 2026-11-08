@@ -36,6 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the automation's keys, then the selected row's. Phone-width and short terminals stack the
   panels without frames and put the details at the end of the output.
 
+## [web 0.15.15] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.14 (0.10.13).
+
+### Changed
+
+- **The sidebar's section headers have a colour each** (operator 2026-11-08: "at least use some colors for the
+  headers"): Conversations in the theme's information blue, Automations in the amber "Needs you" already uses; the
+  count beside Automations wears the same amber. Light and dark themes.
+- **Counts the gateway gives as a lower bound read "4+ turns" / "2+ tool calls"** on the row instead of "At least 4
+  turns" (the gateway answers a long list with "more exist"); screen readers still hear "At least 4 turns".
+
 ## [web 0.15.14] - 2026-11-08 (local build, not published)
 
 Same AbstractUIC as web 0.15.13 (0.10.13).

@@ -114,6 +114,23 @@ test("conversation and automation rows: equal heights, quiet meta, a long name r
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.locator(".code-automation-item")).toHaveCount(5, { timeout: 20_000 });
     await expect(row(page, TITLES.short)).toBeVisible();
+    // Each section header in its colour (kit tokens): Conversations --info, Automations --warning.
+    if (!before) {
+      const tones = await page.evaluate(() => {
+        const resolve = (token: string) => {
+          const probe = document.createElement("span");
+          probe.style.color = `var(${token})`;
+          document.querySelector(".code-sidebar")!.appendChild(probe);
+          const value = getComputedStyle(probe).color;
+          probe.remove();
+          return value;
+        };
+        const toggle = (panel: string) => getComputedStyle(document.querySelector(`.code-sidebar .code-panel-header[data-panel="${panel}"] .code-panel-toggle`)!).color;
+        return { conversations: toggle("conversations"), info: resolve("--info"), automations: toggle("automations"), warning: resolve("--warning") };
+      });
+      expect(tones.conversations, `${theme} Conversations header`).toBe(tones.info);
+      expect(tones.automations, `${theme} Automations header`).toBe(tones.warning);
+    }
     await page.mouse.move(700, 500);
     await shoot(page, `desktop-${theme === "light" ? "light" : "dark"}`);
     await page.setViewportSize({ width: 400, height: 860 });
@@ -149,7 +166,11 @@ async function checkRows(page: Page, heights: (selector: string) => Promise<numb
 
   // The meta row: one line, in words (what is on screen, generated words included).
   const meta = (title: string) => row(page, title).locator(".af-session-card__meta");
-  expect(await rendered(meta(TITLES.short))).toMatch(/^(At least )?1 turn · (just now|\d+ min ago)$/); // "At least" when the gateway's list was cut (a busy test gateway)
+  // "1+ turn" on the line when the gateway's list was cut (has_more); its accessible label keeps
+  // the kit's "At least 1 turn".
+  const shortLine = await rendered(meta(TITLES.short));
+  expect(shortLine).toMatch(/^1\+? turn · (just now|\d+ min ago)$/);
+  if (shortLine.startsWith("1+")) await expect(meta(TITLES.short).locator("[aria-label]").first()).toHaveAttribute("aria-label", "At least 1 turn");
   expect(await meta(TITLES.short).evaluate((el) => el.getBoundingClientRect().height < 24)).toBe(true);
   const morning = page.locator(".code-automation-item .af-session-card").filter({ hasText: "Morning briefing" });
   // The schedule in its compact form, from the rule's structure (the fixture's daily 08:00 rule).
@@ -214,3 +235,25 @@ function rendered(meta: import("@playwright/test").Locator): Promise<string> {
     }).join(" ").replace(/\s+/g, " ").trim();
   });
 }
+
+// The operator's gateway answers every listing with has_more: the counts are lower bounds. The
+// line reads "N+ turns" (short, nothing cut); the row's accessible label keeps "At least N turns".
+test("counts the gateway gives as a lower bound read N+ on the line", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.route("**/api/gateway/runs?*", async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() !== "GET" || !url.pathname.endsWith("/api/gateway/runs")) return route.continue();
+    try {
+      const response = await route.fetch();
+      const body = await response.json();
+      return await route.fulfill({ response, json: { ...body, has_more: true } });
+    } catch {
+      return route.abort().catch(() => undefined); // the app dropped this request itself (a newer list)
+    }
+  });
+  await open(page, "observer-night");
+  await seedConversations(page);
+  const line = row(page, TITLES.short).locator(".af-session-card__meta");
+  await expect.poll(() => rendered(line)).toMatch(/^1\+ turn · (just now|\d+ min ago)$/);
+  await expect(line.locator("[aria-label]").first()).toHaveAttribute("aria-label", "At least 1 turn");
+});

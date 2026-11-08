@@ -130,7 +130,7 @@ describe("sidebar panels DOM", () => {
     const html = renderToStaticMarkup(<AutomationsSection {...automationsBase} onNew={() => undefined} open={false} onToggle={() => undefined} />);
     expect(html).toMatch(/data-open="false"/);
     expect(html).toMatch(/aria-expanded="false"/);
-    expect(html).toMatch(/<div class="code-panel-header"><button/);
+    expect(html).toMatch(/<div class="code-panel-header" data-panel="automations"><button/);
     expect(html).toMatch(/<div class="code-auto-rows"[^>]*hidden=""/);
   });
 
@@ -162,7 +162,7 @@ describe("panel headers (round 3: the operator's 12:00 screenshot of 0.9.0)", ()
     const html = renderToStaticMarkup(
       <AutomationsSection {...automationsBase} onNew={() => undefined} open onToggle={() => undefined} />,
     );
-    const header = /<div class="code-panel-header">([\s\S]*?)<\/div><div class="code-auto-rows"/.exec(html)?.[1] ?? "";
+    const header = /<div class="code-panel-header" data-panel="automations">([\s\S]*?)<\/div><div class="code-auto-rows"/.exec(html)?.[1] ?? "";
     expect(header).toMatch(/^<button type="button" class="code-panel-toggle"[^>]*aria-expanded="true"[^>]*><svg[\s\S]*?<\/svg><span>Automations<\/span><\/button><span class="code-panel-actions">/);
     expect(header).toMatch(/<span class="code-panel-actions">[\s\S]*aria-label="New automation"[\s\S]*aria-label="Refresh automations"[\s\S]*<\/span>$/);
     const conv = renderToStaticMarkup(
@@ -170,7 +170,7 @@ describe("panel headers (round 3: the operator's 12:00 screenshot of 0.9.0)", ()
         <p>row</p>
       </ConversationsPanel>,
     );
-    expect(conv).toMatch(/^<section class="code-panel code-conversations" data-open="false"><div class="code-panel-header"><button type="button" class="code-panel-toggle"[^>]*aria-expanded="false"[^>]*><svg[\s\S]*?<\/svg><span>Conversations<\/span><\/button><span class="code-panel-actions"><button aria-label="Refresh conversations">/);
+    expect(conv).toMatch(/^<section class="code-panel code-conversations" data-open="false"><div class="code-panel-header" data-panel="conversations"><button type="button" class="code-panel-toggle"[^>]*aria-expanded="false"[^>]*><svg[\s\S]*?<\/svg><span>Conversations<\/span><\/button><span class="code-panel-actions"><button aria-label="Refresh conversations">/);
   });
 
   it("the header row is a raised 44 px row (surface-2 background, border-2, 8 px radius)", () => {
