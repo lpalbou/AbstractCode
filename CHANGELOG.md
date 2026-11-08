@@ -16,6 +16,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.12] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.11 (0.10.13: `@abstractframework/panel-chat` 0.9.6, `@abstractframework/ui-kit` 0.9.24).
+
+### Fixed
+
+- **Sending again drops an old stop at once.** A Stop remembered from before a reload is dropped the moment you send
+  again in that conversation, before the new message leaves, so your new reply can never be taken for the one you
+  stopped. (Before, it was dropped only when the gateway answered the new start, and could cancel the new reply.)
+- **The remembered stop looks from the moment you sent.** A reply the gateway created between your Send and your Stop
+  (more than 1 s before the Stop, on a slow start) is now found and stopped after a reload.
+- **An unmatched stop is never dropped silently.** When no reply is found for a remembered stop, the conversation says
+  "The stop you pressed before the reload could not be matched to a reply; if a reply appears here, stop it."
+- The choice shown when several replies match uses the kit's buttons, names each reply by its time and its number
+  ("1 of 2"), and no longer says "runs".
+
+### Corrected (web 0.15.11 overclaimed)
+
+- "A Stop remembered across a reload never cancels the wrong run" was too strong. The exact rule: after a reload, Code
+  cancels a reply only when exactly one unfinished reply of that conversation started between 1 s before your Send
+  and 60 s after your Stop; when several do, it asks you. Known limit: a reply started in ANOTHER browser tab of the
+  same conversation inside that window counts as a match too, so it can be the one stopped.
+
 ## [web 0.15.11] - 2026-11-08 (local build, not published)
 
 Built on AbstractUIC 0.10.13 (`@abstractframework/panel-chat` 0.9.6, `@abstractframework/ui-kit` 0.9.24), vendored
