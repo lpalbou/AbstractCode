@@ -392,6 +392,73 @@
 .pc-composer__icon-action:focus-visible { outline: 2px solid var(--accent, #7189c0); outline-offset: 2px; }
 .pc-composer__icon-action:disabled { opacity: .5; cursor: not-allowed; }
 
+/* @ mentions (ChatComposer `mentionCandidates`): chips above the field, the host's notice
+ * under them, and the list of names above the composer box (full width on a phone). */
+.pc-mention-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px 0;
+}
+.pc-mention-chip { max-width: 100%; }
+.pc-mention-chip .af-chip__label { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.pc-mention-chip__name { overflow: hidden; text-overflow: ellipsis; }
+.pc-mention-notice {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--font-size-xs, 11px);
+  line-height: 1.35;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.70));
+}
+.pc-mention-notice > svg { flex: none; margin-top: 1px; color: var(--info, rgba(96, 165, 250, 0.95)); }
+.pc-mention-notice--unavailable > svg { color: var(--warning, rgba(243, 156, 18, 0.95)); }
+.pc-mention-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: var(--z-popover, 1100);
+  box-sizing: border-box;
+  width: min(100%, 22rem);
+  max-height: min(40vh, 280px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--ui-border-2, rgba(255, 255, 255, 0.14));
+  border-radius: var(--radius-md, 10px);
+  /* Solid surface: the transcript must not show through the list. */
+  background: var(--bg-secondary, #16213e);
+  color: var(--text-primary, rgba(255, 255, 255, 0.92));
+  box-shadow: var(--ui-shadow-1, 0 10px 30px rgba(0, 0, 0, 0.35));
+}
+.pc-mention-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pc-mention-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+}
+.pc-mention-option[aria-selected="true"] {
+  background: var(--ui-overlay-bg-hover, rgba(255, 255, 255, 0.08));
+  box-shadow: inset 3px 0 0 var(--accent, #7189c0);
+}
+.pc-mention-option__text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.pc-mention-option__name,
+.pc-mention-option__hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-mention-option__name { font-weight: 600; font-size: var(--font-size-base, 13px); }
+.pc-mention-option__hint { font-size: var(--font-size-xs, 11px); color: var(--text-muted, rgba(255, 255, 255, 0.55)); }
+.pc-mention-option__kind { flex: none; font-size: var(--font-size-xxs, 10px); color: var(--text-muted, rgba(255, 255, 255, 0.55)); }
+.pc-mention-empty { padding: 8px 10px; font-size: var(--font-size-sm, 12px); color: var(--text-secondary, rgba(255, 255, 255, 0.70)); }
+@media (pointer: coarse) {
+  .pc-mention-option { min-height: var(--tap-min, 44px); }
+}
+
 /* Shared default rounded multiline composer; host actions keep their own semantics. */
 .pc-composer.pc-composer--compact {
   gap: 3px;
@@ -1064,6 +1131,68 @@
   font-size: var(--font-size-sm, 12px);
   color: var(--text-primary, rgba(255, 255, 255, 0.92));
   min-width: 0;
+}
+
+/* Who answered (operator 2026-11-08): an assistant message with an `author` shows the
+ * author's mark (an entity's orb, the agent's mark), its name and a kind tag. Without an
+ * author the tile above stays hidden and the header is today's. */
+.pc-chat-item--assistant[data-author] .pc-chat-avatar {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.pc-chat-author-kind {
+  flex: 0 0 auto;
+}
+
+/* ChatAuthorMark: the round mark used by the header, the mention list and the chips. */
+.pc-author-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  border-radius: 50%;
+  overflow: hidden;
+  line-height: 1;
+}
+
+.pc-author-mark canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* An entity's orb or disc sits on a wash of its own colour with a thin ring of it, so the
+ * design still reads at chat size (a 22 px orb alone is faint on a dark card). */
+.pc-author-mark--orb,
+.pc-author-mark--plain {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--af-entity-color, var(--text-secondary, #9aa4b2)) 55%, transparent);
+}
+
+.pc-author-mark--orb {
+  background: color-mix(in srgb, var(--af-entity-color, var(--text-secondary, #9aa4b2)) 20%, var(--bg-secondary, #16213e));
+}
+
+.pc-author-mark--plain {
+  background: color-mix(in srgb, var(--af-entity-color, var(--text-secondary, #9aa4b2)) 30%, var(--bg-secondary, #16213e));
+  color: var(--text-primary, rgba(255, 255, 255, 0.92));
+  font-weight: 600;
+}
+
+.pc-author-mark--agent {
+  background: var(--accent-subtle, rgba(233, 69, 96, 0.10));
+  border: 1px solid var(--accent-border, rgba(233, 69, 96, 0.30));
+  color: var(--accent, rgba(233, 69, 96, 0.95));
+}
+
+.pc-author-mark--person {
+  background: var(--info-subtle, rgba(96, 165, 250, 0.10));
+  border: 1px solid var(--info-border, rgba(96, 165, 250, 0.30));
+  color: var(--info, rgba(96, 165, 250, 0.95));
 }
 
 .pc-chat-header-spacer {

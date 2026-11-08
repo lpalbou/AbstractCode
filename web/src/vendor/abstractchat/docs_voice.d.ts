@@ -12,9 +12,9 @@ export declare function docsSpeech(fetchGateway: GatewayFetch, message: Pick<Cha
  */
 export declare function docsVoiceOptions(preferences: VoiceClientPreferences): {
     unlock_on_gesture: boolean;
+    muted?: boolean | undefined;
     output_device_id?: string | undefined;
     volume?: number | undefined;
-    muted?: boolean | undefined;
     input_device_id?: string | undefined;
     input_gain?: number | undefined;
     capture_mode?: import("@abstractframework/ui-kit").VoiceCaptureMode | undefined;

@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed (web)
+### Added (web)
+
+- **`@` mentions an entity from Code's chat, and every reply says who wrote it** (operator 2026-11-08; needs
+  the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway main f32c8ca9 with
+  AbstractRuntime 6706188). Typing `@` lists the entities `GET /entities` offers this account; a pick is a chip
+  (the text is never searched for `@`), and the first pick in a conversation says "Castor will read this
+  conversation's history." On send, the message starts its turn as before, then each picked entity is asked in
+  order, the next once the previous answered ("Castor is answering…" above the box). Each answer is a turn of the
+  conversation the gateway records, so it reads the same after a reload; it appears once the current reply has
+  ended. "Castor is in another conversation." (409) and an entity this account cannot mention (404, then no
+  longer offered) are said and the next one is asked; "Castor cannot answer: …" (503) or any other failure is
+  said and the message stays in the box. A gateway without the route says "This gateway does not offer mentions
+  yet." once and `@` then shows that sentence instead of names. A guided message asks its names once the
+  guidance is in; a queued message carries them to its turn.
+- **The left bubble names its author**: the agent's workflow name with an "agent" tag, or the entity's name, its
+  orb and an "entity" tag, from the turn's `author`. Without one (an older gateway) the bubble is unchanged.
+- A conversation that opens on an entity's answer continues with its newest agent turn's workflow (an answer is
+  never taken for the conversation's workflow, which said "no longer available").
+- On the vendored panel-chat of AbstractUIC main aab7240 (local 0.9.9, not published; `npm run sync:conversation`).
 
 - **"Iteration limit" moved to Model → Limits & streaming, as the shared kit control** (AbstractUIC ui-kit 0.9.26
   `IterationLimitField`, operator 2026-11-08). It is the third row after "Context token limit" and "Stream replies"

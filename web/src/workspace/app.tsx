@@ -1,7 +1,10 @@
-import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction} from "../vendor/abstractchat/conversation.js";
+import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, type ChatMentionCandidate, type ChatMentionSent} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
+import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, isMentionTurn, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
+import type { IterationLimitApplied } from "@abstractframework/ui-kit";
+import { AUTOMATION_ITERATION_DEFAULT, runLimitsReceipt } from "./iteration_limit";
 import { ActivityAvatar, useVoiceLevel } from "@abstractframework/ui-kit";
 import "../vendor/abstractchat/conversation.css";
 import { sessionReadTarget, sessionOpeningReceipts } from "../vendor/abstractsessions/session_cards.js";
@@ -285,6 +288,8 @@ export function CodeWorkspace() {
         visibleChoices.find((item) => item.id === selection) ||
         null;
   // What the gateway said it started, for the run this page started.
+  // The last start's iteration receipt (`limits` on the POST /runs/start answer) for "Last run: …".
+  const [runLimits, setRunLimits] = useState<IterationLimitApplied | null>(null);
   const [resolvedNote, setResolvedNote] = useState<
     (ResolvedWorkflowNote & { runId: string }) | null
   >(null);
@@ -307,6 +312,16 @@ export function CodeWorkspace() {
   // Stops dropped without a match: the conversation says so until dismissed.
   const [stopMisses, setStopMisses] = useState<PendingStop[]>([]);
   const [stopsVersion, setStopsVersion] = useState(0);
+  // @ mentions (`mentions.ts`, contract 2026-11-08). `mentionsOff`: this gateway has no mentions
+  // route (for this sign-in). `mentionStatus`: the sentence above the composer about the last
+  // mentions of this conversation. `followTurn`: the newest mention reply, shown once the current
+  // reply has ended (the conversation then opens on it; its earlier turns come before it).
+  const [mentionsOff, setMentionsOff] = useState<string | null>(null);
+  const [mentionStatus, setMentionStatus] = useState<{ sessionId: string; text: string; answered?: boolean } | null>(null);
+  const [mentioning, setMentioning] = useState(false);
+  const [followTurn, setFollowTurn] = useState<{ sessionId: string; runId: string; identity: string } | null>(null);
+  const refusedEntities = useRef(new Set<string>());
+  const entityRoster = useRef<{ identity: string; load: Promise<ChatMentionCandidate[]> } | null>(null);
   const unloadingRef = useRef(false);
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
@@ -779,10 +794,22 @@ export function CodeWorkspace() {
     setRestoreError("");
     if (!identity || !session.runId) return;
     const abort = new AbortController();
-    void gatewayRequest(
-      gatewayApiPath(`runs/${encodeURIComponent(session.runId)}/input_data`),
-      { signal: abort.signal },
-    )
+    const loaded = session.runId;
+    const inputsOf = (runId: string) =>
+      gatewayRequest(gatewayApiPath(`runs/${encodeURIComponent(runId)}/input_data`), { signal: abort.signal });
+    void inputsOf(loaded)
+      .then(async (data) => {
+        // An entity's reply to an @mention is a turn of the conversation, not its workflow: the
+        // conversation continues with its newest agent turn's (`mentions.ts`). Only mention
+        // replies: none is restored (conversation_restore.ts says nothing is gone).
+        if (!isMentionTurn(data)) return data;
+        const bundle = await gatewayRequest<any>(
+          gatewayApiPath(`runs/${encodeURIComponent(loaded)}/history_bundle?include_session=true&include_subruns=false&ledger_max_items=1&detail=replay&session_turn_limit=201`),
+          { signal: abort.signal },
+        );
+        const turn = conversationWorkflowTurn(bundle?.session?.turns, loaded);
+        return turn ? inputsOf(turn) : data;
+      })
       .then((data) => {
         setRestoredInputs(data);
       })
@@ -840,7 +867,7 @@ export function CodeWorkspace() {
     const next = conversationSelection({ restoredInputs, restored: restoredWorkflow });
     if (next) setSelection(next);
   }, [session.runId, restoredInputs, restoredWorkflow?.id, notesSession]);
-  const sourceNote = session.runId ? selectionSourceNote(restoredInputs) : "";
+  const sourceNote = session.runId && !isMentionTurn(restoredInputs) ? selectionSourceNote(restoredInputs) : "";
 
   const newConversation = useCallback(() => {
     const next = { sessionId: newId(), runId: "" };
@@ -1134,6 +1161,7 @@ export function CodeWorkspace() {
         runId: attachedRun,
         ...resolvedWorkflowNote(result.resolved_workflow),
       });
+      setRunLimits(runLimitsReceipt(result.limits));
       setOptimistic([
         ...messages,
         ...(text.trim()
@@ -1169,6 +1197,85 @@ export function CodeWorkspace() {
       }
     }
   }
+
+  // @ mentions: the names the `@` list offers, from `GET /entities` (read again at each new `@`,
+  // the result kept for the letters typed after it); entities the gateway refused are left out.
+  const mentionCandidates = useCallback(
+    async (query: string): Promise<ChatMentionCandidate[]> => {
+      if (!entityRoster.current || entityRoster.current.identity !== identity || !query) {
+        const load = gatewayRequest(gatewayApiPath("entities")).then(entityCandidates);
+        entityRoster.current = { identity, load };
+        load.catch(() => {
+          if (entityRoster.current?.load === load) entityRoster.current = null;
+        });
+      }
+      return filterMentionCandidates(await entityRoster.current.load, query, refusedEntities.current);
+    },
+    [identity],
+  );
+  useEffect(() => {
+    entityRoster.current = null;
+    refusedEntities.current = new Set();
+    setMentionsOff(null);
+    setFollowTurn(null);
+  }, [identity]);
+
+  /**
+   * Ask the picked entities, in order, once the person's message is in the conversation (its turn
+   * started, its guidance accepted, or its queued turn started). 409/404: said, the next one is
+   * asked. 503 or any other failure: said, and the rest is not asked; `keepDraft` puts the message
+   * back in the composer (the chips stay: the send rejects). Each reply is a session turn the
+   * gateway recorded; the conversation opens on the newest once the current reply has ended.
+   */
+  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { signal?: AbortSignal; keepDraft: boolean }) {
+    if (!mentions.length) return;
+    const askedBy = identityRef.current;
+    const epoch = authEpoch.current;
+    const here = () => sessionRef.current.sessionId === sessionId && identityRef.current === askedBy && authEpoch.current === epoch;
+    setMentioning(true);
+    const outcome = await sendMentions(
+      mentions,
+      (mention) =>
+        gatewayRequest(gatewayApiPath(`sessions/${encodeURIComponent(sessionId)}/mentions`), {
+          method: "POST",
+          body: JSON.stringify(mentionRequestBody(text, mention)),
+        }),
+      {
+        signal: options.signal,
+        onAsking: (mention) => { if (here()) setMentionStatus({ sessionId, text: `${mention.name} is answering…` }); },
+      },
+    ).finally(() => setMentioning(false));
+    if (identityRef.current !== askedBy || authEpoch.current !== epoch) return;
+    for (const skipped of outcome.skipped) if (skipped.refusal.kind === "not_offerable") refusedEntities.current.add(skipped.mention.id);
+    if (outcome.stopped?.refusal.kind === "unavailable") setMentionsOff(askedBy);
+    const last = outcome.answered[outcome.answered.length - 1];
+    if (last?.runId) setFollowTurn({ sessionId, runId: last.runId, identity: askedBy });
+    const summary = mentionsSummary(outcome, { replyStillRunning: Boolean(last?.runId) });
+    setMentionStatus(summary ? { sessionId, text: summary, answered: Boolean(last?.runId) } : null);
+    const stop = outcome.stopped?.refusal;
+    if (stop && stop.kind !== "unavailable") {
+      if (options.keepDraft && here()) setDraft(text);
+      throw new Error(stop.sentence);
+    }
+  }
+  // The newest mention reply becomes the conversation's open turn once nothing else is under way
+  // there: the current reply has ended, no send or mention is in flight and no turn is queued
+  // (a queued turn opens on its own, with the replies before it).
+  useEffect(() => {
+    if (!followTurn) return;
+    const done = () => {
+      setFollowTurn(null);
+      setMentionStatus((now) => (now?.answered && now.sessionId === followTurn.sessionId ? null : now));
+    };
+    if (followTurn.sessionId !== session.sessionId || followTurn.identity !== identity || queue.length || session.runId === followTurn.runId) {
+      done();
+      return;
+    }
+    if (sending || mentioning || !terminal(snapshot.status) || String(snapshot.run?.run_id || "") !== session.runId) return;
+    done();
+    setSession({ sessionId: followTurn.sessionId, runId: followTurn.runId });
+    writeRoute(followTurn.sessionId, followTurn.runId);
+  }, [followTurn, session.sessionId, session.runId, identity, queue.length, sending, mentioning, snapshot.status, snapshot.run?.run_id]);
 
   // Press to talk (like the terminal's Space): releasing the microphone SENDS
   // what was said, after anything already typed. While a start is in flight,
@@ -1209,7 +1316,7 @@ export function CodeWorkspace() {
       ...(answer?.duplicate === true ? { duplicate: true } : {}),
     };
   }
-  function queueNextTurn(text: string): { accepted: boolean } {
+  function queueNextTurn(text: string, mentions: readonly ChatMentionSent[] = []): { accepted: boolean } {
     setQueue((items) => [
       ...items,
       {
@@ -1218,6 +1325,7 @@ export function CodeWorkspace() {
         sessionId: session.sessionId,
         sourceRunId: session.runId,
         authEpoch: authEpoch.current,
+        ...(mentions.length ? { mentions: [...mentions] } : {}),
       },
     ]);
     setQueueRunning(true);
@@ -1228,17 +1336,38 @@ export function CodeWorkspace() {
       ? {
           modes: (avatarMode ? ["guide"] : interaction ? ["queue"] : ["guide", "queue"]) as ("guide" | "queue")[],
           parked: snapshot.status === "waiting" && !interaction,
-          onSteer: async (text: string, mode: "guide" | "queue") => (mode === "queue" ? queueNextTurn(text) : guideRun(text)),
+          onSteer: async (text: string, mode: "guide" | "queue", ctx?: { mentions: ChatMentionSent[] }) => {
+            const mentions = ctx?.mentions ?? [];
+            setMentionStatus(null);
+            if (mode === "queue") return queueNextTurn(text, mentions);
+            const sessionId = session.sessionId;
+            const result = await guideRun(text);
+            // The guidance is in the run: then the picked entities are asked (WorkflowChat keeps
+            // the draft and the chips when this rejects).
+            if (result.accepted) await askMentions(sessionId, text, mentions, { keepDraft: false });
+            return result;
+          },
         }
       : undefined;
 
-  /** A message from outside the composer (the microphone): starts a turn, or steers / queues a busy run. */
-  async function send(text: string, opts?: { signal?: AbortSignal }) {
-    if (!active) return startTurn(text, opts?.signal);
-    const result = avatarMode ? await guideRun(text) : interaction ? queueNextTurn(text) : await guideRun(text);
+  /** A message from the composer or the microphone: starts a turn, or steers / queues a busy run.
+   * The `@` names picked with it (`mentions`) are asked once the message is in: right after its
+   * turn started or its guidance was accepted; a queued message carries them to its turn. */
+  async function send(text: string, opts?: { signal?: AbortSignal; mentions?: readonly ChatMentionSent[] }) {
+    const mentions = opts?.mentions ?? [];
+    const sessionId = session.sessionId;
+    setMentionStatus(null);
+    if (!active) {
+      await startTurn(text, opts?.signal);
+      await askMentions(sessionId, text, mentions, { signal: opts?.signal, keepDraft: true });
+      return;
+    }
+    const queued = !avatarMode && Boolean(interaction);
+    const result = queued ? queueNextTurn(text, mentions) : await guideRun(text);
     if (!result.accepted) throw new Error("The gateway did not accept this message.");
     setDraft("");
-    setNotice(avatarMode ? "Sent. Your message is available to the assistant." : interaction ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
+    setNotice(avatarMode ? "Sent. Your message is available to the assistant." : queued ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
+    if (!queued) await askMentions(sessionId, text, mentions, { signal: opts?.signal, keepDraft: true });
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");
@@ -1254,6 +1383,8 @@ export function CodeWorkspace() {
       throw staleSendAbort();
     const nextRunId = await startTurn(intent.text);
     setQueue((items) => advanceQueueIntents(items, intent, nextRunId));
+    // Its names are asked now; a refusal is said and never pauses the queue (the turn started).
+    await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { keepDraft: false }).catch((e) => setError(formatError(e)));
   }
   useEffect(() => {
     if (
@@ -1262,7 +1393,8 @@ export function CodeWorkspace() {
       !connection.connected ||
       !restoredInputs ||
       restoreError ||
-      sendLock.current
+      sendLock.current ||
+      mentioning
     )
       return;
     const disposition = queueTerminalDisposition(snapshot.status);
@@ -1304,6 +1436,7 @@ export function CodeWorkspace() {
     restoreError,
     session.sessionId,
     session.runId,
+    mentioning,
   ]);
 
   async function cancelCurrentRun(): Promise<void> {
@@ -1478,6 +1611,9 @@ export function CodeWorkspace() {
       }
       workflowDefault={!automation && Boolean(inputs.provider && inputs.model)}
       streaming={catalog.streaming}
+      // Automations run on a schedule, where the gateway iteration default does not apply.
+      iterationDefault={automation ? AUTOMATION_ITERATION_DEFAULT : catalog.iterationLimit}
+      lastRunLimits={automation ? null : runLimits}
       disabled={automation ? !connection.connected : locked || !connection.connected}
       workspaceRootFixed={automation?.root}
       sessionId={automation ? undefined : session.sessionId}
@@ -2186,6 +2322,11 @@ export function CodeWorkspace() {
               draft={draft}
               onDraftChange={setDraft}
               onSend={send}
+              mentionCandidates={mentionCandidates}
+              mentionNotice={mentionNoticeFor}
+              mentionSessionKey={`${identity}:${session.sessionId}`}
+              mentionsUnavailable={mentionsOff === identity ? MENTIONS_UNAVAILABLE : null}
+              mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : null}
               busy={locked && !stoppingStart}
               busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
               working={working}

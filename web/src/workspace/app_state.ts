@@ -4,6 +4,8 @@ export type QueueIntent = {
   sessionId: string;
   sourceRunId: string;
   authEpoch: number;
+  /** The `@` names picked with the message: asked in order once its turn has started. */
+  mentions?: { id: string; name: string; kind: "entity" | "agent"; index: number }[];
 };
 
 type QueueContext = {
