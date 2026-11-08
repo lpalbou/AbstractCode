@@ -47,3 +47,10 @@ resumed stream never re-fetched the view.
 ## Related
 
 Root 1140 (one shared browser connection), root 1158 (scalability), the kit event-wait fix of 2026-11-08 (panel-chat 0.9.7).
+
+## Status 2026-11-08 14:10
+
+Done and live (Code 0.15.18/0.15.19, kit 0.10.16/0.10.17 local): no give-up, re-read on reconnection, run state stays
+the ledger's in the status bar, one connection banner with Retry now / Stop retrying, the deploy script refuses under a
+live run. Still open, next release: at 400 px the run status bar cuts its last actions ("Conclude", "View activity");
+a kit/Code layout fix, about an hour.
