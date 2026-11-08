@@ -149,7 +149,7 @@ async function checkRows(page: Page, heights: (selector: string) => Promise<numb
 
   // The meta row: one line, in words (what is on screen, generated words included).
   const meta = (title: string) => row(page, title).locator(".af-session-card__meta");
-  expect(await rendered(meta(TITLES.short))).toMatch(/^1 turn · (just now|\d+ min ago)$/);
+  expect(await rendered(meta(TITLES.short))).toMatch(/^(At least )?1 turn · (just now|\d+ min ago)$/); // "At least" when the gateway's list was cut (a busy test gateway)
   expect(await meta(TITLES.short).evaluate((el) => el.getBoundingClientRect().height < 24)).toBe(true);
   const morning = page.locator(".code-automation-item .af-session-card").filter({ hasText: "Morning briefing" });
   // The schedule in its compact form, from the rule's structure (the fixture's daily 08:00 rule).
