@@ -67,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the automation's keys, then the selected row's. Phone-width and short terminals stack the
   panels without frames and put the details at the end of the output.
 
+## [web 0.15.20] - 2026-11-08 (local build, not published)
+
+- `@entity` mentions from the composer: a structured chip summons the entity into this conversation through the gateway's session mention route; the answering entity, agent or person is named on every left bubble from the turn's `author` (Entity session, e95562c).
+- Model → Limits & streaming: "Iteration limit", the kit's shared `IterationLimitField`; the applied source ("Gateway default (N)") is shown from the run's `limits` (c6ed096 + the remainder carried in e95562c).
+- Kit: ui-kit 0.9.26 and panel-chat 0.9.9 vendored from the local packs (`--no-save`; the lockfile follows the publish).
+
 ## [web 0.15.19] - 2026-11-08 (local build, not published)
 
 Built on AbstractUIC 0.10.17 (`@abstractframework/panel-chat` 0.9.9, `@abstractframework/ui-kit` 0.9.25), vendored
