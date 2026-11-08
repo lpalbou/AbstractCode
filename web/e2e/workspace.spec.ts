@@ -1157,9 +1157,11 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await openWorkspaceSection(page, "Voice");
     const drawer = page.locator(".code-rail .af-rail__panel");
     // Round 4: the Assistant's layout — Text → speech reads "Gateway default"; Change opens the picker in place.
-    const tts = drawer.locator('#code-settings-voice [data-setting="tts"]');
+    // (The panel is #code-rail-panel-voice since the rail split, 142eb36; since the compact Voice
+    // panel, 32898e4, the row itself is the "Change Text → speech" button.)
+    const tts = drawer.locator('[data-setting="tts"]');
     await expect(tts.locator(".af-override__summary")).toContainText("Gateway default");
-    await tts.locator('[data-action="change"]').click();
+    await tts.getByRole("button", { name: "Change Text → speech", exact: true }).click();
     await tts.getByRole("button", { name: "AI voice" }).click();
     await expect(
       page.getByRole("option", {
