@@ -113,3 +113,8 @@ None.
 
 Scan every lifecycle folder for the highest `NNNN_` prefix, take the next one, write the item, and update the counts
 and tables here in the same commit. On completion, move the file to `completed/` and record the date and outcome here.
+
+
+## Planned additions (2026-11-08)
+
+| [1163](planned/1163_the_page_reconnects_its_live_streams_after_the_app_server_restarts.md) | The page reconnects its live streams after the app server restarts and re-fetches the view, so a tool approval raised during the gap is shown (2026-11-08: the tray showed it, Code did not) | Planned | P1 |
