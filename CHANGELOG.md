@@ -16,6 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.14] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.13 (0.10.13).
+
+### Changed
+
+- **An automation's schedule always fits its sidebar row.** The row shows a compact form built from the recorded
+  rule's fields ("Daily 08:00", "Every 8 h", "Weekly Mon, Thu 09:00", "Monthly 1st 07:00", "Every 2 min"); its time
+  zone and bounds stay in the details. Nothing inside a row's details line is ever cut with "…": a part that still
+  does not fit (the schedule first, then a conversation's tool count, then the next run time) leaves the line whole
+  and is named in the row's tooltip; everything stays in the conversation or automation details.
+- With a mouse, a row's archive button appears over the row's right edge on hover instead of reserving its width on
+  every row.
+
+### Tests
+
+- The Code browser tests that still looked for the cards of before (`.code-session`, the card "⋯" archive menu, the
+  2 px open-card frame, "Archived" without the "Paused" footer beside it, a 75 % wide message, the "Queue" button
+  without typed words) now follow today's rows and composer with the same intent.
+
 ## [web 0.15.13] - 2026-11-08 (local build, not published)
 
 Same AbstractUIC as web 0.15.12 (0.10.13). The sidebar's own styles only; the shared cards are unchanged.
