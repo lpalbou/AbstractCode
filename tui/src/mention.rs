@@ -1,273 +1,577 @@
-//! `@name` mention parsing + the '@' completion provider rule.
+//! `@entity` mentions (the 2026-11-08 contract,
+//! `POST /api/gateway/sessions/{session_id}/mentions`): the roster the
+//! composer's `@` popup offers, what a submitted message means, the
+//! gateway's refusals, and the `author` every turn surface carries.
 //!
-//! Routing is a SUBMIT-time parse (leading-@ only; a mid-prompt `@` is
-//! plain text). The completion provider is deliberately DIFFERENT from the
-//! '/' lane: it completes any @-token (leading = routing position,
-//! mid-prompt = reference insert), reads only the CACHED roster (never a
-//! synchronous fetch), and yields NO candidates for a query that already
-//! exactly equals a roster slug — a fully-typed `@castor` submits (and
-//! routes) on the first Enter instead of feeding the dropdown.
+//! A mention is a STRUCTURED chip: the person picks an entity from the
+//! popup (abstracttui `Completion::mentions`) and the composer hands back
+//! `ComposerSubmission { text, mentions }`. Nothing here reads `@` out of
+//! text: a typed `@castor` that was never picked is plain text, sent like
+//! any other prompt.
+//!
+//! Routing ([`route`]): a message that is ONLY one chip opens (or focuses)
+//! that entity's conversation, as the leading `@name` always did. Any
+//! other message with chips is the person's turn, sent as before, then one
+//! mention call per chip, in order (the runner's `Cmd::Mentions`).
+
+use abstracttui::widgets::{
+    AuthorAvatar, AuthorKind, ChatAuthor, ComposerSubmission, MentionCandidate, MentionKind,
+};
+use serde_json::{json, Value};
 
 use crate::entities::EntityInfo;
 
-/// Submit-time routing decision for a composer draft.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Mention {
-    /// No leading `@` — plain prompt text.
-    None,
-    /// Bare `@name`: open/focus the conversation WITHOUT sending.
-    Open { slug: String },
-    /// `@name <text>`: route `<text>` into the conversation.
-    Message { slug: String, text: String },
-    /// Leading `@` with a name not on the cached roster: honest notice,
-    /// draft preserved (never silently swallowed as a prompt).
-    Unknown { name: String },
-}
+/// The one sentence for a gateway without the mention route.
+pub const NOT_OFFERED: &str = "This gateway does not offer mentions yet";
 
-/// Parse a submitted draft against the cached roster (case-insensitive
-/// slug match). Only a LEADING `@` routes.
-pub fn parse(text: &str, roster: &[EntityInfo]) -> Mention {
-    let t = text.trim_start();
-    let Some(rest) = t.strip_prefix('@') else {
-        return Mention::None;
-    };
-    let mut parts = rest.splitn(2, char::is_whitespace);
-    let name = parts.next().unwrap_or("").trim();
-    if name.is_empty() {
-        // A bare "@" is plain text (someone typing an email fragment).
-        return Mention::None;
-    }
-    let body = parts.next().unwrap_or("").trim().to_string();
-    let lower = name.to_lowercase();
-    match roster
-        .iter()
-        .find(|e| e.error.is_empty() && e.slug == lower)
-    {
-        Some(e) => {
-            if body.is_empty() {
-                Mention::Open {
-                    slug: e.slug.clone(),
-                }
-            } else {
-                Mention::Message {
-                    slug: e.slug.clone(),
-                    text: body,
-                }
-            }
-        }
-        None => Mention::Unknown {
-            name: name.to_string(),
-        },
-    }
-}
-
-/// One completion candidate: (label, insert, detail).
-pub type Candidate = (String, String, String);
-
-/// The '@' provider rule (engine `anchored_completion` mechanics: a token
-/// triggers when its FIRST cluster is '@' and the token is whitespace-
-/// delimited, so `castor@10.0.0.215` never triggers):
-/// 1. NO whole-draft guard — leading and mid-prompt @-tokens both
-///    complete; both insert `"@{slug} "`.
-/// 2. A query that already EXACTLY equals a roster slug (case-insensitive)
-///    yields NO candidates, closing the dropdown so Enter submits.
-/// 3. Cached roster only; empty cache = no dropdown.
-pub fn candidates(query: &str, roster: &[EntityInfo]) -> Vec<Candidate> {
-    let q = query.trim().to_lowercase();
-    if roster.iter().any(|e| e.error.is_empty() && e.slug == q) {
-        return Vec::new(); // rule 2: fully-typed name submits on Enter
-    }
+/// The `@` popup's rows: every readable home on the cached roster
+/// (`GET /entities`, the entities this account may see), in roster order.
+/// `id` is the slug (what the mention call names), `name` the display
+/// name (what the chip shows), `hint` the state word and pending tasks.
+/// Broken-home rows are never offered.
+pub fn candidates(roster: &[EntityInfo]) -> Vec<MentionCandidate> {
     roster
         .iter()
-        .filter(|e| e.error.is_empty() && e.slug.starts_with(&q))
+        .filter(|e| e.error.is_empty() && !e.slug.is_empty())
         .map(|e| {
-            let mut detail = e.state.clone();
-            if let Some(n) = e.pending_tasks {
-                if n > 0 {
-                    detail.push_str(&format!(" · {n} task(s) pending"));
+            let name = if e.name.trim().is_empty() {
+                e.slug.clone()
+            } else {
+                e.name.clone()
+            };
+            let mut hint = e.state.clone();
+            if let Some(n) = e.pending_tasks.filter(|n| *n > 0) {
+                if !hint.is_empty() {
+                    hint.push_str(" · ");
                 }
+                hint.push_str(&format!("{n} task(s) pending"));
             }
-            (e.slug.clone(), format!("@{} ", e.slug), detail)
+            let c = MentionCandidate::new(e.slug.clone(), name, MentionKind::Entity);
+            if hint.is_empty() {
+                c
+            } else {
+                c.hint(hint)
+            }
         })
         .collect()
+}
+
+/// One mention call: the entity (its slug), the name the chip showed, and
+/// its `mention_index` (the chip's position among the message's chips).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MentionCall {
+    pub entity: String,
+    pub name: String,
+    pub index: usize,
+}
+
+/// What a submitted message means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Route {
+    /// No chip: the message is sent exactly as before.
+    Plain,
+    /// The message is ONLY one chip: open (or focus) that conversation.
+    Open { slug: String },
+    /// The person's turn, then these mention calls, in order.
+    Mentions(Vec<MentionCall>),
+}
+
+/// Route a submission by its chips (never by its text).
+pub fn route(value: &ComposerSubmission) -> Route {
+    let calls: Vec<MentionCall> = value
+        .mentions
+        .iter()
+        .filter(|m| m.kind == MentionKind::Entity)
+        .map(|m| MentionCall {
+            entity: m.id.clone(),
+            name: m.name.clone(),
+            index: m.index,
+        })
+        .collect();
+    match calls.as_slice() {
+        [] => Route::Plain,
+        [only] if value.text.trim() == format!("@{}", only.name) => Route::Open {
+            slug: only.entity.clone(),
+        },
+        _ => Route::Mentions(calls),
+    }
+}
+
+/// The composer's hint before a message that names someone new: "<name>
+/// will read this conversation's history." for every chip in the draft
+/// whose entity this session has not been told about (`told`: `(session,
+/// slug)` pairs, grown on send). Empty when there is nobody new.
+pub fn history_hint(
+    value: &ComposerSubmission,
+    session_id: &str,
+    told: &[(String, String)],
+) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for m in value
+        .mentions
+        .iter()
+        .filter(|m| m.kind == MentionKind::Entity)
+    {
+        let seen = told.iter().any(|(s, id)| s == session_id && *id == m.id);
+        if !seen && !names.contains(&m.name.as_str()) {
+            names.push(&m.name);
+        }
+    }
+    abstracttui::widgets::history_notice(&names)
+}
+
+/// The mention call's body: the message as typed, chips spelled `@name`,
+/// and `repeat_of` — the run id of the person's own turn that carries the
+/// same words (the agent turn this message started), so every client shows
+/// those words once. Absent when the message started no turn (a steer, a
+/// refused start).
+pub fn request_body(text: &str, call: &MentionCall, repeat_of: Option<&str>) -> Value {
+    let mut body = json!({"entity": call.entity, "text": text, "mention_index": call.index});
+    if let Some(run_id) = repeat_of.filter(|r| !r.is_empty()) {
+        body["repeat_of"] = json!(run_id);
+    }
+    body
+}
+
+/// Restored turns in reading order: the gateway's order (when each
+/// question was asked), except that a turn repeating another turn's words
+/// (`repeat_of`, an `@entity` mention) is read right after the turn it
+/// repeats, the answers to the same words in the order they came
+/// (`updated_at`). A repeat whose turn is not among these keeps its place.
+/// `key` gives `(run_id, repeat_of, updated_at)` for a turn.
+pub fn order_restored<T>(
+    turns: Vec<T>,
+    key: impl Fn(&T) -> (String, Option<String>, String),
+) -> Vec<T> {
+    let keys: Vec<(String, Option<String>, String)> = turns.iter().map(&key).collect();
+    let is_root = |run_id: &str| {
+        keys.iter()
+            .any(|(id, rep, _)| id == run_id && rep.as_deref().is_none_or(|r| r == id))
+    };
+    // A repeat is placed under its turn only when that turn is here and is
+    // itself no repeat (one level: an answer never repeats an answer).
+    let parent = |i: usize| -> Option<&str> {
+        let (id, rep, _) = &keys[i];
+        rep.as_deref().filter(|r| *r != id && is_root(r))
+    };
+    let mut order: Vec<usize> = Vec::with_capacity(keys.len());
+    for i in 0..keys.len() {
+        if parent(i).is_some() {
+            continue;
+        }
+        order.push(i);
+        let mut answers: Vec<usize> = (0..keys.len())
+            .filter(|j| parent(*j) == Some(keys[i].0.as_str()))
+            .collect();
+        answers.sort_by(|a, b| keys[*a].2.cmp(&keys[*b].2));
+        order.extend(answers);
+    }
+    let mut slots: Vec<Option<T>> = turns.into_iter().map(Some).collect();
+    order.into_iter().filter_map(|i| slots[i].take()).collect()
+}
+
+/// A mention call that did not answer 200: the HTTP status (None = no
+/// answer at all), the error `code` (body `code` or the
+/// `X-Gateway-Error-Code` header) and the gateway's `detail` sentence.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MentionFailure {
+    pub status: Option<u16>,
+    pub code: String,
+    pub detail: String,
+}
+
+/// What the person reads for a failed mention, and what happens next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// 409 `in_another_conversation`: "<name> is in another conversation",
+    /// then the next mention.
+    Elsewhere,
+    /// Any other refusal the gateway explains (the visit door's own 409s,
+    /// a `repeat_of` the gateway does not know): its sentence, then the
+    /// next mention.
+    Refused(String),
+    /// 404 `entity_not_found` (a missing entity, or one this account may
+    /// not see — the same answer): "<name> cannot be mentioned here.",
+    /// then the next mention.
+    NotFound,
+    /// 503 `entity_cannot_answer`: the gateway's sentence, and the message
+    /// goes back into the composer.
+    CannotAnswer(String),
+    /// The route does not exist on this gateway: one sentence, mentions
+    /// off for the rest of the session, the remaining calls dropped.
+    NotOffered,
+    /// No answer, or an unexplained error: an error row, then the next.
+    Failed(String),
+}
+
+/// Map a failed mention onto what the person sees. Read from the error
+/// code, never the sentence: the route's own 404 carries
+/// `entity_not_found`; a 404 WITHOUT a code is the route missing.
+pub fn classify(f: &MentionFailure) -> Refusal {
+    match (f.status, f.code.as_str()) {
+        (Some(409), "in_another_conversation") => Refusal::Elsewhere,
+        (Some(503), "entity_cannot_answer") => Refusal::CannotAnswer(f.detail.clone()),
+        (Some(404), "entity_not_found") => Refusal::NotFound,
+        (Some(404), "") => Refusal::NotOffered,
+        (Some(404 | 409 | 422), _) if !f.detail.is_empty() => Refusal::Refused(f.detail.clone()),
+        (Some(code), _) => Refusal::Failed(if f.detail.is_empty() {
+            format!("gateway HTTP {code}")
+        } else {
+            format!("gateway HTTP {code}: {}", f.detail)
+        }),
+        (None, _) => Refusal::Failed(f.detail.clone()),
+    }
+}
+
+/// The workflow id of a mention's session turn: a completed run with no
+/// ledger, whose reply is its `output.answer`.
+pub const MENTION_WORKFLOW_ID: &str = "entity-mention";
+
+/// A mention turn's reply from its run snapshot (`GET /runs/{id}`:
+/// `output.answer` + `author`); None when the snapshot holds no answer.
+pub fn reply_from_run(v: &Value) -> Option<(String, Option<ChatAuthor>)> {
+    let answer = v
+        .get("output")
+        .and_then(|o| o.get("answer"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|a| !a.is_empty())?;
+    Some((answer.to_string(), author_from_value(v.get("author"))))
+}
+
+/// The 200 answer: the reply text and who wrote it.
+pub fn reply_from_response(v: &Value) -> (String, Option<ChatAuthor>) {
+    let reply = v
+        .get("reply")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    (reply, author_from_value(v.get("author")))
+}
+
+/// The contract's `author` object (`{kind, name, entity_id, identity_ref,
+/// avatar: {style, color} | null}`), or None when absent, null or of an
+/// unknown kind (an older gateway: the row renders exactly as before).
+pub fn author_from_value(v: Option<&Value>) -> Option<ChatAuthor> {
+    let v = v?.as_object()?;
+    let kind = match v.get("kind").and_then(Value::as_str)?.trim() {
+        "entity" => AuthorKind::Entity,
+        "agent" => AuthorKind::Agent,
+        "person" => AuthorKind::Person,
+        _ => return None,
+    };
+    let text = |key: &str| {
+        v.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let mut author = ChatAuthor::new(kind, text("name").unwrap_or_default());
+    author.entity_id = text("entity_id");
+    author.identity_ref = text("identity_ref");
+    author.avatar = v.get("avatar").and_then(Value::as_object).map(|a| {
+        let field = |key: &str| {
+            a.get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        AuthorAvatar {
+            style: field("style"),
+            color: field("color"),
+        }
+    });
+    Some(author)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use abstracttui::widgets::Mention;
 
     fn roster() -> Vec<EntityInfo> {
-        let mk = |slug: &str, state: &str, tasks: Option<u64>| EntityInfo {
+        let mk = |slug: &str, name: &str, state: &str, tasks: Option<u64>| EntityInfo {
             slug: slug.into(),
-            name: slug.into(),
+            name: name.into(),
             state: state.into(),
             pending_tasks: tasks,
             ..Default::default()
         };
-        let mut r = vec![
-            mk("castor", "asleep", None),
-            mk("doorcheck", "asleep", Some(2)),
-        ];
-        r.push(EntityInfo {
-            slug: "lost-home".into(),
-            error: "home unreadable".into(),
-            ..Default::default()
-        });
-        r
+        vec![
+            mk("castor", "Castor", "asleep", None),
+            mk("doorcheck", "", "awake", Some(2)),
+            EntityInfo {
+                slug: "lost-home".into(),
+                error: "home unreadable".into(),
+                ..Default::default()
+            },
+        ]
+    }
+
+    fn chip(id: &str, name: &str, index: usize) -> Mention {
+        Mention {
+            id: id.into(),
+            name: name.into(),
+            kind: MentionKind::Entity,
+            index,
+        }
     }
 
     #[test]
-    fn leading_mention_routes_and_bare_opens() {
-        let r = roster();
+    fn candidates_offer_readable_homes_with_their_state() {
+        let c = candidates(&roster());
+        assert_eq!(c.len(), 2, "broken homes are never offered");
+        assert_eq!((c[0].id.as_str(), c[0].name.as_str()), ("castor", "Castor"));
+        assert_eq!(c[0].hint.as_deref(), Some("asleep"));
+        assert_eq!(c[0].kind, MentionKind::Entity);
+        assert_eq!(c[1].name, "doorcheck", "a nameless row shows its slug");
+        assert_eq!(c[1].hint.as_deref(), Some("awake · 2 task(s) pending"));
+        assert!(candidates(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_message_without_chips_is_plain_even_with_a_typed_at() {
+        let typed = ComposerSubmission {
+            text: "@castor hello".into(),
+            mentions: vec![],
+        };
+        assert_eq!(route(&typed), Route::Plain);
+    }
+
+    #[test]
+    fn a_message_that_is_only_one_chip_opens_the_conversation() {
+        let only = ComposerSubmission {
+            text: "@Castor ".into(),
+            mentions: vec![chip("castor", "Castor", 0)],
+        };
         assert_eq!(
-            parse("@castor", &r),
-            Mention::Open {
+            route(&only),
+            Route::Open {
                 slug: "castor".into()
             }
         );
+    }
+
+    #[test]
+    fn chips_with_words_are_mention_calls_in_order() {
+        let two = ComposerSubmission {
+            text: "@Castor and @Pollux, does the plan hold?".into(),
+            mentions: vec![chip("castor", "Castor", 0), chip("pollux", "Pollux", 1)],
+        };
         assert_eq!(
-            parse("@Castor  hello there", &r),
-            Mention::Message {
-                slug: "castor".into(),
-                text: "hello there".into()
-            },
-            "case-insensitive match routes to the canonical slug"
+            route(&two),
+            Route::Mentions(vec![
+                MentionCall {
+                    entity: "castor".into(),
+                    name: "Castor".into(),
+                    index: 0
+                },
+                MentionCall {
+                    entity: "pollux".into(),
+                    name: "Pollux".into(),
+                    index: 1
+                },
+            ])
+        );
+        // Two chips and nothing else: still a message to both, not an open.
+        let bare = ComposerSubmission {
+            text: "@Castor @Pollux".into(),
+            mentions: vec![chip("castor", "Castor", 0), chip("pollux", "Pollux", 1)],
+        };
+        assert!(matches!(route(&bare), Route::Mentions(c) if c.len() == 2));
+    }
+
+    #[test]
+    fn the_history_hint_names_each_new_entity_once_per_session() {
+        let value = ComposerSubmission {
+            text: "@Castor @Pollux @Castor hi".into(),
+            mentions: vec![
+                chip("castor", "Castor", 0),
+                chip("pollux", "Pollux", 1),
+                chip("castor", "Castor", 2),
+            ],
+        };
+        assert_eq!(
+            history_hint(&value, "s1", &[]),
+            "Castor and Pollux will read this conversation's history."
+        );
+        let told = vec![("s1".to_string(), "castor".to_string())];
+        assert_eq!(
+            history_hint(&value, "s1", &told),
+            "Pollux will read this conversation's history."
         );
         assert_eq!(
-            parse("  @doorcheck hi", &r),
-            Mention::Message {
-                slug: "doorcheck".into(),
-                text: "hi".into()
-            },
-            "leading whitespace does not defeat the parse"
+            history_hint(&value, "s2", &told),
+            "Castor and Pollux will read this conversation's history.",
+            "told is per session"
+        );
+        let both = vec![
+            ("s1".to_string(), "castor".to_string()),
+            ("s1".to_string(), "pollux".to_string()),
+        ];
+        assert_eq!(history_hint(&value, "s1", &both), "");
+        assert_eq!(history_hint(&ComposerSubmission::default(), "s1", &[]), "");
+    }
+
+    #[test]
+    fn the_body_carries_the_text_as_typed_and_the_index() {
+        let call = MentionCall {
+            entity: "pollux".into(),
+            name: "Pollux".into(),
+            index: 1,
+        };
+        assert_eq!(
+            request_body("@Castor and @Pollux?", &call, None),
+            json!({"entity": "pollux", "text": "@Castor and @Pollux?", "mention_index": 1}),
+            "no turn carried the words: no repeat_of"
+        );
+        assert_eq!(
+            request_body("@Castor and @Pollux?", &call, Some("run-7"))["repeat_of"],
+            "run-7"
         );
     }
 
     #[test]
-    fn mid_prompt_and_bare_at_are_plain_text() {
-        let r = roster();
-        assert_eq!(parse("ask @castor about doors", &r), Mention::None);
-        assert_eq!(parse("@", &r), Mention::None);
-        assert_eq!(parse("mail me at x@y.z", &r), Mention::None);
-    }
-
-    #[test]
-    fn adversarial_drafts_parse_predictably() {
-        let r = roster();
-        // Alt+Enter leaves a trailing newline on the draft.
-        assert_eq!(
-            parse("@doorcheck\n", &r),
-            Mention::Open {
-                slug: "doorcheck".into()
-            },
-            "trailing newline still opens"
-        );
-        // A newline as the first separator: the rest is the message.
-        assert_eq!(
-            parse("@doorcheck\nhello\nworld", &r),
-            Mention::Message {
-                slug: "doorcheck".into(),
-                text: "hello\nworld".into()
-            },
-            "multiline bodies route whole"
-        );
-        // Non-breaking space is whitespace to the parse.
-        assert_eq!(
-            parse("@doorcheck\u{a0}hi", &r),
-            Mention::Message {
-                slug: "doorcheck".into(),
-                text: "hi".into()
-            }
-        );
-        // Tabs separate like spaces.
-        assert_eq!(
-            parse("@doorcheck\thi", &r),
-            Mention::Message {
-                slug: "doorcheck".into(),
-                text: "hi".into()
-            }
-        );
-        // Unicode names match case-insensitively.
-        let mut r2 = r.clone();
-        r2.push(EntityInfo {
-            slug: "ünïcorn".into(),
-            name: "ünïcorn".into(),
-            state: "awake".into(),
-            ..Default::default()
+    fn restored_answers_follow_the_turn_they_answer_in_updated_at_order() {
+        // (run_id, repeat_of, updated_at), in the gateway's order (when
+        // each question was asked): the person's turn a1; Pollux's answer
+        // to it (asked second, answered at :12); the person's NEXT turn
+        // a2, asked while the answers were still coming; Castor's answer
+        // to a1 (answered at :09); a repeat of a turn not restored here.
+        let turns = vec![
+            ("a1", None, "10:05"),
+            ("m2", Some("a1"), "10:12"),
+            ("a2", None, "10:20"),
+            ("m1", Some("a1"), "10:09"),
+            ("m3", Some("gone"), "10:30"),
+        ];
+        let ordered = order_restored(turns, |t| {
+            (t.0.to_string(), t.1.map(str::to_string), t.2.to_string())
         });
+        let ids: Vec<&str> = ordered.iter().map(|t| t.0).collect();
+        assert_eq!(ids, ["a1", "m1", "m2", "a2", "m3"]);
+        // Nothing to reorder: the gateway's order, untouched.
+        let plain: Vec<(&str, Option<&str>, &str)> = vec![("a1", None, "2"), ("a2", None, "1")];
+        let ids: Vec<&str> = order_restored(plain, |t| (t.0.into(), None, t.2.into()))
+            .iter()
+            .map(|t| t.0)
+            .collect();
+        assert_eq!(ids, ["a1", "a2"]);
+    }
+
+    #[test]
+    fn refusals_map_to_what_the_person_reads() {
+        let f = |status: Option<u16>, code: &str, detail: &str| MentionFailure {
+            status,
+            code: code.into(),
+            detail: detail.into(),
+        };
         assert_eq!(
-            parse("@Ünïcorn hi", &r2),
-            Mention::Message {
-                slug: "ünïcorn".into(),
-                text: "hi".into()
-            }
+            classify(&f(Some(409), "in_another_conversation", "Castor is in …")),
+            Refusal::Elsewhere
         );
-        // Punctuation glued to the name is NOT a match — honest notice,
-        // never a guessed route.
         assert_eq!(
-            parse("@doorcheck, hi", &r),
-            Mention::Unknown {
-                name: "doorcheck,".into()
-            }
+            classify(&f(Some(409), "entity_paused", "Castor is paused.")),
+            Refusal::Refused("Castor is paused.".into()),
+            "the visit door's own 409s pass through with their sentence"
         );
-        // An @ inside the name token never matches a slug.
         assert_eq!(
-            parse("@castor@10.0.0.215 hi", &r),
-            Mention::Unknown {
-                name: "castor@10.0.0.215".into()
-            }
+            classify(&f(
+                Some(503),
+                "entity_cannot_answer",
+                "Castor cannot answer: no model"
+            )),
+            Refusal::CannotAnswer("Castor cannot answer: no model".into())
+        );
+        assert_eq!(
+            classify(&f(Some(404), "", "Not Found")),
+            Refusal::NotOffered,
+            "a 404 without a code: the route is missing"
+        );
+        assert_eq!(
+            classify(&f(Some(404), "", "entity 'ghost' not found")),
+            Refusal::NotOffered,
+            "the code decides, never the sentence"
+        );
+        assert_eq!(
+            classify(&f(
+                Some(404),
+                "entity_not_found",
+                "entity 'ghost' not found under /x"
+            )),
+            Refusal::NotFound,
+            "missing or hidden: cannot mention this one"
+        );
+        assert_eq!(
+            classify(&f(
+                Some(422),
+                "repeat_of_unknown",
+                "repeat_of 'r9' is not a turn of this conversation"
+            )),
+            Refusal::Refused("repeat_of 'r9' is not a turn of this conversation".into()),
+            "a refused repeat_of is a notice row"
+        );
+        assert_eq!(
+            classify(&f(Some(500), "", "boom")),
+            Refusal::Failed("gateway HTTP 500: boom".into())
+        );
+        assert_eq!(
+            classify(&f(None, "", "gateway unreachable: refused")),
+            Refusal::Failed("gateway unreachable: refused".into())
         );
     }
 
     #[test]
-    fn unknown_name_is_reported_not_swallowed() {
-        let r = roster();
+    fn the_author_object_maps_field_for_field() {
+        let v = json!({"kind": "entity", "name": "Castor", "entity_id": "entity:castor",
+            "identity_ref": "entity:castor#3", "avatar": {"style": "watch-halo", "color": "#336699"}});
+        let a = author_from_value(Some(&v)).expect("an entity author");
+        assert_eq!(a.kind, AuthorKind::Entity);
+        assert_eq!(a.name, "Castor");
+        assert_eq!(a.entity_id.as_deref(), Some("entity:castor"));
+        assert_eq!(a.identity_ref.as_deref(), Some("entity:castor#3"));
         assert_eq!(
-            parse("@ghost hello", &r),
-            Mention::Unknown {
-                name: "ghost".into()
-            }
+            a.avatar,
+            Some(AuthorAvatar {
+                style: Some("watch-halo".into()),
+                color: Some("#336699".into())
+            })
         );
-        // Broken-home rows never route (their slug is not a live door).
+        let agent = json!({"kind": "agent", "name": "basic-agent", "entity_id": null,
+            "identity_ref": null, "avatar": null});
+        let a = author_from_value(Some(&agent)).unwrap();
         assert_eq!(
-            parse("@lost-home hi", &r),
-            Mention::Unknown {
-                name: "lost-home".into()
-            }
+            (a.kind, a.name.as_str()),
+            (AuthorKind::Agent, "basic-agent")
         );
+        assert_eq!((a.entity_id, a.avatar), (None, None));
     }
 
     #[test]
-    fn provider_prefix_matches_and_details() {
-        let r = roster();
-        let cands = candidates("c", &r);
-        assert_eq!(cands.len(), 1);
-        assert_eq!(cands[0].0, "castor");
-        assert_eq!(cands[0].1, "@castor ");
-        assert_eq!(cands[0].2, "asleep");
-        let with_tasks = candidates("door", &r);
-        assert!(with_tasks[0].2.contains("2 task(s) pending"));
-        // Case-insensitive prefix.
-        assert_eq!(candidates("CAS", &r).len(), 1);
+    fn a_mention_turn_reply_comes_from_the_run_output() {
+        let v = json!({"status": "completed", "workflow_id": "entity-mention",
+            "output": {"answer": "It holds."},
+            "author": {"kind": "entity", "name": "Castor"}});
+        let (reply, author) = reply_from_run(&v).expect("the reply");
+        assert_eq!(reply, "It holds.");
+        assert_eq!(author.unwrap().name, "Castor");
+        assert_eq!(reply_from_run(&json!({"output": null})), None);
+        assert_eq!(reply_from_run(&json!({"output": {"answer": "  "}})), None);
     }
 
     #[test]
-    fn provider_exact_slug_yields_no_candidates() {
-        let r = roster();
-        assert!(
-            candidates("castor", &r).is_empty(),
-            "a fully-typed @castor submits on the first Enter"
+    fn no_author_or_an_unknown_kind_is_none() {
+        assert_eq!(author_from_value(None), None);
+        assert_eq!(author_from_value(Some(&Value::Null)), None);
+        assert_eq!(
+            author_from_value(Some(&json!({"kind": "robot", "name": "x"}))),
+            None,
+            "unknown kinds are refused, never guessed"
         );
-        assert!(candidates("CASTOR", &r).is_empty());
-    }
-
-    #[test]
-    fn provider_empty_cache_and_broken_rows_stay_silent() {
-        assert!(candidates("c", &[]).is_empty());
-        let r = roster();
-        assert!(
-            candidates("lost", &r).is_empty(),
-            "error rows never complete"
-        );
+        let (reply, author) = reply_from_response(&json!({"reply": " hi "}));
+        assert_eq!((reply.as_str(), author), ("hi", None));
     }
 }

@@ -213,3 +213,98 @@ fn server_bundle_warnings_render_ahead_and_survive_ledgerless_bundles() {
         .iter()
         .any(|i| matches!(i, Item::Info { text } if text.contains("+3 more"))));
 }
+
+/// `@entity` mentions (2026-11-08): a bundle whose `run` section names the
+/// author (`run.author`) restores its answers under that author; a bundle
+/// without one (an older gateway) restores them exactly as before.
+#[test]
+fn the_bundle_run_author_names_the_restored_answers() {
+    let bundle = |author: serde_json::Value| {
+        serde_json::json!({
+            "root_run_id": "root",
+            "run": {"run_id": "root", "workflow_id": "basic-agent@1:agent", "author": author},
+            "input_data": {"prompt": "does it hold?"},
+            "ledgers": {
+                "root": {"run_id": "root", "total": 1, "items": [
+                    {"cursor": 1, "record": {"run_id": "root", "node_id": "end",
+                        "status": "completed", "result": {"output": {"response": "It holds."}}}}
+                ]}
+            }
+        })
+    };
+    let answer_author = |fold: &Fold| {
+        fold.items.iter().find_map(|i| match i {
+            Item::Assistant { author, .. } => Some(author.clone()),
+            _ => None,
+        })
+    };
+    let mut fold = Fold::new();
+    let mut fx = Vec::new();
+    rehydrate_run_into(
+        &mut fold,
+        "root",
+        &bundle(serde_json::json!({"kind": "agent", "name": "basic-agent",
+            "entity_id": null, "identity_ref": null, "avatar": null})),
+        false,
+        &mut fx,
+    );
+    let author = answer_author(&fold).expect("an answer").expect("named");
+    assert_eq!(author.name, "basic-agent");
+    assert_eq!(author.kind, abstracttui::widgets::AuthorKind::Agent);
+
+    let mut old = Fold::new();
+    rehydrate_run_into(
+        &mut old,
+        "root",
+        &bundle(serde_json::Value::Null),
+        false,
+        &mut fx,
+    );
+    assert_eq!(answer_author(&old), Some(None), "no author: as before");
+}
+
+/// `@entity` mentions (2026-11-08): a mention turn repeats the words of
+/// the person's own turn (`run.repeat_of`). When that turn is restored in
+/// the same fold, the words are shown once; when it is not (it fell
+/// outside the restored bloc, or names a turn this fold never showed),
+/// the mention keeps its own card so its answer is never without them.
+#[test]
+fn a_mention_repeating_a_restored_turn_shows_its_words_once() {
+    let turn = |root: &str, repeat_of: Option<&str>| {
+        serde_json::json!({
+            "root_run_id": root,
+            "run": {"run_id": root, "repeat_of": repeat_of},
+            "input_data": {"prompt": "@Castor does it hold?"},
+        })
+    };
+    let cards = |fold: &Fold| {
+        fold.items
+            .iter()
+            .filter(|i| matches!(i, Item::User { .. }))
+            .count()
+    };
+    let mut fx = Vec::new();
+    let mut fold = Fold::new();
+    rehydrate_run_into(&mut fold, "a1", &turn("a1", None), false, &mut fx);
+    rehydrate_run_into(&mut fold, "m1", &turn("m1", Some("a1")), false, &mut fx);
+    assert_eq!(cards(&fold), 1, "the words once");
+    rehydrate_run_into(
+        &mut fold,
+        "m2",
+        &turn("m2", Some("elsewhere")),
+        false,
+        &mut fx,
+    );
+    assert_eq!(
+        cards(&fold),
+        2,
+        "a repeat of a turn not shown keeps its card"
+    );
+    let mut alone = Fold::new();
+    rehydrate_run_into(&mut alone, "m1", &turn("m1", Some("a1")), false, &mut fx);
+    assert_eq!(
+        cards(&alone),
+        1,
+        "the repeated turn is not here: the card stays"
+    );
+}

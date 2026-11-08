@@ -372,6 +372,7 @@ mod payload_tests {
                 f.push_item(Item::Assistant {
                     text: "Visible news answer".into(),
                     final_answer: true,
+                    author: None,
                 });
                 f.push_item(Item::Thinking {
                     iteration: 1,
@@ -418,6 +419,7 @@ mod payload_tests {
                 f.push_item(Item::Assistant {
                     text: long.clone(),
                     final_answer: true,
+                    author: None,
                 });
                 f.push_item(Item::User {
                     text: "second question".into(),
@@ -425,6 +427,7 @@ mod payload_tests {
                 f.push_item(Item::Assistant {
                     text: "second answer".into(),
                     final_answer: true,
+                    author: None,
                 });
             });
             let r = capture(store);

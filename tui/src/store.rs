@@ -1315,6 +1315,15 @@ pub struct Store {
     pub entity_cards: Signal<Vec<(String, crate::entities::EntityCard)>>,
     /// MCP registry honesty (source path + probed flag) for `/mcp`.
     pub mcp_info: Signal<crate::entities::McpRegistryInfo>,
+    // -- @entity mentions (2026-11-08) -----------------------------------
+    /// The gateway answered the mention route with "no such route": the
+    /// `@` popup offers nothing for the rest of this process, and the
+    /// person read "This gateway does not offer mentions yet" once.
+    pub mentions_off: Signal<bool>,
+    /// `(session_id, entity slug)` pairs already told "<name> will read
+    /// this conversation's history." — the composer's hint shows once per
+    /// session per entity, before the first message that names it.
+    pub mention_told: Signal<Vec<(String, String)>>,
 }
 
 impl Store {
@@ -1443,6 +1452,8 @@ impl Store {
             entities_error: cx.signal(String::new()),
             entity_cards: cx.signal(Vec::new()),
             mcp_info: cx.signal(Default::default()),
+            mentions_off: cx.signal(false),
+            mention_told: cx.signal(Vec::new()),
         }
     }
 

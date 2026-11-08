@@ -278,6 +278,7 @@ mod tests {
             Item::Assistant {
                 text: " ".into(),
                 final_answer: true,
+                author: None,
             },
         ] {
             assert_eq!(payload(&item, "copy", None), None, "{item:?}");

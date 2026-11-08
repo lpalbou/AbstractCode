@@ -914,6 +914,7 @@ fn docs_questions_include_fresh_visible_conversation_even_with_cached_documentat
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "The visible news summary".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();

@@ -42,23 +42,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@` mentions an entity from the conversation, and every answer says who wrote it** (operator
   2026-11-08; needs the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway
-  main f32c8ca9 with AbstractRuntime 6706188; built on AbstractTUI main b06ba9a through a temporary
-  `[patch.crates-io]` that goes when AbstractTUI 0.8.0 is published). Typing `@` lists the entities
+  main f32c8ca9 + 06e9968c/0997ce4a with AbstractRuntime 6706188 + 1abcc26/cd65610; built on
+  AbstractTUI main b06ba9a through a temporary `[patch.crates-io]` that goes when AbstractTUI 0.8.0
+  is published). Typing `@` lists the entities
   this account may see; a pick is one chip, which Backspace removes whole. A typed `@name` that was
   not picked is plain text, sent as typed (a leading `@name` used to be read out of the text and
   route the message). Before the first message that names an entity in a conversation, the line
   above the box says "Castor will read this conversation's history." A message that is only one chip
   opens that entity's conversation, as `@name` did. Any other message is sent as before, then each
   picked entity is asked in order, the next once the previous answered, and each answer appears as
-  "● Castor · entity" with the mark in the entity's own colour. "Castor is in another conversation."
-  and the gateway's other refusals are shown and the next entity is asked; "Castor cannot answer: …"
-  is shown and the message goes back into the box. A gateway without the route says "This gateway
-  does not offer mentions yet." once, and `@` then offers nothing. Under an entity's focus the chips
-  ask no one, and a notice says so. A reopened conversation shows each mention's answer under its
-  author.
+  "● Castor · entity" with the mark in the entity's own colour. Each call names the turn the same
+  words started (`repeat_of`), so a reopened conversation shows those words once, with each
+  mention's answer right after that turn, the answers in the order they came. "Castor is in another
+  conversation.", "Castor cannot be mentioned here." and the gateway's other refusals are shown and
+  the next entity is asked; "Castor cannot answer: …" is shown and the message goes back into the
+  box. A gateway without the route says "This gateway does not offer mentions yet." once, and `@`
+  then offers nothing. Under an entity's focus, or inside a slash command, the chips ask no one,
+  and a notice says so.
 - **The answer rule names its author** when the gateway gives one: "✦ basic-agent · agent" for the
-  agent's turn (read when the turn ends, and from the history on reopen), "● Castor · entity" for an
-  entity. Without one (an older gateway) the rule is the plain "assistant" as before. The Markdown
+  agent's turn (on the streaming reply as it arrives, on the answer when the turn ends, and from the
+  history on reopen), "● Castor · entity" for an entity. Without one (an older gateway) the rule is the plain "assistant" as before. The Markdown
   export uses the same name, and the SFT export never takes an entity's reply as the agent's answer.
 
 ### Fixed (terminal, ships with the next terminal release)

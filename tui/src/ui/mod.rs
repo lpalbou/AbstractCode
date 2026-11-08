@@ -405,10 +405,9 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
 
     let on_submit = {
         let ctx = ctx.clone();
-        let composer = composer.clone();
-        move |text: &str| {
+        move |value: &abstracttui::widgets::ComposerSubmission, draft: &str| {
             follow.set(true); // sending jumps back to the tail
-            submit(cx, store, &ctx, &composer, text, stance_mode)
+            submit(cx, store, &ctx, value, draft, stance_mode)
         }
     };
 
@@ -446,14 +445,21 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                 return;
             };
             store.voice.hold_send.set(None);
+            // The typed draft (its chips included) leads what was said.
             let draft = composer.text();
-            let text = if draft.trim().is_empty() {
+            let mut value = composer.submission();
+            value.text = if value.text.trim().is_empty() {
+                said.clone()
+            } else {
+                format!("{} {said}", value.text.trim_end())
+            };
+            let draft = if draft.trim().is_empty() {
                 said
             } else {
                 format!("{} {said}", draft.trim_end())
             };
             composer.set_text("");
-            on_submit(&text);
+            on_submit(&value, &draft);
         });
     }
 
@@ -907,6 +913,10 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                     // reserved blank; CHROME_ROWS estimates deliberately
                     // exclude this sometimes-present row).
                     .child(attachments::chips_row(cx, store, &ctx))
+                    // "<name> will read this conversation's history." while
+                    // the draft names an entity this session has not been
+                    // told about (sometimes-present, like the chips row).
+                    .child(chrome::mention_hint_row(store, composer.clone()))
                     // Voice status (only while speaking / recording /
                     // transcribing — no reserved blank, like the chips row).
                     .child(voice_view::status_row(store))
@@ -985,14 +995,16 @@ fn submit(
     cx: Scope,
     store: Store,
     ctx: &UiCtx,
-    composer: &abstracttui::widgets::TextAreaState,
-    text: &str,
+    // The structured submission (chips spelled `@name`, mentions in
+    // order) and the raw draft it came from (a refused mention's restore).
+    value: &abstracttui::widgets::ComposerSubmission,
+    draft: &str,
     // `/stance`'s mode lives in root scope, not in `store` (the feature
     // owns no shared state — see `ui::stance`'s removal note), so it
     // rides the two hops from the composer to the dispatcher.
     stance_mode: Signal<u8>,
 ) {
-    let text = text.trim().to_string();
+    let text = value.text.trim().to_string();
     // `?` opens the keys + commands reference (REST-1): the status-bar
     // legend moved behind it — the footer's `? keys + commands` names
     // this exact gesture. A bare `?` is never a useful agent prompt.
@@ -1018,24 +1030,28 @@ fn submit(
             // A newly submitted message takes the speaker lane immediately,
             // including while the next run is starting or guidance is buffered.
             voice_view::stop_speaking(store);
-            // Commands parsed first (global); then @name routing (leading-@
-            // only — a mid-prompt @ is plain text); then the focused
-            // conversation decides.
-            match entity_actions::route_mention(store, ctx, &text) {
-                entity_actions::Routed::Consumed => return,
-                entity_actions::Routed::UnknownName => {
-                    // Draft preserved: put the text back so a typo'd name
-                    // is one edit away (the composer cleared on submit).
-                    composer.set_text(&text);
+            // Commands parsed first (global); then the CHIPS decide (never
+            // the text, `mention::route`): one chip alone opens that
+            // entity's conversation; chips among words are mentions, sent
+            // after the person's own turn; then the focused conversation
+            // decides where that turn goes.
+            let calls = match crate::mention::route(value) {
+                crate::mention::Route::Open { slug } => {
+                    entity_actions::open_or_focus(store, ctx, &slug);
                     return;
                 }
-                entity_actions::Routed::No => {}
-            }
+                crate::mention::Route::Plain => Vec::new(),
+                crate::mention::Route::Mentions(calls) => calls,
+            };
             if let crate::convo::Focus::Entity(name) = store.focus.get_untracked() {
                 entity_actions::send_or_hold(store, ctx, &name, &text);
+                entity_actions::mentions_not_sent_here(store, &calls);
                 return;
             }
             let phase = store.phase.get_untracked();
+            // Did these words start a turn (a Start went out: the phase is
+            // Starting)? Then the mentions name it as `repeat_of`.
+            let mut started = false;
             match phase {
                 Phase::Running => {
                     steer_or_buffer(store, ctx, &text);
@@ -1054,10 +1070,23 @@ fn submit(
                 // The ONE call site that carries pending attachments
                 // (explicit plain-prompt send): goal starts and queue
                 // drains go through `start_run` and stay chip-free.
-                Phase::Idle => start_run_attaching(store, ctx, &text),
+                Phase::Idle => {
+                    start_run_attaching(store, ctx, &text);
+                    started = store.phase.get_untracked() == Phase::Starting;
+                }
             }
+            // Mentions go AFTER the turn on the runner channel, so the
+            // start (or steer) reaches the gateway first.
+            entity_actions::send_mentions(store, ctx, &text, draft, started, calls);
         }
-        Some(cmd) => dispatch_command(cx, store, ctx, cmd, stance_mode),
+        Some(cmd) => {
+            // A command's argument is text: chips in it ask no one, and
+            // the person is told so rather than left waiting for answers.
+            if let crate::mention::Route::Mentions(calls) = crate::mention::route(value) {
+                entity_actions::mentions_in_a_command(store, &calls);
+            }
+            dispatch_command(cx, store, ctx, cmd, stance_mode)
+        }
     }
 }
 

@@ -39,6 +39,7 @@ fn harness(width: i32, companion: Option<Value>) -> Harness {
             f.push_item(Item::Assistant {
                 text: "Existing assistant reply".into(),
                 final_answer: true,
+                author: None,
             });
         });
         store.workflow.set(Workflow {
@@ -210,6 +211,7 @@ fn selected_table_value_sends_header_relation_only_after_enter() {
         f.push_item(Item::Assistant {
             text: "| Package | Status |\n|---|---|\n| AbstractAvatar | Pending |".into(),
             final_answer: true,
+            author: None,
         })
     });
     h.turn();
@@ -248,6 +250,7 @@ fn bottom_edge_selection_and_later_messages_do_not_move_the_clicked_text() {
         f.push_item(Item::Assistant {
             text: body,
             final_answer: true,
+            author: None,
         })
     });
     h.turn();
@@ -270,6 +273,7 @@ fn bottom_edge_selection_and_later_messages_do_not_move_the_clicked_text() {
         f.push_item(Item::Assistant {
             text: "a later assistant message\n\nwith more output".into(),
             final_answer: true,
+            author: None,
         })
     });
     h.turn();

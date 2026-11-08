@@ -423,11 +423,21 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
         }
         match item {
             Item::User { text } => sections.push(format!("## User\n\n{text}")),
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text,
+                final_answer,
+                author,
+            } => {
+                // Who answered, when the gateway named it (`## Castor
+                // (entity)`); otherwise the heading it always had.
+                let who = match author {
+                    Some(a) if !a.name.is_empty() => format!("{} ({})", a.name, a.kind.as_str()),
+                    _ => "Assistant".to_string(),
+                };
                 let heading = if *final_answer {
-                    "## Assistant"
+                    format!("## {who}")
                 } else {
-                    "## Assistant (update)"
+                    format!("## {who} (update)")
                 };
                 sections.push(format!("{heading}\n\n{text}"));
             }
@@ -565,9 +575,16 @@ fn segment_turns(items: &[Item]) -> Vec<SftTurn> {
                 user: text.clone(),
                 ..SftTurn::default()
             }),
+            // An entity's (or person's) reply in the turn is not the
+            // agent's answer: the training record's assistant stays the
+            // agent's own (`@entity` mentions land in the same turn).
+            Item::Assistant {
+                author: Some(a), ..
+            } if a.kind != abstracttui::widgets::AuthorKind::Agent => {}
             Item::Assistant {
                 text,
                 final_answer: true,
+                ..
             } => {
                 if let Some(last) = turns.last_mut() {
                     if last.assistant.is_none() {
@@ -707,6 +724,7 @@ mod tests {
         Item::Assistant {
             text: text.into(),
             final_answer: true,
+            author: None,
         }
     }
 
@@ -924,6 +942,50 @@ mod tests {
         }]));
         assert!(has_conversation(&[user("hi")]));
         assert!(has_conversation(&[Item::Error { text: "x".into() }]));
+    }
+
+    // -- who answered (`@entity` mentions) ------------------------------------
+
+    fn authored(text: &str, kind: abstracttui::widgets::AuthorKind, name: &str) -> Item {
+        Item::Assistant {
+            text: text.into(),
+            final_answer: true,
+            author: Some(abstracttui::widgets::ChatAuthor::new(kind, name)),
+        }
+    }
+
+    #[test]
+    fn markdown_names_the_author_and_keeps_assistant_without_one() {
+        use abstracttui::widgets::AuthorKind;
+        let meta = ExportMeta {
+            session_id: "s".into(),
+            workflow: "basic-agent".into(),
+            exported_at: "2026-11-08T16:00:00Z".into(),
+            truncated: false,
+        };
+        let items = vec![
+            user("@Castor does it hold?"),
+            answer("plain"),
+            authored("It holds.", AuthorKind::Entity, "Castor"),
+        ];
+        let md = to_markdown(&items, &meta, false);
+        assert!(md.contains("## Assistant\n\nplain"), "{md}");
+        assert!(md.contains("## Castor (entity)\n\nIt holds."), "{md}");
+    }
+
+    #[test]
+    fn an_entity_reply_is_never_the_training_turns_assistant() {
+        use abstracttui::widgets::AuthorKind;
+        // A mention reply that lands before the agent's answer must not
+        // become the record's assistant; the agent's own answer does.
+        let items = vec![
+            user("@Castor does it hold?"),
+            authored("It holds.", AuthorKind::Entity, "Castor"),
+            authored("Yes.", AuthorKind::Agent, "basic-agent"),
+        ];
+        let turns = segment_turns(&items);
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].assistant.as_deref(), Some("Yes."));
     }
 
     // -- markdown -------------------------------------------------------------

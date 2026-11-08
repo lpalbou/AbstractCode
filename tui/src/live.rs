@@ -72,6 +72,10 @@ pub struct LiveDelta {
     pub channel: Channel,
     pub snapshot: bool,
     pub truncated: bool,
+    /// Who answers this turn (the ROOT turn's `author`, carried by every
+    /// live frame of a gateway with turn authors): the bubble is labelled
+    /// before the saved message replaces it. None from an older gateway.
+    pub author: Option<abstracttui::widgets::ChatAuthor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,6 +221,7 @@ pub fn parse_event(event: &str, data: &str) -> Result<Option<LiveEvent>, String>
         channel,
         snapshot: v.get("snapshot").and_then(Value::as_bool).unwrap_or(false),
         truncated: v.get("truncated").and_then(Value::as_bool).unwrap_or(false),
+        author: crate::mention::author_from_value(v.get("author")),
     })))
 }
 
@@ -238,6 +243,8 @@ pub struct LiveReply {
     /// Bumped whenever `content` was REPLACED rather than appended (a
     /// snapshot): the view rebuilds its stream item instead of appending.
     pub content_gen: u64,
+    /// Who answers (the frames' `author`; None from an older gateway).
+    pub author: Option<abstracttui::widgets::ChatAuthor>,
     content_seq: Option<u64>,
     reasoning_seq: Option<u64>,
 }
@@ -393,6 +400,7 @@ impl LiveReplies {
                     truncated: false,
                     finished: false,
                     content_gen: 0,
+                    author: None,
                     content_seq: None,
                     reasoning_seq: None,
                 });
@@ -400,6 +408,9 @@ impl LiveReplies {
             }
         };
         let e = &mut self.entries[ix];
+        if d.author.is_some() {
+            e.author = d.author.clone();
+        }
         if d.truncated {
             e.truncated = true;
         }
@@ -606,6 +617,7 @@ mod tests {
             channel: Channel::Content,
             snapshot: false,
             truncated: false,
+            author: None,
         })
     }
 

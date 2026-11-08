@@ -397,6 +397,7 @@ fn render_transcript_turns(items: &mut Vec<Item>, turns: &[crate::entities::Tran
                     items.push(Item::Assistant {
                         text: t.content.clone(),
                         final_answer: true,
+                        author: None,
                     });
                 }
             }
@@ -529,6 +530,7 @@ pub fn fold_turn_reply(convo: &mut EntityConvo, resp: &TurnResponse) -> Option<S
                 convo.items.push(Item::Assistant {
                     text: resp.reply.clone(),
                     final_answer: true,
+                    author: None,
                 });
             }
             convo.items.push(Item::Info {
@@ -543,6 +545,7 @@ pub fn fold_turn_reply(convo: &mut EntityConvo, resp: &TurnResponse) -> Option<S
                 convo.items.push(Item::Assistant {
                     text: resp.reply.clone(),
                     final_answer: true,
+                    author: None,
                 });
             }
             convo.status = ConvoStatus::Parked;
@@ -576,6 +579,7 @@ pub fn fold_flow_reply(
         convo.items.push(Item::Assistant {
             text: answer.to_string(),
             final_answer: true,
+            author: None,
         });
     }
     if degraded > 0 {
@@ -716,6 +720,7 @@ pub fn fold_recovery_parked(
             convo.items.push(Item::Assistant {
                 text: t.content.clone(),
                 final_answer: true,
+                author: None,
             });
         }
     }
@@ -743,6 +748,7 @@ pub fn fold_recovery_closed(convo: &mut EntityConvo, transcript: &VisitTranscrip
         convo.items.push(Item::Assistant {
             text: last.content.clone(),
             final_answer: true,
+            author: None,
         });
     }
     convo.items.push(Item::Info {
@@ -769,6 +775,7 @@ pub fn fold_close(convo: &mut EntityConvo, resp: &CloseResponse) {
         convo.items.push(Item::Assistant {
             text: resp.summary.clone(),
             final_answer: true,
+            author: None,
         });
     }
     for w in &resp.warnings {
@@ -1088,7 +1095,7 @@ mod tests {
             if name == "search_memory" && *status == ToolStatus::Ok)));
         // The reply is the final answer.
         assert!(matches!(c.items.last().unwrap(),
-            Item::Assistant { text, final_answer: true } if text.contains("connectivity")));
+            Item::Assistant { text, final_answer: true, .. } if text.contains("connectivity")));
     }
 
     #[test]
@@ -1347,6 +1354,7 @@ mod tests {
         c.items.push(Item::Assistant {
             text: "old visit reply".into(),
             final_answer: true,
+            author: None,
         });
         fold_close(&mut c, &CloseResponse::default());
         // The cached roster now (stale) says asleep; reopen notes the wake.

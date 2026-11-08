@@ -837,6 +837,7 @@ pub fn wire(cx: Scope, store: Store, ctx: &UiCtx, composer: abstracttui::widgets
                     Item::Assistant {
                         text,
                         final_answer: true,
+                        ..
                     } if !text.trim().is_empty() => Some(text.trim().to_string()),
                     _ => None,
                 })

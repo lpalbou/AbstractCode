@@ -420,6 +420,7 @@ mod tests {
             Item::Assistant {
                 text: "answer".into(),
                 final_answer: true,
+                author: None,
             },
         ];
         let a = semantic_revision("s", "r", &items, Phase::Running);

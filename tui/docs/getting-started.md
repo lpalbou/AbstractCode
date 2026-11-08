@@ -125,11 +125,14 @@ gateway until you answer.
 
 ## Working with entities
 
-If your gateway hosts summoned entities, `@name` opens a durable **visit**
-(`/entities` lists the roster with identity cards; `Enter` there does the
-same as `@name`). The visit gets its own transcript and a header chip;
-`Alt+E` cycles focus between the agent and open visits, and everything you
-submit under entity focus is that visit's next turn.
+If your gateway hosts summoned entities, type `@` and pick one: a message
+that is only that chip opens a durable **visit** (`/entities` lists the
+roster with identity cards; `Enter` there does the same). The visit gets its
+own transcript and a header chip; `Alt+E` cycles focus between the agent and
+open visits, and everything you submit under entity focus is that visit's
+next turn. A chip among other words is a **mention**: your message goes to
+the agent as usual, then each mentioned entity answers in the conversation,
+in order, under its own name (`● Castor · entity`).
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
 and stream **no mid-turn progress** (both server-side boundaries — the app

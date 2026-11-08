@@ -618,6 +618,7 @@ fn discuss_forks_a_finished_run_and_switches_this_terminal_to_it() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "the inbox rule changed".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();

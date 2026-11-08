@@ -41,6 +41,7 @@ fn harness(width: i32, companion: Option<Value>) -> Harness {
             f.push_item(Item::Assistant {
                 text: "Existing assistant reply".into(),
                 final_answer: true,
+                author: None,
             });
         });
         store.workflow.set(Workflow {
@@ -529,6 +530,7 @@ fn automatic_comments_read_the_history_window_not_a_character_cap() {
         f.push_item(Item::Assistant {
             text: long.clone(),
             final_answer: true,
+            author: None,
         });
         f.push_item(Item::User {
             text: "A new visible question".into(),
@@ -688,6 +690,7 @@ fn transparent_companion_preserves_transcript_cells_and_restores_them_when_hidde
                         .collect::<Vec<_>>()
                         .join("\n\n"),
                     final_answer: true,
+                    author: None,
                 });
             });
             h.turn();
@@ -954,6 +957,7 @@ fn a_fast_recoverable_tool_error_holds_for_one_second_even_during_speech() {
             f.push_item(Item::Assistant {
                 text: "Recovered immediately".into(),
                 final_answer: true,
+                author: None,
             })
         });
         h.store.phase.set(Phase::Idle);

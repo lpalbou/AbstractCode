@@ -1042,6 +1042,49 @@ impl ComposerAnchor {
     }
 }
 
+/// The `@entity` hint above the composer (2026-11-08): "<name> will read
+/// this conversation's history." while the draft holds a chip whose entity
+/// this session has not been told about (once per session per entity; the
+/// told set grows when the mention is sent). Agent focus only — under an
+/// entity's focus chips ask no one. Absent (zero rows) otherwise, like the
+/// attachment chips row.
+pub fn mention_hint_row(store: Store, composer: abstracttui::widgets::TextAreaState) -> View {
+    abstracttui::ui::dyn_view_scoped(LayoutStyle::default().shrink(0.0), move |_| {
+        let _ = composer.value().get();
+        let agent_focus = matches!(store.focus.get(), crate::convo::Focus::Agent);
+        let line = if agent_focus && !store.mentions_off.get() {
+            let session = store.session_id.get();
+            store
+                .mention_told
+                .with(|told| crate::mention::history_hint(&composer.submission(), &session, told))
+        } else {
+            String::new()
+        };
+        if line.is_empty() {
+            return Element::new().build();
+        }
+        let ink = abstracttui::app::current_theme().tokens.text_muted;
+        Element::new()
+            .style(
+                LayoutStyle::row()
+                    .width(Dimension::Percent(1.0))
+                    .height(Dimension::Cells(1))
+                    .shrink(0.0),
+            )
+            .access_label(line.clone())
+            .draw(move |canvas, rect| {
+                let shown = text::truncate_ellipsis(&line, (rect.w - 2).max(1));
+                canvas.print(
+                    Point::new(rect.x + 2, rect.y),
+                    &shown,
+                    ink,
+                    Rgba::TRANSPARENT,
+                );
+            })
+            .build()
+    })
+}
+
 /// Composer: multiline `TextArea` (grows 1..4 rows, Enter submits,
 /// Ctrl+J inserts a newline EVERYWHERE — engine-owned since abstracttui
 /// 0.2.2 (our 0295 ask): the edit model consumes the chord under every
@@ -1069,7 +1112,10 @@ pub fn composer(
     anchor: &ComposerAnchor,
     overlays: &abstracttui::app::Overlays,
     placeholder: String,
-    on_submit: impl FnMut(&str) + Clone + 'static,
+    // `(value, draft)`: the structured submission (chips spelled `@name`,
+    // the picked mentions in order) and the raw buffer it came from (the
+    // chips as their markers — what a refused mention puts back).
+    on_submit: impl FnMut(&abstracttui::widgets::ComposerSubmission, &str) + Clone + 'static,
 ) -> View {
     let mut submit = on_submit;
     let submit_state = state.clone();
@@ -1106,11 +1152,15 @@ pub fn composer(
         .rows(1, 4)
         .on_submit(move |text| {
             let owned = text.to_string();
+            // Read BEFORE the clear: the buffer still holds the draft here
+            // (the engine never clears it). History keeps the raw draft, so
+            // a recalled entry brings its chips back.
+            let value = submit_state.submission();
             if !owned.trim().is_empty() {
                 submit_state.push_history(owned.trim());
             }
             submit_state.clear();
-            submit(&owned);
+            submit(&value, &owned);
         })
         .element(cx, t)
         // Publish the mounted instance to the anchor. FocusIn is
@@ -1183,22 +1233,19 @@ pub fn composer(
                 })
                 .collect()
         })
-        // '@' entity mentions — deliberately DIFFERENT rules from '/':
-        // NO whole-draft guard (mid-prompt reference inserts are wanted;
-        // Enter-accept inserts the name, the NEXT Enter submits), cached
-        // roster only (never a synchronous fetch), and an exact-slug
-        // query yields nothing so a fully-typed @castor submits on the
-        // first Enter (rules live in `mention::candidates`, tested there).
-        .trigger('@', move |query| {
-            store.entities.with_untracked(|roster| {
-                crate::mention::candidates(query, roster)
-                    .into_iter()
-                    .map(|(label, insert, detail)| {
-                        abstracttui::app::anchored::CompletionCandidate::new(label, insert)
-                            .detail(detail)
-                    })
-                    .collect()
-            })
+        // '@' entity mentions (2026-11-08): a pick inserts ONE atomic chip
+        // (the engine's `Completion::mentions`), never text, and a typed
+        // `@name` that is never picked stays text. Rows are the cached
+        // roster only (never a synchronous fetch; a tracked read, so an open
+        // popup refreshes when the roster lands), and nothing at all once
+        // this gateway answered that it has no mention route.
+        .mentions('@', move || {
+            if store.mentions_off.get() {
+                return Vec::new();
+            }
+            store
+                .entities
+                .with(|roster| crate::mention::candidates(roster))
         })
         .attach(cx, overlays, state, area);
     // No outer border: the TextArea draws its own `▐ ▌` side strokes —

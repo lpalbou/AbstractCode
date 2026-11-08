@@ -64,6 +64,7 @@ fn real_run_tree_reaches_the_answer() {
         Item::Assistant {
             text,
             final_answer: true,
+            ..
         } => Some(text.clone()),
         _ => None,
     });
@@ -163,7 +164,7 @@ fn offloaded_answer_tree_concludes_and_fetches_the_words() {
     let placeholder = abstractcode::transcript::offload_placeholder(&artifact_id);
     assert!(
         fold.items.iter().any(
-            |i| matches!(i, Item::Assistant { text, final_answer: true } if *text == placeholder)
+            |i| matches!(i, Item::Assistant { text, final_answer: true, .. } if *text == placeholder)
         ),
         "placeholder rendered final: {:#?}",
         fold.items
@@ -177,7 +178,7 @@ fn offloaded_answer_tree_concludes_and_fetches_the_words() {
     assert!(
         fold.items.iter().any(|i| matches!(
             i,
-            Item::Assistant { text, final_answer: true } if text.starts_with("You were right.")
+            Item::Assistant { text, final_answer: true, .. } if text.starts_with("You were right.")
         )),
         "the real words replace the placeholder: {:#?}",
         fold.items
@@ -289,6 +290,7 @@ fn coder_tree_folds_splitless_usage_and_concludes_on_the_report() {
         Item::Assistant {
             text,
             final_answer: true,
+            ..
         } => {
             assert!(
                 text.contains("Coding agent result"),

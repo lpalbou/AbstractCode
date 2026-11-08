@@ -1124,6 +1124,7 @@ fn details_toggle_keeps_thinking_visible_and_start_carries_no_client_history() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "first answer".into(),
             final_answer: true,
+            author: None,
         });
     });
     // Three pumps: width discovery, extent sync, gap-flip geometry
@@ -2092,6 +2093,7 @@ fn details_command_immediately_rerenders_mixed_content() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "all green".into(),
             final_answer: true,
+            author: None,
         });
     });
     // Three pumps: width discovery, extent sync, gap-flip geometry
@@ -2367,6 +2369,7 @@ fn one_blank_row_between_a_header_and_its_words() {
         f.push_item(Item::Assistant {
             text: "ANSWERWORDS here".into(),
             final_answer: true,
+            author: None,
         });
     });
     let key = h
@@ -3099,6 +3102,7 @@ fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "prior answer".into(),
             final_answer: true,
+            author: None,
         });
     });
     let mid = h.turn();
@@ -3994,6 +3998,7 @@ fn feed_order_survives_mid_list_visibility_flips() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "BBB-update".into(),
             final_answer: false,
+            author: None,
         });
     });
     h.turn();
@@ -4199,6 +4204,7 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "THE-FINAL-ANSWER".into(),
             final_answer: true,
+            author: None,
         });
     });
     // Three pumps: width discovery, extent sync, gap-flip geometry
@@ -4333,6 +4339,7 @@ fn assistant_diff_fences_tint_added_and_removed_lines() {
             text: "Patch:\n\n```diff\n+added-marker line\n-removed-marker line\n unchanged-marker line\n```\n"
                 .into(),
             final_answer: true,
+            author: None,
         });
     });
     // Two pumps: the feed discovers its width at draw and typesets on
@@ -6100,6 +6107,7 @@ fn assistant_answer_tables_typeset_instead_of_raw_pipes() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "Here:\n\n| crate | tests |\n| --- | --- |\n| abstracttui | 1660 |\n".into(),
             final_answer: true,
+            author: None,
         });
     });
     // Two pumps: first feed mount discovers width at draw; the measured
@@ -8370,6 +8378,7 @@ fn export_command_writes_markdown_and_refuses_overwrite() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "done — hello.txt written".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();
@@ -8445,6 +8454,7 @@ fn export_jsonl_details_writes_training_lines() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "a1".into(),
             final_answer: true,
+            author: None,
         });
         // A dangling second prompt (no answer): skipped from the file,
         // counted in the notice.
@@ -9809,6 +9819,7 @@ fn scrolled_up_renders_on_the_strip_and_esc_jump_never_arms_cancel() {
             f.push_item(abstractcode::transcript::Item::Assistant {
                 text: format!("progress line {i}"),
                 final_answer: false,
+                author: None,
             });
         }
     });
@@ -10634,6 +10645,7 @@ fn scroll_to_top_autoloads_previous_history_bloc_with_progress() {
             f.push_item(abstractcode::transcript::Item::Assistant {
                 text: format!("line {i}"),
                 final_answer: false,
+                author: None,
             });
         }
     });
@@ -10726,6 +10738,7 @@ fn pageup_on_a_fitting_transcript_never_autoloads_history() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "short answer".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.store.older_turns.set(3);
@@ -11090,6 +11103,7 @@ fn typing_off_the_composer_recovers_focus_and_keeps_the_first_character() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();
@@ -11129,6 +11143,7 @@ fn typing_after_a_click_in_the_transcript_recovers_focus() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "a line worth clicking".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();
@@ -11167,6 +11182,7 @@ fn a_slash_typed_off_the_composer_opens_the_command_dropdown() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();
@@ -11192,6 +11208,7 @@ fn pasted_text_off_the_composer_lands_in_the_draft_and_recovers_focus() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();
@@ -11225,6 +11242,7 @@ fn a_file_dropped_on_the_transcript_stages_a_chip_and_recovers_focus() {
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();
@@ -11468,6 +11486,7 @@ fn gallery_fold(store: &Store) {
         f.push_item(Item::Assistant {
             text: "Fixed. The freeze was an **invincibility timer underflow**: `player.invincible` decremented past zero and the collision loop spun forever.\n\n- `js/game.js` — clamp the timer at zero in `update()`\n- `smoke.js` — the harness called the renamed `player.reset()`; now `respawn()`\n\nLevel 3 survives 500 frames in the smoke run.".into(),
             final_answer: true,
+            author: None,
         });
     });
 }

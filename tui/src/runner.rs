@@ -402,6 +402,25 @@ pub enum Cmd {
     },
     /// Ensure the ONE conversation poller thread is running.
     PollConvos,
+    /// `@entity` mentions of one message (2026-11-08): one
+    /// `POST /sessions/{session_id}/mentions` per call, in order, each
+    /// after the previous answered (`gateway::mentions`). Sent AFTER the
+    /// person's own turn on this channel, so the start (or steer) has
+    /// reached the gateway before the first mention does.
+    Mentions {
+        session_id: String,
+        /// The message as typed, chips spelled `@name`.
+        text: String,
+        /// The composer's raw draft (chips as markers): what a 503 puts
+        /// back into the composer.
+        draft: String,
+        /// The same words started an agent turn just before this command
+        /// (`Cmd::Start`): each call names that turn as `repeat_of`, so
+        /// clients show the words once. False for a steer or a refused
+        /// start.
+        repeat_turn: bool,
+        calls: Vec<crate::mention::MentionCall>,
+    },
     /// `/automations` lane: every action runs on its own thread
     /// (`gateway::automations`), results land in `store.automations`.
     Automations(crate::gateway::automations::AutoCmd),
@@ -635,6 +654,23 @@ struct Runner {
     workspace_notice_posted: bool,
     /// The gateway's same-machine verdict was asked for (once).
     same_machine_probed: bool,
+    /// `(session_id, run_id)` of the last `Cmd::Start` that started a run;
+    /// None while a start is in flight or after one failed. A message's
+    /// `@entity` mentions name it as `repeat_of`.
+    last_start: Option<(String, String)>,
+}
+
+/// The `repeat_of` of a message's mention calls: the run its words just
+/// started in this session, when they started one.
+fn repeat_of_turn(
+    last_start: &Option<(String, String)>,
+    session_id: &str,
+    repeat_turn: bool,
+) -> Option<String> {
+    last_start
+        .as_ref()
+        .filter(|(session, _)| repeat_turn && session == session_id)
+        .map(|(_, run_id)| run_id.clone())
 }
 
 pub fn spawn(
@@ -668,6 +704,7 @@ pub fn spawn(
                     last_workspace_note: None,
                     workspace_notice_posted: false,
                     same_machine_probed: false,
+                    last_start: None,
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -1143,6 +1180,31 @@ impl Runner {
                     self.store,
                     name,
                     title,
+                );
+            }
+            Cmd::Mentions {
+                session_id,
+                text,
+                draft,
+                repeat_turn,
+                calls,
+            } => {
+                // The Start these words made ran just before on this
+                // thread (commands are handled in order): its run id, when
+                // it started in this session.
+                let repeat_of = repeat_of_turn(&self.last_start, &session_id, repeat_turn);
+                let client = crate::gateway::entities::client_for(&self.client);
+                crate::gateway::mentions::spawn_mentions(
+                    client,
+                    self.wake.clone(),
+                    self.store,
+                    crate::gateway::mentions::MentionMessage {
+                        session_id,
+                        text,
+                        draft,
+                        repeat_of,
+                        calls,
+                    },
                 );
             }
             Cmd::PollConvos => {
@@ -1657,6 +1719,7 @@ impl Runner {
         attachment_cap: u64,
     ) {
         self.stop_streams();
+        self.last_start = None;
         let store = self.store;
         if let Ok(v) = self.client.workspace_policy() {
             if let Some(note) = workspace_preflight_note(&v, &opts) {
@@ -1802,6 +1865,7 @@ impl Runner {
         {
             Ok(started) => {
                 let run_id = started.run_id;
+                self.last_start = Some((session_id.clone(), run_id.clone()));
                 let rid = run_id.clone();
                 let tx = self.tx.clone();
                 let started_session = session_id.clone();
@@ -2044,7 +2108,11 @@ impl Runner {
         post_for_session!(move || store.restore_progress.set(Some((0, bloc_total))));
         let mut fetched = 0usize;
         if replay_turns > 0 {
-            for run in prior.iter().skip(bloc_start) {
+            // `@entity` mention turns first (small run reads): their
+            // `repeat_of` orders the bloc before any bundle is fetched.
+            let bloc: Vec<&Value> = prior.iter().skip(bloc_start).copied().collect();
+            let snaps = mention_snapshots(&self.client, &bloc);
+            for run in restored_order(bloc, &snaps) {
                 let rid = run.get("run_id").and_then(Value::as_str).unwrap_or("");
                 match self.client.history_bundle(rid, false, 0) {
                     Ok(bundle) => {
@@ -2052,9 +2120,11 @@ impl Runner {
                             run.get("status").and_then(Value::as_str).unwrap_or(""),
                             "failed" | "cancelled"
                         );
+                        let from = fold.items.len();
                         if rehydrate_run_into(&mut fold, rid, &bundle, failed, &mut effects) {
                             replayed += 1;
                         }
+                        restore_mention_reply(&mut fold, run, &snaps, from);
                     }
                     Err(e) => {
                         // A silently skipped turn left an unmarked hole
@@ -2268,7 +2338,9 @@ impl Runner {
         let mut effects: Vec<FoldEffect> = Vec::new();
         let mut streamed = 0usize;
         let mut failed = 0usize;
-        for run in older.iter().skip(bloc_start) {
+        let bloc: Vec<&Value> = older.iter().skip(bloc_start).copied().collect();
+        let snaps = mention_snapshots(&self.client, &bloc);
+        for run in restored_order(bloc, &snaps) {
             let rid = run.get("run_id").and_then(Value::as_str).unwrap_or("");
             if rid.is_empty() {
                 continue;
@@ -2279,9 +2351,11 @@ impl Runner {
                         run.get("status").and_then(Value::as_str).unwrap_or(""),
                         "failed" | "cancelled"
                     );
+                    let from = scratch.items.len();
                     if rehydrate_run_into(&mut scratch, rid, &bundle, run_failed, &mut effects) {
                         streamed += 1;
                     }
+                    restore_mention_reply(&mut scratch, run, &snaps, from);
                 }
                 Err(e) => {
                     scratch.push_item(Item::Error {
@@ -3891,12 +3965,17 @@ fn finish(
     // Failed outcome via `run_terminal`).
     let mut status: Option<String> = None;
     let mut terminal_output = None;
+    // Who answered this turn (the run summary's `author`, a gateway with
+    // turn authors; None on an older one — the answer then stays the
+    // plain "assistant" row).
+    let mut author = None;
     for attempt in 0..3u32 {
         if let Ok(v) = client.get_run(run_id) {
             if let Some(s) = v.get("status").and_then(Value::as_str) {
                 let s = s.trim();
                 if !s.is_empty() {
                     status = Some(s.to_string());
+                    author = crate::mention::author_from_value(v.get("author"));
                     // The authenticated run snapshot is another authoritative
                     // output surface. Keep its own output if a final ledger
                     // read failed, rather than declaring a readable answer lost.
@@ -3993,6 +4072,10 @@ fn finish(
             current = true;
             was_finished = f.finished;
             f.run_terminal(&status);
+            if let Some(a) = &author {
+                let from = f.turn_start();
+                f.stamp_answers_from(from, a);
+            }
         });
         if current && store.live.with_untracked(|l| !l.is_empty()) {
             // The run ended: whatever was still streaming is over (the
@@ -4073,6 +4156,96 @@ pub fn downscale_for_transcript(
     bitmap.resize_bilinear(nw, nh)
 }
 
+/// Run snapshots (`GET /runs/{id}`) of the restored `@entity` mention
+/// turns, by run id (list rows `workflow_id` "entity-mention", 2026-11-08).
+/// A mention turn has no ledger: its snapshot holds its reply, author,
+/// `repeat_of` and `updated_at`. Read before the bundles, so the bloc is
+/// ordered without holding every bundle at once.
+pub(crate) type MentionSnapshots =
+    std::collections::HashMap<String, crate::gateway::GwResult<Value>>;
+
+fn is_mention_row(run: &Value) -> bool {
+    run.get("workflow_id").and_then(Value::as_str) == Some(crate::mention::MENTION_WORKFLOW_ID)
+}
+
+pub(crate) fn mention_snapshots(client: &GatewayClient, rows: &[&Value]) -> MentionSnapshots {
+    rows.iter()
+        .filter(|r| is_mention_row(r))
+        .filter_map(|r| r.get("run_id").and_then(Value::as_str))
+        .filter(|rid| !rid.is_empty())
+        .map(|rid| (rid.to_string(), client.get_run(rid)))
+        .collect()
+}
+
+/// The bloc's rows in reading order (`mention::order_restored`): each
+/// mention's answer right after the turn whose words it repeats, answers
+/// to the same words by `updated_at`; everything else as listed.
+pub(crate) fn restored_order<'a>(rows: Vec<&'a Value>, snaps: &MentionSnapshots) -> Vec<&'a Value> {
+    crate::mention::order_restored(rows, |r| {
+        let rid = r.get("run_id").and_then(Value::as_str).unwrap_or("");
+        let snap = snaps.get(rid).and_then(|s| s.as_ref().ok());
+        let repeat_of = snap
+            .and_then(|s| s.get("repeat_of"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let updated = snap
+            .and_then(|s| s.get("updated_at"))
+            .or_else(|| r.get("updated_at"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        (rid.to_string(), repeat_of, updated)
+    })
+}
+
+/// A restored mention turn's reply, from its run snapshot, appended as
+/// that entity's answer — or an error row saying it could not be read.
+/// Any other turn, or one already answered: no-op.
+pub(crate) fn restore_mention_reply(
+    fold: &mut crate::transcript::Fold,
+    run: &Value,
+    snaps: &MentionSnapshots,
+    from: usize,
+) {
+    if !is_mention_row(run) {
+        return;
+    }
+    let answered = fold.items[from.min(fold.items.len())..].iter().any(|i| {
+        matches!(
+            i,
+            Item::Assistant {
+                final_answer: true,
+                ..
+            }
+        )
+    });
+    if answered {
+        return;
+    }
+    let rid = run.get("run_id").and_then(Value::as_str).unwrap_or("");
+    let short = &rid[..rid.len().min(8)];
+    let item = match snaps.get(rid) {
+        Some(Ok(v)) => match crate::mention::reply_from_run(v) {
+            Some((text, author)) => Item::Assistant {
+                text,
+                final_answer: true,
+                author,
+            },
+            None => Item::Error {
+                text: format!("this mention turn holds no reply — run {short}"),
+            },
+        },
+        Some(Err(e)) => Item::Error {
+            text: format!("the reply of one mention could not be restored — run {short}: {e}"),
+        },
+        None => Item::Error {
+            text: format!("the reply of one mention was not read — run {short}"),
+        },
+    };
+    fold.push_item(item);
+}
+
 /// Fold one prior run tree (a `history_bundle`) into `fold` as a full-detail
 /// turn: the user's prompt card, then the tree's ledgers root-first through
 /// the normal fold (cycles, tool cards, answers — identical to the live
@@ -4094,8 +4267,18 @@ pub fn rehydrate_run_into(
         .unwrap_or("")
         .trim()
         .to_string();
-    if !prompt.is_empty() {
+    // An `@entity` mention repeats the words of the person's own turn
+    // (`run.repeat_of`): when that turn is restored here its card already
+    // shows them, so they are shown once.
+    let repeat_of = bundle
+        .get("run")
+        .and_then(|r| r.get("repeat_of"))
+        .and_then(Value::as_str)
+        .filter(|r| !r.is_empty());
+    let repeated = repeat_of.is_some_and(|r| fold.prompted_runs.iter().any(|p| p == r));
+    if !prompt.is_empty() && !repeated {
         fold.push_item(Item::User { text: prompt });
+        fold.prompted_runs.push(root_run_id.to_string());
     }
     push_attachments_line(fold, bundle, effects_out);
     fold.begin_run(root_run_id);
@@ -4104,6 +4287,13 @@ pub fn rehydrate_run_into(
     fold.replay = true;
     let _ = fold_bundle_chronologically(fold, root_run_id, bundle, effects_out);
     fold.replay = false;
+    // Who answered this turn (the bundle's `run.author`, a gateway with
+    // turn authors): the answers it restored say so.
+    if let Some(author) =
+        crate::mention::author_from_value(bundle.get("run").and_then(|r| r.get("author")))
+    {
+        fold.stamp_answers_from(before, &author);
+    }
     let has_answer = fold.items[before..].iter().any(|i| {
         matches!(
             i,
@@ -4879,6 +5069,7 @@ mod tests {
             last_workspace_note: None,
             workspace_notice_posted: false,
             same_machine_probed: false,
+            last_start: None,
         }
     }
 
@@ -5325,7 +5516,7 @@ mod tests {
             .iter()
             .any(|i| matches!(i, Item::Tool { name, .. } if name == "write_file")));
         assert!(fold.items.iter().any(
-            |i| matches!(i, Item::Assistant { text, final_answer: true } if text == "test added")
+            |i| matches!(i, Item::Assistant { text, final_answer: true, .. } if text == "test added")
         ));
         assert!(
             fold.pending_wait.is_none(),
@@ -6224,6 +6415,7 @@ mod tests {
             channel: crate::live::Channel::Content,
             snapshot,
             truncated: false,
+            author: None,
         })
     }
 
@@ -6460,9 +6652,111 @@ mod tests {
                     "final tail must be read after terminal probe"
                 );
                 store.fold.with_untracked(|f| {
-                    assert_eq!(f.items.iter().filter(|i|matches!(i,Item::Assistant{text,final_answer:true} if text=="Visible final answer.")).count(),1);
+                    assert_eq!(f.items.iter().filter(|i|matches!(i,Item::Assistant{text,final_answer:true, ..} if text=="Visible final answer.")).count(),1);
                     assert!(!f.items.iter().any(|i|matches!(i,Item::Thinking{content,..} if content=="Visible final answer.")));
                     assert!(!f.items.iter().any(|i|matches!(i,Item::Info{text} if text.contains("without a readable final answer"))));
+                });
+            });
+            root.dispose();
+        }
+    }
+
+    /// `@entity` mentions (2026-11-08): the mention calls of a message
+    /// name the turn its words started — in this session, and only when
+    /// they started one.
+    #[test]
+    fn mentions_repeat_the_turn_the_same_words_started() {
+        let last = Some(("s1".to_string(), "r1".to_string()));
+        assert_eq!(repeat_of_turn(&last, "s1", true).as_deref(), Some("r1"));
+        assert_eq!(repeat_of_turn(&last, "s1", false), None, "a steer");
+        assert_eq!(repeat_of_turn(&last, "s2", true), None, "another session");
+        assert_eq!(repeat_of_turn(&None, "s1", true), None, "the start failed");
+
+        // The runner records the run a start made, and forgets it when
+        // the next start fails.
+        let url = fake_gateway(vec![("/runs/start", json!({"run_id": "r1"}).to_string())]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s1".into());
+            let mut runner = runner_for(&url, store);
+            let start = |runner: &mut Runner| {
+                runner.start_run(
+                    "hi".into(),
+                    "agent".into(),
+                    "basic-agent".into(),
+                    "s1".into(),
+                    StartOpts::default(),
+                    Vec::new(),
+                    0,
+                )
+            };
+            start(&mut runner);
+            assert_eq!(runner.last_start, Some(("s1".into(), "r1".into())));
+            runner.stop_streams();
+            let mut refused = runner_for(&fake_gateway(vec![]), store);
+            refused.last_start = Some(("s1".into(), "old".into()));
+            start(&mut refused);
+            assert_eq!(refused.last_start, None, "a failed start names no turn");
+        });
+        root.dispose();
+    }
+
+    /// `@entity` mentions (2026-11-08): the run snapshot read at the end
+    /// of a turn names who answered (`author`), and the turn's answer says
+    /// so; an older gateway's snapshot (no author) leaves it exactly as it
+    /// was. A reply that already names its author keeps it.
+    #[test]
+    fn the_run_snapshot_author_names_the_turns_answer_at_its_end() {
+        let agent = json!({"kind": "agent", "name": "basic-agent", "entity_id": null,
+            "identity_ref": null, "avatar": null});
+        for (author, expect) in [(agent, Some("basic-agent")), (Value::Null, None)] {
+            let url = fake_gateway(vec![(
+                "/runs/root1",
+                json!({"run_id": "root1", "status": "completed", "author": author}).to_string(),
+            )]);
+            let (root, ()) = abstracttui::reactive::create_root(|cx| {
+                let store = Store::create(cx);
+                store.session_id.set("s1".into());
+                let (tx, _rx) = std::sync::mpsc::channel();
+                apply_start_binding(&store, &tx, "root1", "s1");
+                let castor = abstracttui::widgets::ChatAuthor::new(
+                    abstracttui::widgets::AuthorKind::Entity,
+                    "Castor",
+                );
+                store.fold.update(|f| {
+                    f.push_item(Item::User { text: "q".into() });
+                    f.push_item(Item::Assistant {
+                        text: "entity".into(),
+                        final_answer: true,
+                        author: Some(castor.clone()),
+                    });
+                    f.push_item(Item::Assistant {
+                        text: "agent".into(),
+                        final_answer: true,
+                        author: None,
+                    });
+                });
+                finish(
+                    &GatewayClient::new(&url, None),
+                    &abstracttui::reactive::wake_handle(),
+                    &store,
+                    &tx,
+                    "root1",
+                    "root1",
+                    true,
+                );
+                assert!(drain_until(|| store.phase.get_untracked() == Phase::Idle));
+                store.fold.with_untracked(|f| {
+                    let name = |text: &str| {
+                        f.items.iter().find_map(|i| match i {
+                            Item::Assistant {
+                                text: t, author, ..
+                            } if t == text => Some(author.as_ref().map(|a| a.name.clone())),
+                            _ => None,
+                        })
+                    };
+                    assert_eq!(name("agent"), Some(expect.map(str::to_string)));
+                    assert_eq!(name("entity"), Some(Some("Castor".to_string())));
                 });
             });
             root.dispose();

@@ -236,6 +236,64 @@ impl EntityClient {
         )
     }
 
+    /// `POST /sessions/{session_id}/mentions` (`@entity`, 2026-11-08). TURN
+    /// lane: the mention runs a visit turn of the entity (minutes of model
+    /// time). A refusal keeps its error `code` (body `code`, else the
+    /// `X-Gateway-Error-Code` header), which the shared error mapping drops.
+    pub fn mention(
+        &self,
+        session_id: &str,
+        body: &Value,
+    ) -> Result<Value, crate::mention::MentionFailure> {
+        use crate::mention::MentionFailure;
+        let path = format!("/sessions/{}/mentions", url_encode(session_id));
+        let req = self.with_auth(
+            self.turn
+                .post(&self.url(&path))
+                .set("Accept", "application/json")
+                .set("Content-Type", "application/json"),
+        );
+        match req.send_string(&body.to_string()) {
+            Ok(resp) => read_json_body(&path, resp).map_err(|e| MentionFailure {
+                status: None,
+                code: String::new(),
+                detail: e.to_string(),
+            }),
+            Err(ureq::Error::Status(status, resp)) => {
+                let header = resp
+                    .header("X-Gateway-Error-Code")
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let raw = resp.into_string().unwrap_or_default();
+                let v = serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null);
+                let field = |k: &str| {
+                    v.get(k)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or("")
+                        .to_string()
+                };
+                let code = Some(field("code"))
+                    .filter(|c| !c.is_empty())
+                    .unwrap_or(header);
+                let detail = Some(field("detail"))
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or_else(|| raw.trim().to_string());
+                Err(MentionFailure {
+                    status: Some(status),
+                    code,
+                    detail,
+                })
+            }
+            Err(e) => Err(MentionFailure {
+                status: None,
+                code: String::new(),
+                detail: err_from_ureq(&path, e).to_string(),
+            }),
+        }
+    }
+
     pub fn post_task(&self, name: &str, title: &str) -> GwResult<Value> {
         self.post_json(
             &self.slow,
@@ -933,7 +991,7 @@ pub fn ensure_poller(client: EntityClient, wake: WakeHandle, store: Store) {
 /// TurnRunning forever — /end refused, chip spinning, no recovery). Runs
 /// on the UI thread with full store access; the fold must guard itself
 /// (convo/run/epoch or the open-outcome shape) before touching state.
-type PanicFold = Box<dyn FnOnce(Store) + Send>;
+pub(crate) type PanicFold = Box<dyn FnOnce(Store) + Send>;
 
 /// One flow-brain turn on its own thread: summon → poll to terminal →
 /// guarded fold. The poll pace is 2s to a 300s bound (the reference
@@ -1134,7 +1192,7 @@ pub fn parse_summon_output(v: &Value) -> (String, i64, String) {
     (answer, degraded, moment_error)
 }
 
-fn spawn_named(
+pub(crate) fn spawn_named(
     name: &str,
     wake: WakeHandle,
     store: Store,

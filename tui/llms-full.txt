@@ -538,11 +538,14 @@ gateway until you answer.
 
 ## Working with entities
 
-If your gateway hosts summoned entities, `@name` opens a durable **visit**
-(`/entities` lists the roster with identity cards; `Enter` there does the
-same as `@name`). The visit gets its own transcript and a header chip;
-`Alt+E` cycles focus between the agent and open visits, and everything you
-submit under entity focus is that visit's next turn.
+If your gateway hosts summoned entities, type `@` and pick one: a message
+that is only that chip opens a durable **visit** (`/entities` lists the
+roster with identity cards; `Enter` there does the same). The visit gets its
+own transcript and a header chip; `Alt+E` cycles focus between the agent and
+open visits, and everything you submit under entity focus is that visit's
+next turn. A chip among other words is a **mention**: your message goes to
+the agent as usual, then each mentioned entity answers in the conversation,
+in order, under its own name (`● Castor · entity`).
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
 and stream **no mid-turn progress** (both server-side boundaries — the app
@@ -1107,7 +1110,7 @@ abstractcode --help | --version
 | `/gpu` | Toggle the gateway-host GPU meter in the footer |
 | `/stance [line\|figure\|off]` | How the turn is going, from mechanical facts (effort, calls, verify-shaped share of calls); floats bottom-right over the transcript, `Ctrl+G` folds it (`/conduct` too) |
 | `/redraw` | Force a full-screen repaint (`Ctrl+L`) — recovery from an external terminal clear (Cmd+K), which damage-tracked rendering cannot detect |
-| `@name [text]` | Talk with a summoned entity: bare `@name` opens (or focuses) a durable visit; `@name <text>` opens and sends the first turn. An unknown name never becomes an agent prompt — the draft is preserved with a roster hint. A partial `@na` opens a completion dropdown (cached roster); accepting inserts the name and the NEXT Enter submits |
+| `@` + pick | Mention an entity. `@` opens a list of the entities this account may see (the cached roster); a pick is one chip in the box (Backspace removes it whole), and a typed `@name` that was not picked is plain text. A message that is only one chip opens (or focuses) that entity's durable visit. Any other message is sent as usual, then each picked entity is asked in order through `POST /api/gateway/sessions/{id}/mentions`, the next once the previous answered; each answer appears as `● Castor · entity`. "Castor is in another conversation." and the gateway's other refusals are shown and the next entity is asked; "Castor cannot answer: …" puts the message back in the box. A gateway without the route says "This gateway does not offer mentions yet." once and `@` then offers nothing. Under an entity's focus the chips ask no one (a notice says so) |
 | `/entities [name]` | Entity roster + identity cards (opens instantly on the cached roster, refreshes async — the live fetch can be slow behind the gateway's drives fold). `[name]` deep-links to that card |
 | `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live `@name` visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
 | `/task <name> <title>` | Leave a task on the entity's desk — durable, no visit needed, works while the entity sleeps. Pickup happens at the entity's own boundary (day end, wake check, or visit close), never "immediately" |
@@ -1576,7 +1579,7 @@ recovers it.
 | `Ctrl+J` | composer | Insert a newline — works in **every** terminal (it is the LF byte on the legacy wire); the composer grows to 4 rows |
 | `Alt+Enter` | composer | Insert a newline (Option+Enter on macOS with "Option as Meta/Esc+"); `Shift+Enter` also works wherever the kitty keyboard protocol is live (kitty/Ghostty/foot from startup; iTerm2 ≥ 3.5, VS Code/Cursor, Warp via the mid-session probe) |
 | `↑` / `↓` | composer at buffer edge | Recall sent messages (input history) |
-| `Tab` / `Enter` | `/` and `@` completion dropdowns | Accept the highlighted entry (Esc dismisses; a fully-typed command or `@name` submits directly on the first Enter) |
+| `Tab` / `Enter` | `/` and `@` completion dropdowns | Accept the highlighted entry (Esc dismisses; a fully-typed command submits directly on the first Enter; an `@` row becomes a chip, and the next Enter sends) |
 | `Esc` | composer with text | Clear the composer |
 | `Esc` | scrolled up | Jump back to the live tail — that press is consumed (it never arms cancel) |
 | `Esc Esc` | while running, at the tail | Cancel the run (within 900ms). Under entity focus it explains instead: entity turns are non-interruptible |

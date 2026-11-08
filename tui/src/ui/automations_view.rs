@@ -560,6 +560,7 @@ pub fn occurrences_as_chat(
             out.push(ChatEntry::Item(Box::new(Item::Assistant {
                 text: o.answer.clone(),
                 final_answer: true,
+                author: None,
             })));
         }
         if let Some((title, body)) = &o.notify {
@@ -1595,7 +1596,8 @@ mod tests {
             entries[2],
             ChatEntry::Item(Box::new(crate::transcript::Item::Assistant {
                 text: "all quiet".into(),
-                final_answer: true
+                final_answer: true,
+                author: None,
             }))
         );
         // A run still going has its task and no reply yet.

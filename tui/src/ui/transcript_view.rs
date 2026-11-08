@@ -121,17 +121,82 @@ fn draw_rule(
     if rect.w <= 0 || rect.h < 2 {
         return;
     }
+    draw_rule_spans(
+        canvas,
+        rect,
+        ch,
+        &[(label.to_string(), label_ink)],
+        line_ink,
+    );
+}
+
+/// [`draw_rule`] over a label made of inked spans (an authored answer's
+/// `● Castor · entity`). The spans share the label's room; the one that
+/// does not fit is cut with an ellipsis and the rest are dropped, so one
+/// span paints exactly what `draw_rule` always painted.
+fn draw_rule_spans(
+    canvas: &mut dyn abstracttui::ui::StyledCanvas,
+    rect: Rect,
+    ch: char,
+    spans: &[(String, Rgba)],
+    line_ink: Rgba,
+) {
+    if rect.w <= 0 || rect.h < 2 {
+        return;
+    }
     let y = rect.y + 1;
     let lead = format!("{ch}{ch} ");
     canvas.print(Point::new(rect.x, y), &lead, line_ink, Rgba::TRANSPARENT);
     let lx = rect.x + text::width(&lead);
-    let fitted = text::truncate_ellipsis(label, (rect.w - text::width(&lead) - 4).max(4));
-    canvas.print(Point::new(lx, y), &fitted, label_ink, Rgba::TRANSPARENT);
-    let tx = lx + text::width(&fitted) + 1;
+    let room = (rect.w - text::width(&lead) - 4).max(4);
+    let mut x = 0;
+    for (label, ink) in spans {
+        let left = room - x;
+        if left <= 0 {
+            break;
+        }
+        let fitted = text::truncate_ellipsis(label, left);
+        canvas.print(Point::new(lx + x, y), &fitted, *ink, Rgba::TRANSPARENT);
+        x += text::width(&fitted);
+        if text::width(label) > left {
+            break; // cut: the spans after it would read as part of it
+        }
+    }
+    let tx = lx + x + 1;
     if rect.right() > tx {
         let tail: String = ch.to_string().repeat((rect.right() - tx) as usize);
         canvas.print(Point::new(tx, y), &tail, line_ink, Rgba::TRANSPARENT);
     }
+}
+
+/// The label of an answer whose author the gateway named (`@entity`
+/// mentions, 2026-11-08): the author's mark (`●` in an entity's own
+/// avatar colour, `✦` for an agent, none for a person — abstracttui's
+/// `AuthorKind::mark`), the name in the answer ink, then a muted kind tag.
+/// A nameless author keeps the row's old name, "assistant".
+fn author_label(author: &abstracttui::widgets::ChatAuthor, t: &TokenSet) -> Vec<(String, Rgba)> {
+    use abstracttui::widgets::AuthorKind;
+    let mut spans = Vec::new();
+    if let Some(mark) = author.kind.mark() {
+        let ink = match author.kind {
+            AuthorKind::Entity => abstracttui::theme::derive::identity_ink(
+                author.avatar.as_ref().and_then(|a| a.color.as_deref()),
+                t.bg,
+                t.text,
+                t.accent,
+            ),
+            _ => t.accent,
+        };
+        spans.push((format!("{mark} "), ink));
+    }
+    let name = if author.name.is_empty() {
+        "assistant"
+    } else {
+        author.name.as_str()
+    };
+    spans.push((name.to_string(), t.ok));
+    spans.push((format!(" · {}", author.kind.as_str()), t.text_muted));
+    spans
 }
 
 /// A labeled full-width rule, two rows: air, then `ch ch label ch…`.
@@ -146,8 +211,7 @@ fn rule_block(ch: char, label: String, label_ink: Rgba, line_ink: Rgba) -> FeedB
 /// (the final answer's `══ assistant ══ ▶ ═`).
 fn rule_block_with_icon(
     ch: char,
-    label: String,
-    label_ink: Rgba,
+    label: Vec<(String, Rgba)>,
     line_ink: Rgba,
     icon: VoiceIcon,
     icon_ink: Rgba,
@@ -161,7 +225,7 @@ fn rule_block_with_icon(
     FeedBlock::Custom(CustomBlock::new(
         |_| 3,
         move |canvas, rect| {
-            draw_rule(canvas, rect, ch, &label, label_ink, line_ink);
+            draw_rule_spans(canvas, rect, ch, &label, line_ink);
             if rect.h >= 2 {
                 paint_icon(
                     canvas,
@@ -962,6 +1026,7 @@ pub(crate) fn speakable(item: &Item) -> Option<&str> {
         | Item::Assistant {
             text,
             final_answer: true,
+            ..
         } if !text.trim().is_empty() => Some(text),
         _ => None,
     }
@@ -1824,15 +1889,21 @@ fn render_item(
         Item::Assistant {
             text: body,
             final_answer,
+            author,
         } => {
             // The FINAL answer closes the turn — the same '═' weight
             // that opened it (adversarial review finding 3). Interim
-            // updates stay minor cards.
+            // updates stay minor cards. An answer the gateway named an
+            // author for says WHO answered (`● Castor · entity`); without
+            // one the row is exactly the plain "assistant" it always was.
             if *final_answer {
+                let label = match author {
+                    Some(a) => author_label(a, t),
+                    None => vec![("assistant".to_string(), t.ok)],
+                };
                 return Some(FeedItem::new().block(rule_block_with_icon(
                     '═',
-                    "assistant".into(),
-                    t.ok,
+                    label,
                     t.text_faint,
                     voice_icon(&store, item),
                     t.text_muted,
@@ -1840,10 +1911,28 @@ fn render_item(
                 )));
             }
             let ink = t.text_muted;
-            Some(
-                carded("✦", ink, "assistant (update)", ink, "", ink)
-                    .block(FeedBlock::Markdown(body.clone())),
-            )
+            let card = match author {
+                Some(a) => {
+                    let mut spans = author_label(a, t);
+                    let (glyph, glyph_ink) = if spans.len() == 3 {
+                        let (g, i) = spans.remove(0);
+                        (g.trim_end().to_string(), i)
+                    } else {
+                        ("✦".to_string(), ink)
+                    };
+                    let label: String = spans.iter().map(|(s, _)| s.as_str()).collect();
+                    carded(
+                        &glyph,
+                        glyph_ink,
+                        &format!("{label} (update)"),
+                        ink,
+                        "",
+                        ink,
+                    )
+                }
+                None => carded("✦", ink, "assistant (update)", ink, "", ink),
+            };
+            Some(card.block(FeedBlock::Markdown(body.clone())))
         }
         Item::Image {
             artifact_id, label, ..
@@ -1911,6 +2000,7 @@ fn render_body(t: &TokenSet, item: &Item, slot: &Slot) -> Option<FeedItem> {
         Item::Assistant {
             text,
             final_answer: true,
+            ..
         } if !text.trim().is_empty() => {
             Some(FeedItem::new().block(FeedBlock::Markdown(text.clone())))
         }
@@ -1961,6 +2051,7 @@ fn has_body(item: &Item, slot: &Slot) -> bool {
         Item::Assistant {
             text,
             final_answer: true,
+            ..
         } => !text.trim().is_empty(),
         Item::Thinking {
             content, reasoning, ..
@@ -2058,10 +2149,29 @@ fn fingerprint(item: &Item, store: &Store, expanded: bool, slot: &Slot) -> u64 {
             h.body(&sandbox_key(sandbox.as_ref()));
             h.byte(u8::from(expanded));
         }
-        Item::Assistant { text, final_answer } => {
+        Item::Assistant {
+            text,
+            final_answer,
+            author,
+        } => {
             h.byte(5);
             h.byte(u8::from(*final_answer));
             h.body(text);
+            // Who answered renders on the rule (a late stamp repaints it).
+            match author {
+                Some(a) => {
+                    h.byte(1);
+                    h.str(a.kind.as_str());
+                    h.str(&a.name);
+                    h.str(
+                        a.avatar
+                            .as_ref()
+                            .and_then(|v| v.color.as_deref())
+                            .unwrap_or(""),
+                    );
+                }
+                None => h.byte(0),
+            }
         }
         Item::Image {
             artifact_id, label, ..
@@ -2423,6 +2533,23 @@ pub fn read_only_transcript(
 /// then (when present) the collapsed reasoning line and the truncation
 /// note. Rebuilt per header change only — never per content delta.
 pub fn live_header_item(t: &TokenSet, e: &crate::live::LiveReply) -> FeedItem {
+    // The turn's author, when the frames name one (`✦ basic-agent · agent
+    // · reason`): the same label the saved answer will carry. A child
+    // run's bubble stays "sub-agent" (the author is the root turn's).
+    if let (Some(author), false) = (&e.author, e.child) {
+        let mut spans = author_label(author, t);
+        let (glyph, glyph_ink) = if spans.len() == 3 {
+            let (g, i) = spans.remove(0);
+            (g.trim_end().to_string(), i)
+        } else {
+            ("✎".to_string(), t.accent)
+        };
+        let mut caption: String = spans.iter().map(|(s, _)| s.as_str()).collect();
+        if !e.node_id.is_empty() {
+            caption.push_str(&format!(" · {}", e.node_id));
+        }
+        return live_header_lines(t, e, &glyph, glyph_ink, &caption);
+    }
     let caption = if e.child {
         format!("sub-agent · {}", e.node_id)
     } else if e.node_id.is_empty() {
@@ -2430,6 +2557,17 @@ pub fn live_header_item(t: &TokenSet, e: &crate::live::LiveReply) -> FeedItem {
     } else {
         format!("reply · {}", e.node_id)
     };
+    live_header_lines(t, e, "✎", t.accent, &caption)
+}
+
+/// [`live_header_item`]'s rows under a given glyph and caption.
+fn live_header_lines(
+    t: &TokenSet,
+    e: &crate::live::LiveReply,
+    glyph: &str,
+    glyph_ink: Rgba,
+    caption: &str,
+) -> FeedItem {
     let state = if e.finished {
         "complete — the recorded reply replaces this"
     } else {
@@ -2437,7 +2575,7 @@ pub fn live_header_item(t: &TokenSet, e: &crate::live::LiveReply) -> FeedItem {
     };
     let mut lines = vec![
         RichLine::new(),
-        header_line("✎", t.accent, &caption, t.text_muted, state, t.text_faint),
+        header_line(glyph, glyph_ink, caption, t.text_muted, state, t.text_faint),
     ];
     if !e.reasoning.is_empty() {
         lines.push(RichLine::from_spans(vec![Span::new(
@@ -2519,6 +2657,7 @@ pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
         let head_fp = |e: &crate::live::LiveReply| -> (u64, bool) {
             let mut h = Fnv::new();
             h.str(&e.node_id);
+            h.str(e.author.as_ref().map(|a| a.name.as_str()).unwrap_or(""));
             h.byte(u8::from(e.child));
             h.byte(u8::from(e.truncated));
             h.byte(u8::from(e.finished));
@@ -3657,10 +3796,12 @@ mod tests {
                 Item::Assistant {
                     text: "a".into(),
                     final_answer: true,
+                    author: None,
                 },
                 Item::Assistant {
                     text: "u".into(),
                     final_answer: false,
+                    author: None,
                 },
                 Item::Image {
                     run_id: "r".into(),
@@ -3829,6 +3970,7 @@ mod tests {
             Item::Assistant {
                 text: "answer".into(),
                 final_answer: true,
+                author: None,
             },
             tool_item("late", ToolStatus::Ok),
         ];
@@ -3927,6 +4069,7 @@ mod tests {
                 Item::Assistant {
                     text: "done".into(),
                     final_answer: true,
+                    author: None,
                 },
             ]
         };

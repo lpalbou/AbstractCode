@@ -21,8 +21,6 @@ dependencies = [
 [[package]]
 name = "abstracttui"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71b58967e5dd8843ba426f9bc8c4a7094546732fa70e69fd3de35581ce7eed87"
 dependencies = [
  "abstractavatar",
  "libc",

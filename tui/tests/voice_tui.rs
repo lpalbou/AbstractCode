@@ -778,6 +778,7 @@ impl Harness {
             f.push_item(Item::Assistant {
                 text: reply.into(),
                 final_answer: true,
+                author: None,
             });
         });
         for _ in 0..3 {
@@ -1638,6 +1639,7 @@ fn read_aloud_narrates_cycles_then_the_answer() {
         f.push_item(Item::Assistant {
             text: "Here is the summary.".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.until("the second cycle read", |_| tts(&gw).len() == 2);

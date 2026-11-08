@@ -12,6 +12,7 @@ pub mod docs;
 pub mod entities;
 pub mod gpu;
 pub mod me_events;
+pub mod mentions;
 pub mod preferences;
 pub mod rail;
 pub mod sse;

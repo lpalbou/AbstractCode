@@ -120,6 +120,11 @@ pub enum Item {
     Assistant {
         text: String,
         final_answer: bool,
+        /// Who answered (the gateway turn's `author`, `@entity` mentions
+        /// 2026-11-08): an entity's mention reply, an agent's turn. `None`
+        /// (an older gateway, a ledger-only reply) renders exactly as the
+        /// plain "assistant" row always did.
+        author: Option<abstracttui::widgets::ChatAuthor>,
     },
     Image {
         run_id: String,
@@ -695,6 +700,10 @@ struct ProvisionalConclusion {
 #[derive(Default)]
 pub struct Fold {
     pub items: Vec<Item>,
+    /// Root runs whose prompt card this fold shows (a restore records
+    /// them): an `@entity` mention whose `repeat_of` is one of them shows
+    /// no second card for the same words.
+    pub prompted_runs: Vec<String>,
     pub stats: Stats,
     pub session: SessionStats,
     pub pending_wait: Option<PendingWait>,
@@ -1057,6 +1066,30 @@ impl Fold {
         } else {
             Some(self.steer_run_id.clone())
         }
+    }
+
+    /// Name who answered the turn in progress (the gateway's run `author`,
+    /// read at the run's end or from its history bundle): every answer
+    /// item since the turn's prompt (`from`, an item index) that has no
+    /// author yet. Answers that already carry one (an entity's mention
+    /// reply landing mid-turn) keep theirs.
+    pub fn stamp_answers_from(&mut self, from: usize, author: &abstracttui::widgets::ChatAuthor) {
+        for item in self.items.iter_mut().skip(from) {
+            if let Item::Assistant { author: slot, .. } = item {
+                if slot.is_none() {
+                    *slot = Some(author.clone());
+                }
+            }
+        }
+    }
+
+    /// Index of the newest prompt card (`Item::User`): where the turn in
+    /// progress begins. 0 when there is none.
+    pub fn turn_start(&self) -> usize {
+        self.items
+            .iter()
+            .rposition(|i| matches!(i, Item::User { .. }))
+            .unwrap_or(0)
     }
 
     pub fn push_item(&mut self, item: Item) {
@@ -1464,6 +1497,7 @@ impl Fold {
                             _ => self.push_item(Item::Assistant {
                                 text,
                                 final_answer: false,
+                                author: None,
                             }),
                         }
                     }
@@ -1623,6 +1657,7 @@ impl Fold {
                         self.push_item(Item::Assistant {
                             text: msg.clone(),
                             final_answer: false,
+                            author: None,
                         });
                     }
                 }
@@ -1772,6 +1807,7 @@ impl Fold {
                 self.push_item(Item::Assistant {
                     text,
                     final_answer: concludes,
+                    author: None,
                 });
                 if let Some(aid) = &out.offload_artifact {
                     if concludes {
@@ -2794,6 +2830,41 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn a_turn_author_stamps_only_this_turns_unauthored_answers() {
+        use abstracttui::widgets::{AuthorKind, ChatAuthor};
+        let answer = |text: &str, author: Option<ChatAuthor>| Item::Assistant {
+            text: text.into(),
+            final_answer: true,
+            author,
+        };
+        let mut f = Fold::new();
+        f.push_item(Item::User { text: "one".into() });
+        f.push_item(answer("old", None));
+        f.push_item(Item::User { text: "two".into() });
+        f.push_item(answer(
+            "castor",
+            Some(ChatAuthor::new(AuthorKind::Entity, "Castor")),
+        ));
+        f.push_item(answer("agent", None));
+        assert_eq!(f.turn_start(), 2);
+        let agent = ChatAuthor::new(AuthorKind::Agent, "basic-agent");
+        let from = f.turn_start();
+        f.stamp_answers_from(from, &agent);
+        let author_of = |i: usize| match &f.items[i] {
+            Item::Assistant { author, .. } => author.as_ref().map(|a| a.name.clone()),
+            _ => unreachable!(),
+        };
+        assert_eq!(author_of(1), None, "an earlier turn is untouched");
+        assert_eq!(
+            author_of(3).as_deref(),
+            Some("Castor"),
+            "a named reply keeps its author"
+        );
+        assert_eq!(author_of(4).as_deref(), Some("basic-agent"));
+        assert_eq!(Fold::new().turn_start(), 0);
+    }
+
     /// Two distinct calls must never collapse onto one card.
     ///
     /// Regression: `tool_key` keyed the id branch as a GLOBAL `call:{id}` namespace
@@ -3162,7 +3233,9 @@ mod tests {
         fold.apply("root", &root_final);
         assert!(fold.finished);
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(final_answer);
                 assert_eq!(text, "the final word");
             }
@@ -3185,7 +3258,9 @@ mod tests {
         fold.apply("sub1", &sub_final);
         assert!(fold.finished, "agent-loop subrun answer finishes the turn");
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(final_answer);
                 assert_eq!(text, "DONE");
             }
@@ -3328,7 +3403,7 @@ mod tests {
         assert!(fold
             .items
             .iter()
-            .any(|i| matches!(i, Item::Assistant { text, final_answer: true } if text == "Both configs are at MSRP.")));
+            .any(|i| matches!(i, Item::Assistant { text, final_answer: true, .. } if text == "Both configs are at MSRP.")));
     }
 
     #[test]
@@ -3503,6 +3578,7 @@ mod tests {
             Item::Assistant {
                 text,
                 final_answer: true,
+                ..
             } => assert_eq!(text, "the real answer"),
             other => panic!("unexpected {other:?}"),
         }
@@ -3821,7 +3897,7 @@ mod tests {
         );
         assert_eq!(fold.activity, "build cycle 2 of 6", "strip shows the cycle");
         assert!(
-            matches!(fold.items.last(), Some(Item::Assistant { text, final_answer: false }) if text == "build cycle 2 of 6"),
+            matches!(fold.items.last(), Some(Item::Assistant { text, final_answer: false, .. }) if text == "build cycle 2 of 6"),
             "and a persistent transcript card marks the boundary"
         );
         // A real intermediate answer stays transcript-only.
@@ -3914,7 +3990,9 @@ mod tests {
             "a subrun answer must NOT finish a root-only run"
         );
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(!final_answer, "iteration results render NON-final");
                 assert_eq!(text, "iteration 1 result");
             }
@@ -3950,7 +4028,9 @@ mod tests {
         );
         assert!(!fold.finished, "iteration 2's end keeps the goal open");
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(!final_answer, "iteration 2 renders NON-final too");
                 assert_eq!(text, "iteration 2 result");
             }
@@ -4023,7 +4103,9 @@ mod tests {
         );
         let placeholder = offload_placeholder("e3b19ad9e42a2b725048bab40138f975");
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(*final_answer);
                 assert_eq!(*text, placeholder, "placeholder names the artifact");
             }
@@ -4035,7 +4117,9 @@ mod tests {
             Ok("You were right. I tested the game myself.".into()),
         );
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(*final_answer);
                 assert!(text.starts_with("You were right."));
             }
@@ -4065,7 +4149,9 @@ mod tests {
         assert!(fold.finished, "conclusion never waits on the fetch");
         fold.resolve_offloaded_answer("abc123", Err("HTTP 500".into()));
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(*final_answer, "the failure label stays the final answer");
                 // The 2026-07-23 fetch_url incident contract: the label
                 // carries the compact reason but NO artifact id, NO URL,
@@ -4117,7 +4203,9 @@ mod tests {
                     "result": {"completed": true, "output": {"response": "The full report: everything shipped."}}}),
         );
         match last_content(&fold) {
-            Item::Assistant { text, final_answer } => {
+            Item::Assistant {
+                text, final_answer, ..
+            } => {
                 assert!(*final_answer);
                 assert_eq!(
                     text, "The full report: everything shipped.",
@@ -4539,7 +4627,7 @@ mod tests {
                 &json!({"run_id":"root","node_id":"end","status":"completed",
                 "result":{"completed":true,"output":{"response":"The actual answer."}}}),
             );
-            assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Assistant { text, final_answer:true } if text == "The actual answer.")).count(),1);
+            assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Assistant { text, final_answer:true, .. } if text == "The actual answer.")).count(),1);
             assert!(!fold.items.iter().any(
                 |i| matches!(i, Item::Thinking { content, .. } if content == "The actual answer.")
             ));
@@ -4587,7 +4675,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(fold.items.iter().filter(|i|matches!(i,Item::Assistant{text,final_answer:true} if text=="Partial answer.")).count(),1);
+        assert_eq!(fold.items.iter().filter(|i|matches!(i,Item::Assistant{text,final_answer:true, ..} if text=="Partial answer.")).count(),1);
         assert!(!fold.items.iter().any(
             |i| matches!(i,Item::Info{text} if text.contains("without a readable final answer"))
         ));
@@ -4620,7 +4708,7 @@ mod tests {
         assert_eq!(fold.stopped_short, None);
         assert_eq!(fold.stop, None);
         assert!(fold.done_note.starts_with("done"));
-        assert_eq!(fold.items.iter().filter(|item| matches!(item, Item::Assistant { text, final_answer:true } if text=="Canonical answer")).count(),1);
+        assert_eq!(fold.items.iter().filter(|item| matches!(item, Item::Assistant { text, final_answer:true, .. } if text=="Canonical answer")).count(),1);
     }
 
     #[test]
@@ -4746,7 +4834,7 @@ mod tests {
             &json!({"run_id":"root","status":"completed",
             "result":{"completed":true,"output":{"response":"Recovered answer"}}}),
         );
-        assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Assistant { text, final_answer:true } if text == "Recovered answer")).count(),1);
+        assert_eq!(fold.items.iter().filter(|i| matches!(i, Item::Assistant { text, final_answer:true, .. } if text == "Recovered answer")).count(),1);
     }
 
     #[test]
@@ -5907,7 +5995,7 @@ mod tests {
         assert!(fold.finished);
         assert!(matches!(
             last_content(&fold),
-            Item::Assistant { text, final_answer: true } if text == "root's answer"
+            Item::Assistant { text, final_answer: true, .. } if text == "root's answer"
         ));
     }
 

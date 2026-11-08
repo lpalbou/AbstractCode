@@ -9,3 +9,9 @@
 [workspace]
 resolver = "2"
 members = ["tui"]
+
+# TEMPORARY until abstracttui 0.8.0 is published — remove at release.
+# The @entity mention chips and the turn author (abstracttui main b06ba9a)
+# are not on crates.io yet; this builds `tui/` against the sibling checkout.
+[patch.crates-io]
+abstracttui = { path = "../abstracttui" }

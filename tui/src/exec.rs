@@ -1293,6 +1293,7 @@ fn print_new(
                 Item::Assistant {
                     text,
                     final_answer: true,
+                    ..
                 },
                 Some(p),
             ) if p.streamed_whole(text) => {
@@ -1399,9 +1400,20 @@ fn print_item(item: &Item) {
             };
             println!("{glyph} {name} {args_preview}");
         }
-        Item::Assistant { text, final_answer } => {
+        Item::Assistant {
+            text,
+            final_answer,
+            author,
+        } => {
             if *final_answer {
-                println!("\n━━━ answer ━━━\n{text}\n");
+                match author {
+                    Some(a) if !a.name.is_empty() => println!(
+                        "\n━━━ answer · {} ({}) ━━━\n{text}\n",
+                        a.name,
+                        a.kind.as_str()
+                    ),
+                    _ => println!("\n━━━ answer ━━━\n{text}\n"),
+                }
             } else {
                 println!("✦ {text}");
             }

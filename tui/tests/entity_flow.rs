@@ -118,6 +118,17 @@ impl Harness {
         self.term.push_input(b"\r");
     }
 
+    /// Pick `@query`'s first row from the mention popup: the chip lands
+    /// in the composer (Enter accepts the highlighted row).
+    fn pick(&mut self, query: &str) {
+        self.type_text(&format!("@{query}"));
+        self.turn();
+        self.turn();
+        self.press_enter();
+        self.turn();
+        self.turn();
+    }
+
     fn drain_cmds(&mut self) -> Vec<Cmd> {
         let mut out = Vec::new();
         while let Ok(c) = self.rx.try_recv() {
@@ -163,6 +174,7 @@ fn focus_round_trip_renders_byte_identically() {
         f.push_item(Item::Assistant {
             text: "agent answer".into(),
             final_answer: true,
+            author: None,
         });
     });
     // Two pumps: markdown blocks discover width on first draw and
@@ -184,6 +196,7 @@ fn focus_round_trip_renders_byte_identically() {
                 Item::Assistant {
                     text: "entity reply words".into(),
                     final_answer: true,
+                    author: None,
                 },
             ],
         ))
@@ -230,6 +243,7 @@ fn same_length_same_fingerprint_switch_still_rebuilds() {
         Item::Assistant {
             text: "identical answer".into(),
             final_answer: true,
+            author: None,
         },
     ];
     store.fold.update(|f| {
@@ -257,6 +271,7 @@ fn same_length_same_fingerprint_switch_still_rebuilds() {
         cs[0].items.push(Item::Assistant {
             text: "post-switch entity growth".into(),
             final_answer: true,
+            author: None,
         })
     });
     h.turn();
@@ -286,6 +301,7 @@ fn details_toggle_composes_with_focus_probe_items() {
                 Item::Assistant {
                     text: "reply".into(),
                     final_answer: true,
+                    author: None,
                 },
             ],
         ))
@@ -328,6 +344,7 @@ fn rapid_focus_toggling_mid_stream_stays_correct() {
         f.push_item(Item::Assistant {
             text: "agent one".into(),
             final_answer: true,
+            author: None,
         });
     });
     store
@@ -342,6 +359,7 @@ fn rapid_focus_toggling_mid_stream_stays_correct() {
             cs[0].items.push(Item::Assistant {
                 text: format!("entity growth {round}"),
                 final_answer: true,
+                author: None,
             })
         });
         // And the AGENT fold in the same breath.
@@ -349,6 +367,7 @@ fn rapid_focus_toggling_mid_stream_stays_correct() {
             f.push_item(Item::Assistant {
                 text: format!("agent growth {round}"),
                 final_answer: true,
+                author: None,
             })
         });
         h.turn();
@@ -397,6 +416,7 @@ fn details_and_focus_compose_with_agent_images() {
         f.push_item(Item::Assistant {
             text: "the diagram above".into(),
             final_answer: true,
+            author: None,
         });
     });
     h.turn();
@@ -581,8 +601,9 @@ fn at_name_submit_opens_the_conversation_and_sends_open_cmd() {
         .entities
         .set(vec![roster_entry("doorcheck", "asleep")]);
     h.turn();
-    h.type_text("@doorcheck");
-    h.turn();
+    // A message that is ONLY the chip opens the conversation (2026-11-08:
+    // the chip is picked from the popup; the text is never parsed).
+    h.pick("doorcheck");
     h.press_enter();
     h.turn();
     let screen = h.turn();
@@ -615,7 +636,10 @@ fn at_name_submit_opens_the_conversation_and_sends_open_cmd() {
 }
 
 #[test]
-fn unknown_mention_notifies_and_preserves_the_draft() {
+fn a_typed_at_name_never_picked_is_plain_text() {
+    // The 2026-11-08 rule: a mention exists only as a PICKED chip; a typed
+    // `@ghost` (no roster row, so no popup) is the person's prompt, sent
+    // as typed — nothing is parsed out of the text.
     let mut h = harness();
     h.turn();
     let store = h.store;
@@ -624,19 +648,20 @@ fn unknown_mention_notifies_and_preserves_the_draft() {
     h.type_text("@ghost hello there");
     h.turn();
     h.press_enter();
-    let screen = h.turn();
-    assert!(
-        screen.contains("@ghost hello there"),
-        "draft preserved in the composer:\n{screen}"
-    );
+    h.turn();
     assert!(
         store.convos.with_untracked(|cs| cs.is_empty()),
-        "no conversation opened for an unknown name"
+        "no conversation opened for a typed name"
     );
     let cmds = h.drain_cmds();
     assert!(
-        !cmds.iter().any(|c| matches!(c, Cmd::Start { .. })),
-        "an unknown @name must never become an agent prompt"
+        cmds.iter()
+            .any(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "@ghost hello there")),
+        "the typed text is the agent prompt"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Cmd::Mentions { .. })),
+        "and asks no entity"
     );
 }
 
@@ -1124,8 +1149,7 @@ fn flow_convo_never_chimeras_and_reopen_flips_brain() {
     // (the reference implementation's P0 chimera class).
     h.store.focus.set(Focus::Agent);
     h.turn();
-    h.type_text("@doorcheck");
-    h.turn();
+    h.pick("doorcheck");
     h.press_enter();
     h.turn();
     assert_eq!(
@@ -1152,8 +1176,7 @@ fn flow_convo_never_chimeras_and_reopen_flips_brain() {
     h.turn();
     h.press_enter();
     h.turn();
-    h.type_text("@doorcheck");
-    h.turn();
+    h.pick("doorcheck");
     h.press_enter();
     h.turn();
     assert!(

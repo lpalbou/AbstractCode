@@ -1,57 +1,15 @@
-//! Entity conversation actions driven from the UI thread: @name routing,
-//! turn sends + held drafts, focus switching, /end, /task, and the poller
+//! Entity conversation actions driven from the UI thread: opening a
+//! conversation from an `@` chip, turn sends + held drafts, focus
+//! switching, /end, /task, the `@entity` mention send, and the poller
 //! view sync. All signal writes happen here (UI thread); HTTP rides the
 //! runner's entity commands.
 
 use abstracttui::prelude::*;
 
 use crate::convo::{self, ConvoStatus, EntityConvo, Focus};
-use crate::mention::Mention;
 use crate::runner::Cmd;
 use crate::store::Store;
 use crate::ui::UiCtx;
-
-/// What the mention routing did with a submitted draft.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Routed {
-    /// No leading `@` — not ours; the normal submit path continues.
-    No,
-    /// Routed (opened/focused/sent/held).
-    Consumed,
-    /// Leading `@` with an unknown name: notice shown; the CALLER must
-    /// preserve the draft (it never becomes an agent prompt by accident).
-    UnknownName,
-}
-
-/// Route a submitted draft through the mention parse.
-pub fn route_mention(store: Store, ctx: &UiCtx, text: &str) -> Routed {
-    let roster = store.entities.get_untracked();
-    match crate::mention::parse(text, &roster) {
-        Mention::None => Routed::No,
-        Mention::Open { slug } => {
-            open_or_focus(store, ctx, &slug);
-            Routed::Consumed
-        }
-        Mention::Message { slug, text } => {
-            open_or_focus(store, ctx, &slug);
-            send_or_hold(store, ctx, &slug, &text);
-            Routed::Consumed
-        }
-        Mention::Unknown { name } => {
-            let known: Vec<String> = roster
-                .iter()
-                .filter(|e| e.error.is_empty())
-                .map(|e| e.slug.clone())
-                .collect();
-            store.notify(if known.is_empty() {
-                format!("@{name}: no entity roster yet — /entities refreshes it")
-            } else {
-                format!("@{name} is not on the roster (known: {})", known.join(", "))
-            });
-            Routed::UnknownName
-        }
-    }
-}
 
 /// Open a conversation with `name` (or focus the existing one). Closed and
 /// refused conversations reopen fresh — "the next @name opens fresh".
@@ -453,4 +411,84 @@ pub fn wire_poller_view(cx: Scope, store: Store) {
 /// its text had drifted from the live Ctrl+J teaching).
 pub fn entity_placeholder(name: &str) -> String {
     format!("message {name} — non-interruptible mid-turn; Enter holds during a turn · /help")
+}
+
+/// The `@entity` half of a message with chips (2026-11-08), called right
+/// after the person's own turn was sent: one `Cmd::Mentions` on the runner
+/// channel (so it follows that turn to the gateway), the history hint
+/// recorded as told for this session, and one line naming who is asked.
+/// No calls: nothing. A gateway that has no mention route: its sentence,
+/// and the message stays the person's turn alone.
+pub fn send_mentions(
+    store: Store,
+    ctx: &UiCtx,
+    text: &str,
+    draft: &str,
+    repeat_turn: bool,
+    calls: Vec<crate::mention::MentionCall>,
+) {
+    if calls.is_empty() {
+        return;
+    }
+    if store.mentions_off.get_untracked() {
+        store.notify(format!("{}.", crate::mention::NOT_OFFERED));
+        return;
+    }
+    let session_id = store.session_id.get_untracked();
+    store.mention_told.update(|told| {
+        for c in &calls {
+            let key = (session_id.clone(), c.entity.clone());
+            if !told.contains(&key) {
+                told.push(key);
+            }
+        }
+    });
+    store.notify(format!("asking {}", names_of(&calls)));
+    ctx.send(Cmd::Mentions {
+        session_id,
+        text: text.to_string(),
+        draft: draft.to_string(),
+        repeat_turn,
+        calls,
+    });
+}
+
+/// Under an entity's focus the message went to that entity as typed; the
+/// chips in it asked no one else — say so (mentions belong to the agent
+/// conversation, whose session records the answers).
+pub fn mentions_not_sent_here(store: Store, calls: &[crate::mention::MentionCall]) {
+    if calls.is_empty() {
+        return;
+    }
+    store.notify(format!(
+        "{} not asked: mentions are sent from the agent conversation (Alt+E switches)",
+        names_of(calls)
+    ));
+}
+
+/// A slash command carried chips: its argument is text, so they asked no
+/// one — say so.
+pub fn mentions_in_a_command(store: Store, calls: &[crate::mention::MentionCall]) {
+    if calls.is_empty() {
+        return;
+    }
+    store.notify(format!(
+        "{} not asked: mentions are sent with a message, not with a command",
+        names_of(calls)
+    ));
+}
+
+/// "Castor", "Castor and Pollux", "A, B and C" (each name once, in order).
+fn names_of(calls: &[crate::mention::MentionCall]) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for c in calls {
+        if !names.contains(&c.name.as_str()) {
+            names.push(&c.name);
+        }
+    }
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
