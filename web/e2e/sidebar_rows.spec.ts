@@ -33,8 +33,7 @@ function automations(): unknown {
     item.next_run_at = next;
     item.next_fire_at = next;
   });
-  // One rule too long for a desktop row even in its compact form (five weekdays): it must leave
-  // the line whole, never be cut.
+  // A calendar rule on five weekdays (its compact form names them "Weekdays").
   const news = list.items[1];
   news.trigger = { ...news.trigger, source_version: 2, config: { kind: "weekly", days: ["mon", "tue", "wed", "thu", "fri"], at: "09:00", time_zone: "Europe/Paris" } };
   news.schedule_rule_text = "Every Monday, Tuesday, Wednesday, Thursday and Friday at 09:00 (Europe/Paris)";
@@ -164,30 +163,25 @@ async function checkRows(page: Page, heights: (selector: string) => Promise<numb
   expect(await clamped(TITLES.two)).toBe(false);
   expect(await clamped(TITLES.long)).toBe(true); // two lines shown, ending in "…"
 
-  // The meta row: one line, in words (what is on screen, generated words included).
+  // The details line is the kit's symbol row, as before (operator 2026-11-08: "put them back"):
+  // each figure keeps its icon; only the automation's schedule reads in its compact form.
   const meta = (title: string) => row(page, title).locator(".af-session-card__meta");
-  // "1+ turn" on the line when the gateway's list was cut (has_more); its accessible label keeps
-  // the kit's "At least 1 turn".
-  const shortLine = await rendered(meta(TITLES.short));
-  expect(shortLine).toMatch(/^1\+? turn · (just now|\d+ min ago)$/);
-  if (shortLine.startsWith("1+")) await expect(meta(TITLES.short).locator("[aria-label]").first()).toHaveAttribute("aria-label", "At least 1 turn");
-  expect(await meta(TITLES.short).evaluate((el) => el.getBoundingClientRect().height < 24)).toBe(true);
+  const symbols = (loc: import("@playwright/test").Locator) => loc.locator("svg").evaluateAll((svgs) => svgs.filter((s) => getComputedStyle(s).display !== "none" && s.getBoundingClientRect().width > 0).length);
+  expect(await symbols(meta(TITLES.short)), "conversation: chat + clock").toBe(2);
+  expect(await rendered(meta(TITLES.short))).toMatch(/^≥?1 (just now|\d+ min ago)$/);
   const morning = page.locator(".code-automation-item .af-session-card").filter({ hasText: "Morning briefing" });
-  // The schedule in its compact form, from the rule's structure (the fixture's daily 08:00 rule).
-  expect(await rendered(morning.locator(".af-session-card__meta"))).toMatch(/^7 runs · Daily 08:00 · next 2[12]h$/);
-  // It needs you: "Needs you" instead of the next run; the new-results count stays on the row.
+  expect(await symbols(morning.locator(".af-session-card__meta")), "automation: runs + schedule + next").toBe(3);
+  // The schedule in its compact form beside its clock, from the rule's structure (daily 08:00).
+  expect(await rendered(morning.locator(".af-session-card__meta"))).toMatch(/^7 Daily 08:00 2[12]h$/);
   const triage = page.locator(".code-automation-item .af-session-card").filter({ hasText: "Inbox triage" });
-  const triageLine = await rendered(triage.locator(".af-session-card__meta"));
-  expect(triageLine).toMatch(/^7 runs · (Every 30 min · )?Needs you 2$/);
-  // When the schedule had to leave this busier line, the row's tooltip names it.
-  if (!triageLine.includes("Every 30 min")) await expect(triage.locator(".af-session-card__open")).toHaveAttribute("data-af-tip", "Every 30 minutes (UTC)");
-  // Too long even compact: the schedule leaves the line whole, and the row's tooltip says it.
+  expect(await symbols(triage.locator(".af-session-card__meta")), "a waiting automation keeps every symbol").toBe(3);
+  expect(await rendered(triage.locator(".af-session-card__meta"))).toMatch(/^7 Every 30 min \d+m Needs you 2$/);
   const news = page.locator(".code-automation-item").filter({ hasText: "AI news monitor" });
-  expect(await rendered(news.locator(".af-session-card__meta"))).toMatch(/^6 runs · next [56]h$/);
-  await expect(news.locator(".af-session-card__open")).toHaveAttribute("data-af-tip", "Every Monday, Tuesday, Wednesday, Thursday and Friday at 09:00 (Europe/Paris)");
-  // Nothing is ever cut inside a row's details: no part and no line wider than its box.
+  expect(await symbols(news.locator(".af-session-card__meta"))).toBe(3);
+  expect(await rendered(news.locator(".af-session-card__meta"))).toMatch(/^6 Weekdays 09:00 [56]h$/);
+  // Nothing is cut inside a row's details (the symbol row wraps instead).
   const cut = await page.locator(".code-sidebar .af-session-card__meta").evaluateAll((metas) => metas.flatMap((m) =>
-    [m, ...Array.from(m.children)].filter((el) => getComputedStyle(el).display !== "none" && (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth + 1).map((el) => el.textContent || el.className)));
+    [m, ...Array.from(m.querySelectorAll("*"))].filter((el) => getComputedStyle(el).display !== "none" && (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth + 1).map((el) => el.textContent || el.className)));
   expect(cut).toEqual([]);
   // The state marker and the count sit in one column at the right edge.
   const centreX = (loc: import("@playwright/test").Locator) => loc.evaluate((el) => { const r = el.getBoundingClientRect(); return Math.round(r.left + r.width / 2); });
@@ -237,8 +231,9 @@ function rendered(meta: import("@playwright/test").Locator): Promise<string> {
 }
 
 // The operator's gateway answers every listing with has_more: the counts are lower bounds. The
-// line reads "N+ turns" (short, nothing cut); the row's accessible label keeps "At least N turns".
-test("counts the gateway gives as a lower bound read N+ on the line", async ({ page }) => {
+// row keeps the kit's compact form ("≥1" beside the chat symbol, "At least 1 turn" for screen
+// readers and the tooltip), never a sentence.
+test("counts the gateway gives as a lower bound keep the kit's ≥ beside the symbol", async ({ page }) => {
   test.setTimeout(120_000);
   await page.route("**/api/gateway/runs?*", async (route) => {
     const url = new URL(route.request().url());
@@ -254,6 +249,7 @@ test("counts the gateway gives as a lower bound read N+ on the line", async ({ p
   await open(page, "observer-night");
   await seedConversations(page);
   const line = row(page, TITLES.short).locator(".af-session-card__meta");
-  await expect.poll(() => rendered(line)).toMatch(/^1\+ turn · (just now|\d+ min ago)$/);
+  await expect.poll(() => rendered(line)).toMatch(/^≥1 (just now|\d+ min ago)$/);
   await expect(line.locator("[aria-label]").first()).toHaveAttribute("aria-label", "At least 1 turn");
+  expect(await line.locator("svg").count()).toBe(2);
 });

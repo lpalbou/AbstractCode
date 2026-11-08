@@ -45,8 +45,12 @@ Same AbstractUIC as web 0.15.14 (0.10.13).
 - **The sidebar's section headers have a colour each** (operator 2026-11-08: "at least use some colors for the
   headers"): Conversations in the theme's information blue, Automations in the amber "Needs you" already uses; the
   count beside Automations wears the same amber. Light and dark themes.
-- **Counts the gateway gives as a lower bound read "4+ turns" / "2+ tool calls"** on the row instead of "At least 4
-  turns" (the gateway answers a long list with "more exist"); screen readers still hear "At least 4 turns".
+- **The symbols are back on every row** (operator: "put them back"): a conversation reads its chat icon and turn count,
+  its wrench and tool-call count (when there are any) and its clock and time, exactly as the shared card draws them
+  (a count the gateway gives as a lower bound keeps its "≥", "At least N turns" for screen readers); an automation
+  reads its runs, schedule and next-run symbols, "Needs you" and its new-results count. The words 0.15.13 and 0.15.14
+  had put in their place are gone. Only the automation's schedule keeps its compact form, beside the same clock
+  ("Daily 08:00", "Every 30 min", "Weekdays 09:00"). The line wraps rather than cutting anything.
 
 ## [web 0.15.14] - 2026-11-08 (local build, not published)
 

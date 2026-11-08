@@ -93,7 +93,11 @@ export function compactSchedule(s: Pick<AutomationSummary, "status" | "trigger">
   if (typeof c.every === "string") return intervalWords(c.every);
   if (c.kind === "daily") return time ? `Daily ${time}` : "Daily";
   if (c.kind === "weekly") {
-    const days = (Array.isArray(c.days) ? c.days : []).map((d) => WEEKDAYS[String(d)] || "").filter(Boolean).join(", ");
+    const set = new Set((Array.isArray(c.days) ? c.days : []).map((d) => String(d)));
+    // The two common sets by name (the recorded days, not a guess): every day, Monday to Friday.
+    if (set.size === 7 && Object.keys(WEEKDAYS).every((d) => set.has(d))) return time ? `Daily ${time}` : "Daily";
+    if (set.size === 5 && ["mon", "tue", "wed", "thu", "fri"].every((d) => set.has(d))) return time ? `Weekdays ${time}` : "Weekdays";
+    const days = Object.keys(WEEKDAYS).filter((d) => set.has(d)).map((d) => WEEKDAYS[d]).join(", ");
     return ["Weekly", days, time].filter(Boolean).join(" ");
   }
   if (c.kind === "monthly") {
@@ -106,60 +110,27 @@ export function compactSchedule(s: Pick<AutomationSummary, "status" | "trigger">
 }
 
 /**
- * A sidebar row shows nothing cut (ADR 0053 §2). Its name keeps two lines; a longer one ends in
- * "…" and the whole name is the kit tooltip of the row's button (hover and keyboard focus). Its
- * details are one line: when they do not fit, whole parts leave the line, lowest value first
- * (`drop`: the schedule, then the tool count, then the next run), never an ellipsis inside a part;
- * what left is said in the same tooltip, and stays in the conversation or automation details.
- * `schedule` puts the compact schedule words on the automation's schedule part.
+ * A sidebar row's name keeps two lines; a longer one ends in "…" and the whole name is the kit
+ * tooltip of the row's button (hover and keyboard focus; ADR 0053 §2). A name that fits carries no
+ * tooltip, and the title's own `title` is removed so the browser shows no second one. The details
+ * line is the kit's symbol row, untouched, except `schedule`: the automation's compact schedule
+ * words beside its clock symbol.
  */
-export function useRevealClampedTitle(
-  title: string,
-  schedule = "",
-  /** The gateway's counts when its list was cut (`has_more`): the line reads "4+ turns" (the kit's
-   * accessible label keeps "At least 4 turns"). */
-  counts?: { partial?: boolean; turns?: number; tools?: number },
-): React.RefObject<HTMLDivElement> {
+export function useRevealClampedTitle(title: string, schedule = ""): React.RefObject<HTMLDivElement> {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const root = ref.current;
     const name = root?.querySelector<HTMLElement>(".af-session-card__title");
     const button = root?.querySelector<HTMLElement>(".af-session-card__open");
-    const meta = root?.querySelector<HTMLElement>(".af-session-card__meta");
     if (!root || !name || !button) return;
     name.removeAttribute("title");
-    // Recomputed after every render (the kit re-renders the figures: a next run time changes).
-    for (const el of Array.from(meta?.children || [])) if (el.hasAttribute("data-drop")) el.removeAttribute("data-drop");
-    const cadence = meta?.querySelector<HTMLElement>('[data-field="cadence"]') || null;
+    const cadence = root.querySelector<HTMLElement>('.af-session-card__meta > [data-field="cadence"]');
     if (cadence) {
-      if (schedule) cadence.setAttribute("data-short", schedule);
-      else cadence.setAttribute("data-drop", "empty");
+      if (schedule && cadence.getAttribute("data-short") !== schedule) cadence.setAttribute("data-short", schedule);
+      else if (!schedule && cadence.hasAttribute("data-short")) cadence.removeAttribute("data-short");
     }
-    // Counts the gateway gave as a lower bound: "4+ turns", "2+ tool calls" on the line.
-    for (const el of Array.from(meta?.children || []) as HTMLElement[]) {
-      const label = el.getAttribute("aria-label") || "";
-      if (!label || el.getAttribute("data-field") === "cadence") continue;
-      const isTurns = label.endsWith(" turn") || label.endsWith(" turns");
-      const isTools = label.endsWith(" tool call") || label.endsWith(" tool calls");
-      const n = isTurns ? counts?.turns : isTools ? counts?.tools : undefined;
-      const short = counts?.partial && typeof n === "number" ? `${n}+ ${isTurns ? (n === 1 ? "turn" : "turns") : n === 1 ? "tool call" : "tool calls"}` : "";
-      if (short) { if (el.getAttribute("data-short") !== short) el.setAttribute("data-short", short); }
-      else if (el.hasAttribute("data-short")) el.removeAttribute("data-short");
-    }
-    // While an automation needs you, "Needs you" says more than the next run time.
-    const next = meta?.querySelector<HTMLElement>('[data-field="next"]') || null;
-    if (next && meta?.querySelector(".af-session-card__attention")) next.setAttribute("data-drop", "attention");
-    const tools = meta ? Array.from(meta.children).find((el) => /tool call/.test(el.getAttribute("aria-label") || "")) as HTMLElement | undefined : undefined;
-    const droppable = [cadence, tools || null, next].filter((el): el is HTMLElement => Boolean(el) && el!.getAttribute("data-drop") !== "empty" && el!.getAttribute("data-drop") !== "attention");
     const update = () => {
-      for (const el of droppable) el.removeAttribute("data-drop");
-      const dropped: string[] = [];
-      for (const el of droppable) {
-        if (!meta || meta.scrollWidth <= meta.clientWidth + 1) break;
-        el.setAttribute("data-drop", "fit");
-        dropped.push(el.getAttribute("title") || el.getAttribute("aria-label") || el.textContent || "");
-      }
-      const tip = [name.scrollHeight > name.clientHeight + 1 ? title : "", ...dropped.filter(Boolean)].filter(Boolean).join(" · ");
+      const tip = name.scrollHeight > name.clientHeight + 1 ? title : "";
       // Written only when it changes: the kit tooltip hides when its sentence is rewritten.
       if (tip && button.getAttribute("data-af-tip") !== tip) button.setAttribute("data-af-tip", tip);
       else if (!tip && button.hasAttribute("data-af-tip")) button.removeAttribute("data-af-tip");
@@ -187,7 +158,7 @@ export function ConversationCard(props: {
 }): React.ReactElement {
   const { item } = props;
   const title = conversationTitle(item);
-  const reveal = useRevealClampedTitle(title, "", { partial: item.truncated, turns: item.turnCount, tools: item.toolCalls });
+  const reveal = useRevealClampedTitle(title);
   return (
     <div ref={reveal} className={`code-session-item${props.confirm ? " is-confirming" : ""}`} data-item-id={item.sessionId}>
       <SessionCard sessionId={item.sessionId} title={title} selected={props.selected} unread={props.unread}

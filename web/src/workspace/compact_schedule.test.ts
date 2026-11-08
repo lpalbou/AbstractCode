@@ -19,6 +19,9 @@ describe("compactSchedule", () => {
     expect(compactSchedule(row({ kind: "daily", at: "08:00", time_zone: "Europe/Paris" }))).toBe("Daily 08:00");
     expect(compactSchedule(row({ kind: "weekly", days: ["mon"], at: "09:00" }))).toBe("Weekly Mon 09:00");
     expect(compactSchedule(row({ kind: "weekly", days: ["mon", "thu"], at: "09:30" }))).toBe("Weekly Mon, Thu 09:30");
+    expect(compactSchedule(row({ kind: "weekly", days: ["thu", "mon"], at: "09:30" }))).toBe("Weekly Mon, Thu 09:30");
+    expect(compactSchedule(row({ kind: "weekly", days: ["mon", "tue", "wed", "thu", "fri"], at: "09:00" }))).toBe("Weekdays 09:00");
+    expect(compactSchedule(row({ kind: "weekly", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], at: "07:00" }))).toBe("Daily 07:00");
     expect(compactSchedule(row({ kind: "monthly", day: 1, at: "07:00" }))).toBe("Monthly 1st 07:00");
     expect(compactSchedule(row({ kind: "monthly", day: 22, at: "07:00" }))).toBe("Monthly 22nd 07:00");
     expect(compactSchedule(row({ kind: "monthly", day: "last", at: "18:00" }))).toBe("Monthly last day 18:00");

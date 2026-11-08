@@ -2906,11 +2906,9 @@ select option {
    Sidebar rows (operator 2026-11-08: "I am not a huge fan of the design" of the session and
    automation cards). The kit's SessionCard / AutomationCard, restyled in the sidebar only as
    quiet list rows (ADR 0053): no card chrome, one rhythm (8 px rows, 12 px sides, 2 px between
-   rows), one type scale (title 13 px medium, meta 12 px muted), every row the same height (the
-   title keeps room for two lines; a longer name ends in "…" and is shown whole in the kit tooltip,
-   sidebar_cards.tsx), the active row a tone and a hairline, hover and focus calm but visible.
-   The meta row is one line of words: the kit's own labels for each figure ("3 turns",
-   "7 runs", "Every day at 08:00 (Europe/Paris)", "Next run in 21h"), separated by "·".
+   rows), the title 13 px medium, every row the same height (a longer name ends in "…" and is shown
+   whole in the kit tooltip, sidebar_cards.tsx), the active row a tone and a hairline, hover and
+   focus calm but visible. The details line stays the kit's own symbol row (below).
    =========================================================================== */
 .code-sidebar .code-session-item,
 .code-sidebar .code-automation-item,
@@ -2929,12 +2927,13 @@ select option {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
 }
-/* Every row the height of a two-line name and its meta line; shorter content is centred. */
+/* Every row the same height: room for a two-line name and one symbol line, or a one-line name and
+   a symbol line that wrapped; shorter content is centred. */
 .code-sidebar .af-session-card__open {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  min-height: calc(16px + 2 * 1.35 * var(--code-row-title) + 4px + 1.35 * var(--font-size-sm, 12px));
+  min-height: calc(16px + max(2 * 1.35 * var(--code-row-title) + 4px + 1.3 * var(--font-size-xs, 12px), 1.35 * var(--code-row-title) + 4px + 2 * 1.3 * var(--font-size-xs, 12px) + 4px));
   padding: 8px 12px;
   border-radius: 8px;
 }
@@ -2956,32 +2955,14 @@ select option {
 .code-sidebar .af-session-card__marker.is-working {
   margin: calc((1.35 * var(--code-row-title) - 9px) / 2) calc((20px - 9px) / 2) 0 auto;
 }
-.code-sidebar .af-session-card .af-session-card__meta {
-  flex-wrap: nowrap;
-  gap: 6px;
-  margin-top: 4px;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm, 12px);
-  line-height: 1.35;
-}
-.code-sidebar .af-session-card__meta svg { display: none; }
-.code-sidebar .af-session-card__meta > span[aria-label] > span[aria-hidden="true"] { display: none; }
-.code-sidebar .af-session-card__meta > span[aria-label]:not(.af-automation-card__unseen)::before { content: attr(aria-label); }
-.code-sidebar .af-session-card__meta > span { flex: none; gap: 0; }
-/* Nothing is cut inside the details line: a part that does not fit leaves the line whole
-   (sidebar_cards.tsx sets data-drop; the row's tooltip names it), and the automation's schedule
-   reads in its compact form (data-short: "Daily 08:00", "Every 8 h"). */
-.code-sidebar .af-session-card__meta > [data-drop] { display: none; }
-.code-sidebar .af-session-card__meta > span[aria-label][data-short]:not(.af-automation-card__unseen)::before { content: attr(data-short); }
-/* "next 5h": the kit's own short value after one word. */
-.code-sidebar .af-session-card__meta > span[aria-label][data-field="next"]:not(.af-automation-card__unseen)::before { content: "next "; white-space: pre; }
-.code-sidebar .af-session-card__meta > span[aria-label][data-field="next"] > span[aria-hidden="true"] { display: inline; }
-/* "·" between the parts still on the line (dropped ones and the count excluded). */
-.code-sidebar .af-session-card__meta > span:not([data-drop]):has(~ span:not([data-drop]):not(.af-automation-card__unseen))::after {
-  content: "·";
-  margin-left: 6px;
-}
+/* The details line is the kit's symbol row, as before (operator 2026-11-08: "put them back"):
+   chat icon + turns, wrench + tool calls, clock + time; for an automation loop + runs, clock +
+   schedule, play + next run, "Needs you", the new-results count. It wraps rather than cutting.
+   Only the automation's schedule words change: the compact form from the rule's fields (data-short,
+   "Daily 08:00", "Every 30 min"), beside the same clock symbol. */
+.code-sidebar .af-session-card .af-session-card__meta { flex-wrap: wrap; row-gap: 4px; }
+.code-sidebar .af-session-card__meta > [data-field="cadence"][data-short] > span[aria-hidden="true"] { display: none; }
+.code-sidebar .af-session-card__meta > [data-field="cadence"][data-short]::after { content: attr(data-short); }
 .code-sidebar .af-session-card__meta > .af-automation-card__unseen {
   margin-left: auto;
   min-width: 20px;
@@ -2992,9 +2973,6 @@ select option {
   text-align: center;
 }
 .code-sidebar .af-session-card__attention { color: var(--warning); }
-@media (pointer: coarse) {
-  .code-sidebar .af-session-card__meta { font-size: max(13px, var(--font-size-sm, 12px)); }
-}
 /* With a mouse the archive button floats over the row's right edge on hover/focus instead of
    reserving its width on every row (the details line keeps that room); on touch it stays in place. */
 @media (hover: hover) and (pointer: fine) {
