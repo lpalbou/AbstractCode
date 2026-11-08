@@ -303,6 +303,8 @@ export function CodeWorkspace() {
   const stoppingStart = Boolean(stopping);
   // Stops an earlier page of this tab left behind that match more than one run: the person chooses.
   const [stopChoices, setStopChoices] = useState<PendingStop[]>([]);
+  // Stops dropped without a match: the conversation says so until dismissed.
+  const [stopMisses, setStopMisses] = useState<PendingStop[]>([]);
   const [stopsVersion, setStopsVersion] = useState(0);
   const unloadingRef = useRef(false);
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
@@ -1042,6 +1044,10 @@ export function CodeWorkspace() {
       if (avatarMode) Object.assign(body, { conversation: true });
       // Stop pressed before the start left: nothing is started, nothing to cancel.
       if (signal?.aborted) throw new DOMException("Stopped before the run started.", "AbortError");
+      // Sending again here: a stop an earlier page left for this conversation no longer applies,
+      // and is dropped BEFORE this start leaves, so its run can never be taken for that stop's.
+      forgetStopsOfConversation(startedSession);
+      const sentAt = Date.now();
       // Stop pressed while the gateway is starting the run (review 2026-11-08 D1, D3, R12): the
       // press is answered now ("Stopping…" at the top, the message box cleared and free) and kept
       // in this tab until the run the gateway returns is cancelled, even if the person reloads or
@@ -1052,7 +1058,7 @@ export function CodeWorkspace() {
         identityRef.current === startedIdentity &&
         authEpoch.current === startedEpoch;
       const onStop = () => {
-        pendingStop = rememberStopWhileStarting(startedSession);
+        pendingStop = rememberStopWhileStarting(startedSession, sentAt);
         if (!sameConversation()) return;
         setStopping({ pressId: pendingStop, runId: "", text: text.trim() });
         setDraft("");
@@ -1121,8 +1127,6 @@ export function CodeWorkspace() {
       )
         throw staleSendAbort();
       attachedRun = String(result.run_id);
-      // A new run here: a stop an earlier page left for this conversation no longer applies.
-      forgetStopsOfConversation(startedSession);
       startedRunInput.current = { runId: attachedRun, input };
       // "@default" resolves at every start: refresh the label from each one.
       setResolvedNote({
@@ -1346,9 +1350,10 @@ export function CodeWorkspace() {
     const run = () => {
       timer = undefined;
       if (typeof document !== "undefined" && document.hidden) return;
-      void finishPendingStops().then(({ waiting, choices }) => {
+      void finishPendingStops().then(({ waiting, choices, dropped }) => {
         if (!alive) return;
         setStopChoices(choices);
+        if (dropped.length) setStopMisses((list) => [...list, ...dropped]);
         if (waiting && !timer) timer = setTimeout(run, 3_000);
       });
     };
@@ -2039,18 +2044,27 @@ export function CodeWorkspace() {
                 </button>
               </div>
             ) : null}
-            {stopChoices.filter((c) => c.sessionId === session.sessionId).map((choice) => (
-              <div key={choice.id} className="code-notice code-stop-choice" role="status">
-                <span>
-                  You pressed Stop while a message was starting, then the page reloaded. {choice.candidates?.length} runs of this
-                  conversation started at that moment; Code will not guess which one you meant.
-                </span>
-                {(choice.candidates || []).map((c) => (
-                  <button key={c.runId} type="button" onClick={() => chooseStop(choice, c.runId)}>
-                    Stop the run started at {new Date(c.createdAt).toLocaleTimeString()}
-                  </button>
-                ))}
-                <button type="button" onClick={() => chooseStop(choice, null)}>Keep them running</button>
+            {stopChoices.filter((c) => c.sessionId === session.sessionId).map((choice) => {
+              const count = choice.candidates?.length || 0;
+              return (
+                <div key={choice.id} className="code-stop-choice" role="status">
+                  <span>
+                    You pressed Stop while a message was starting, then the page reloaded. {count} replies of this
+                    conversation started at that moment; Code will not guess which one you meant.
+                  </span>
+                  {(choice.candidates || []).map((c, index) => (
+                    <button key={c.runId} type="button" className="af-setting-btn" onClick={() => chooseStop(choice, c.runId)}>
+                      Stop the reply started at {new Date(c.createdAt).toLocaleTimeString()} ({index + 1} of {count})
+                    </button>
+                  ))}
+                  <button type="button" className="af-setting-btn af-setting-btn--quiet" onClick={() => chooseStop(choice, null)}>Keep them</button>
+                </div>
+              );
+            })}
+            {stopMisses.filter((m) => m.sessionId === session.sessionId).map((miss) => (
+              <div key={miss.id} className="code-stop-choice" role="status">
+                <span>The stop you pressed before the reload could not be matched to a reply; if a reply appears here, stop it.</span>
+                <button type="button" className="af-setting-btn af-setting-btn--quiet" onClick={() => setStopMisses((list) => list.filter((m) => m.id !== miss.id))}>Dismiss</button>
               </div>
             ))}
             {notice ? (

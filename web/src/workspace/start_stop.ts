@@ -8,26 +8,33 @@ import { gatewayRequest, newId } from "./transport";
  * The tab also keeps the stop in sessionStorage until that cancel is accepted, for one case only:
  * the page went away (a reload) before the start answered. The next page of the tab then looks
  * for the run that start created and NEVER guesses:
- * - exactly one unfinished run of that conversation started in the press's own window
- *   (1 s before … 60 s after the press): it is cancelled;
+ * - exactly one unfinished run of that conversation started in the start's own window
+ *   (1 s before the Send … 60 s after the Stop): it is cancelled;
  * - none yet: the stop keeps waiting (the gateway may still be creating it), at most
- *   `WAIT_FOR_RUN_MS` after the press, then it is dropped;
+ *   `WAIT_FOR_RUN_MS` after the press, then it is dropped and the conversation says so;
  * - more than one: nothing is cancelled; the conversation shows the candidates and the person
  *   stops the one they meant (`ambiguous`).
- * A stop is dropped when the tab starts a new run in that conversation (the person moved on), and
- * when the start failed (the gateway refused it, or the network cut it in a page still here).
+ * A stop is dropped the moment this tab sends again in that conversation (before that start
+ * leaves, so the new run can never be its match), and when the start failed (the gateway refused
+ * it, or the network cut it in a page still here).
+ *
+ * Known limit: a run started in ANOTHER tab of the same conversation inside the window is a
+ * candidate too (only a start id echoed by the gateway could tell them apart).
  */
 export type PendingStop = {
   id: string;
   sessionId: string;
+  /** When the Stop was pressed. */
   at: number;
+  /** When the start left (the gateway may create the run any time after it). */
+  sentAt?: number;
   runId?: string;
   /** Set when more than one run matches: the person chooses (never a guess). */
   candidates?: Array<{ runId: string; createdAt: string }>;
 };
 
 const KEY = "abstractcode.stop-while-starting.v1";
-/** The press's window: a run this start created was created between these bounds. */
+/** The start's window: a run this start created was created between these bounds (Send − 1 s … Stop + 60 s). */
 export const WINDOW_BEFORE_MS = 1_000;
 export const WINDOW_AFTER_MS = 60_000;
 /** How long a reloaded stop waits for its run to be listed before it is dropped. */
@@ -68,9 +75,10 @@ function save(list: PendingStop[]): void {
 }
 
 /** Remember a Stop pressed while the conversation `sessionId` was starting a run; returns its id. */
-export function rememberStopWhileStarting(sessionId: string): string {
+export function rememberStopWhileStarting(sessionId: string, sentAt?: number): string {
   const id = newId();
-  save([...pendingStops(), { id, sessionId, at: Date.now() }]);
+  const at = Date.now();
+  save([...pendingStops(), { id, sessionId, at, sentAt: typeof sentAt === "number" ? Math.min(sentAt, at) : at }]);
   return id;
 }
 
@@ -101,6 +109,8 @@ export async function cancelStartedRun(runId: string): Promise<void> {
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
+const stillPending = (id: string): boolean => pendingStops().some((p) => p.id === id);
+
 /** The unfinished runs of the conversation created inside the press's window. */
 async function runsInWindow(p: PendingStop): Promise<Array<{ runId: string; createdAt: string }>> {
   const query = new URLSearchParams({ session_id: p.sessionId, root_only: "true", limit: "20", include_ledger_len: "false" });
@@ -108,7 +118,7 @@ async function runsInWindow(p: PendingStop): Promise<Array<{ runId: string; crea
   return (Array.isArray(answer?.items) ? answer.items : [])
     .filter((run) => {
       const created = Date.parse(String(run.created_at || ""));
-      return Number.isFinite(created) && created >= p.at - WINDOW_BEFORE_MS && created <= p.at + WINDOW_AFTER_MS && !TERMINAL.has(String(run.status || ""));
+      return Number.isFinite(created) && created >= (p.sentAt ?? p.at) - WINDOW_BEFORE_MS && created <= p.at + WINDOW_AFTER_MS && !TERMINAL.has(String(run.status || ""));
     })
     .map((run) => ({ runId: String(run.run_id || ""), createdAt: String(run.created_at || "") }))
     .filter((run) => Boolean(run.runId));
@@ -119,7 +129,8 @@ async function runsInWindow(p: PendingStop): Promise<Array<{ runId: string; crea
  * Returns the stops still waiting for their run (the caller tries again later) and those that
  * need the person's choice.
  */
-export async function finishPendingStops(now = () => Date.now()): Promise<{ waiting: number; choices: PendingStop[] }> {
+export async function finishPendingStops(now = () => Date.now()): Promise<{ waiting: number; choices: PendingStop[]; dropped: PendingStop[] }> {
+  const dropped: PendingStop[] = [];
   for (const p of pendingStops()) {
     if (p.candidates) continue; // the person decides
     try {
@@ -129,18 +140,23 @@ export async function finishPendingStops(now = () => Date.now()): Promise<{ wait
         continue;
       }
       const runs = await runsInWindow(p);
+      // The list took time: the person may have sent again meanwhile (the stop was dropped then),
+      // and a run listed now may be that new one. Act only on a stop that is still pending.
+      if (!stillPending(p.id)) continue;
       if (runs.length === 1) {
         await cancelStartedRun(runs[0].runId);
         forgetStopWhileStarting(p.id);
       } else if (runs.length > 1) {
         save(pendingStops().map((q) => (q.id === p.id ? { ...q, candidates: runs } : q)));
       } else if (now() - p.at > WAIT_FOR_RUN_MS) {
-        forgetStopWhileStarting(p.id); // no run was created for it
+        // No run to match: dropped, and said in that conversation (never a silent give-up).
+        forgetStopWhileStarting(p.id);
+        dropped.push(p);
       }
     } catch {
       /* kept: tried again */
     }
   }
   const left = pendingStops();
-  return { waiting: left.filter((p) => !p.candidates).length, choices: left.filter((p) => Boolean(p.candidates)) };
+  return { waiting: left.filter((p) => !p.candidates).length, choices: left.filter((p) => Boolean(p.candidates)), dropped };
 }

@@ -412,7 +412,7 @@ test("a left-behind stop waits only while the tab is visible, and never guesses 
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   const choice = page.locator(".code-stop-choice");
   await expect(choice).toBeVisible({ timeout: 10_000 });
-  await expect(choice.getByRole("button", { name: /^Stop the run started at / })).toHaveCount(2);
+  await expect(choice.getByRole("button", { name: /^Stop the reply started at .* \((1|2) of 2\)$/ })).toHaveCount(2);
   expect(commands).toEqual([]); // nothing guessed
   // The waiting stop asks every 3 s while visible ...
   await expect.poll(() => lists.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
@@ -426,10 +426,71 @@ test("a left-behind stop waits only while the tab is visible, and never guesses 
   await expect.poll(() => lists.length, { timeout: 5_000 }).toBeGreaterThan(hiddenFrom);
   await shot(page, "stop-choice-desktop");
   // The person chooses: that run (and only it) is stopped; the choice is gone.
-  await choice.getByRole("button", { name: /^Stop the run started at / }).first().click();
+  await page.setViewportSize({ width: 400, height: 860 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await shot(page, "stop-choice-400");
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await choice.getByRole("button", { name: /^Stop the reply started at .*\(1 of 2\)$/ }).click();
   await expect(choice).toHaveCount(0);
   await expect.poll(() => commands.length).toBe(1);
   expect(commands[0]).toMatchObject({ run_id: runs[0].id, type: "cancel" });
   const left = await page.evaluate(() => JSON.parse(sessionStorage.getItem("abstractcode.stop-while-starting.v1") || "[]").map((p: any) => p.id));
   expect(left).toEqual(["wait"]);
+});
+
+// R13 + R14 (review 2026-11-08): sending again in a conversation drops a stop an earlier page left
+// there BEFORE the start leaves, so the new run is never taken for that stop's run (the start's
+// answer is held 4 s while the tab's retry lists the conversation); and a stop that finds no run
+// is dropped with a sentence in its conversation, never silently.
+test("sending again drops a left-behind stop before the start leaves; an unmatched stop says so", async ({ page }) => {
+  test.setTimeout(120_000);
+  const allowed = new URL(appOrigin).origin;
+  const commands: any[] = [];
+  let hold = 0;
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== allowed) return route.abort("blockedbyclient");
+    if (url.pathname.endsWith("/api/gateway/commands")) commands.push(route.request().postDataJSON());
+    if (!url.pathname.endsWith("/api/gateway/runs/start") || !hold) return route.continue();
+    const response = await route.fetch();
+    await new Promise((r) => setTimeout(r, hold));
+    return route.fulfill({ response });
+  });
+  await signIn(page);
+  await chooseWorkflow(page, "Event listener");
+  const strip = page.locator(".code-run-strip");
+  const primary = page.locator(".code-conversation .pc-composer .pc-composer__send--compact");
+  const box = page.locator(".code-conversation .pc-composer textarea");
+  await box.fill("First turn.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(strip).toContainText("Working");
+  await primary.click();
+  await expect(strip).toContainText("Stopped", { timeout: 20_000 });
+  const sessionId = String(new URLSearchParams(new URL(page.url()).hash.slice(1)).get("session"));
+  const before = commands.length;
+  // A stop an earlier page left here, waiting for its run (none listed yet).
+  await page.evaluate((sid) => sessionStorage.setItem("abstractcode.stop-while-starting.v1", JSON.stringify([{ id: "left", sessionId: sid, at: Date.now(), sentAt: Date.now() }])), sessionId);
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  // Send again; its answer is held 4 s while the retry runs every 3 s.
+  hold = 4000;
+  await box.fill("Second turn, not to be stopped.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("abstractcode.stop-while-starting.v1"))).toBeNull();
+  await page.waitForTimeout(6_000);
+  hold = 0;
+  await expect(strip).toContainText("Working", { timeout: 20_000 });
+  expect(commands.slice(before)).toEqual([]);
+  // A stop whose run never appears: dropped after its wait, and said in its conversation.
+  await page.evaluate((sid) => sessionStorage.setItem("abstractcode.stop-while-starting.v1", JSON.stringify([{ id: "gone", sessionId: sid, at: Date.now() - 200_000, sentAt: Date.now() - 200_000 }])), sessionId);
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  const miss = page.locator(".code-stop-choice");
+  await expect(miss).toContainText("The stop you pressed before the reload could not be matched to a reply; if a reply appears here, stop it.", { timeout: 10_000 });
+  expect(commands.slice(before)).toEqual([]);
+  await shot(page, "stop-unmatched-desktop");
+  await page.setViewportSize({ width: 400, height: 860 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await shot(page, "stop-unmatched-400");
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await miss.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await expect(miss).toHaveCount(0);
 });

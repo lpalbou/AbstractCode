@@ -42,7 +42,7 @@ describe("stop while starting", () => {
   it("cancels by id once the start answered", async () => {
     const id = rememberStopWhileStarting("s1");
     noteStartedRun(id, "run-7");
-    expect(await finishPendingStops()).toEqual({ waiting: 0, choices: [] });
+    expect(await finishPendingStops()).toEqual({ waiting: 0, choices: [], dropped: [] });
     expect(cancels()).toEqual(["run-7"]);
     expect(pendingStops()).toHaveLength(0);
   });
@@ -60,6 +60,15 @@ describe("stop while starting", () => {
     expect(calls[0].url).toContain("session_id=s1");
     expect(cancels()).toEqual(["started"]);
     expect(pendingStops()).toHaveLength(0);
+  });
+
+  it("the window starts at the Send: a run created after the Send but more than 1 s before the Stop is matched (R14)", async () => {
+    const sentAt = Date.now() - 2_500;
+    rememberStopWhileStarting("s1", sentAt);
+    const at = pendingStops()[0].at;
+    runs = [run("slow-start", at - 1_500), run("before-send", sentAt - 5_000)];
+    await finishPendingStops();
+    expect(cancels()).toEqual(["slow-start"]);
   });
 
   it("two candidates: nothing is cancelled, the person chooses", async () => {
@@ -89,7 +98,10 @@ describe("stop while starting", () => {
     rememberStopWhileStarting("s2");
     runs = [];
     const at2 = pendingStops()[0].at;
-    expect((await finishPendingStops(() => at2 + WAIT_FOR_RUN_MS + 1)).waiting).toBe(0);
+    const late = await finishPendingStops(() => at2 + WAIT_FOR_RUN_MS + 1);
+    expect(late.waiting).toBe(0);
+    // Dropped without a match: returned, so the conversation says so (never silent).
+    expect(late.dropped.map((p) => p.sessionId)).toEqual(["s2"]);
     expect(pendingStops()).toHaveLength(0);
   });
 
@@ -105,6 +117,21 @@ describe("stop while starting", () => {
     cancelAnswer = { status: 200, body: { accepted: true } };
     await finishPendingStops();
     expect(pendingStops()).toHaveLength(0);
+  });
+
+  it("a stop dropped while its list is in flight (the person sent again) cancels nothing (R13)", async () => {
+    rememberStopWhileStarting("s1");
+    const at = pendingStops()[0].at;
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+      calls.push({ url, body: init.body ? JSON.parse(String(init.body)) : undefined });
+      if (url.startsWith("api/gateway/runs?")) {
+        forgetStopsOfConversation("s1"); // Send pressed while the list was on its way
+        return new Response(JSON.stringify({ items: [run("new-turn", at + 2_000)] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ accepted: true }), { status: 200 });
+    });
+    await finishPendingStops();
+    expect(cancels()).toEqual([]);
   });
 
   it("a new run started by the tab in that conversation drops the stop there (never cancels the new run)", async () => {

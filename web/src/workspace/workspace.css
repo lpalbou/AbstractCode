@@ -1181,16 +1181,23 @@ select option {
 .code-discovery-errors {
   display: block;
 }
-/* A reloaded Stop that matches several runs: the sentence, then one button per run (they wrap). */
+/* A Stop remembered across a reload that needs the person (several replies match, or none was
+ * found): the sentence, then the kit's buttons (they wrap). The same strip as a notice, without
+ * its underlined text buttons. */
 .code-stop-choice {
+  flex-shrink: 0;
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  font-size: var(--font-size-sm);
+  background: var(--info-subtle);
+  border-bottom: 1px solid var(--info-border);
 }
 .code-stop-choice > span {
   flex: 1 1 100%;
   overflow-wrap: anywhere;
-}
-.code-stop-choice button {
-  margin-left: 0;
 }
 .code-discovery-errors p {
   font-size: var(--font-size-xs);
@@ -1717,6 +1724,7 @@ select option {
   }
   .code-alert,
   .code-notice,
+  .code-stop-choice,
   .code-discovery-errors {
     padding: 9px 14px;
   }
