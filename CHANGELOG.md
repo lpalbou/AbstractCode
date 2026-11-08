@@ -36,6 +36,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the automation's keys, then the selected row's. Phone-width and short terminals stack the
   panels without frames and put the details at the end of the output.
 
+## [web 0.15.16] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.15 (`@abstractframework/panel-chat` 0.9.7, `@abstractframework/ui-kit` 0.9.25), vendored
+from local packs (installed with `--no-save`: the floors and the lockfile follow the kit publish).
+
+### Fixed
+
+- **A workflow waiting for an event says so again, and you can send the event by hand.** Since the conversation reads
+  the gateway's replay view (web 0.13.0), a run parked on an event with no question read "Working", and the
+  "Waiting for an event" card with "Event data (JSON)" and "Send event" was gone. Both are back.
+- **A turn that ends with its tools shows its figures again** ("1 tool · 1 file changed", tokens, time), under its
+  tool group: they used to ride only on a written reply.
+
+### Tests
+
+- The "live thinking" browser check feeds the replay view (what Code reads since 0.13.0) instead of the old ledger
+  bundle; its assertions are unchanged. The whole `workspace.spec.ts` (18 checks) passes on the test gateway.
+
 ## [web 0.15.15] - 2026-11-08 (local build, not published)
 
 Same AbstractUIC as web 0.15.14 (0.10.13).

@@ -4,7 +4,7 @@ import React from "react";
 import { type IconName } from "@abstractframework/ui-kit";
 import type { MarkdownImages } from "./markdown.js";
 import type { WorkflowStatistics, WorkflowToolActivity } from "./workflow_evidence.js";
-import { type StatDetail } from "./stat_detail.js";
+import { type ChatStat } from "./chat_stats.js";
 export type ChatMessageLevel = "info" | "warn" | "error";
 export type ChatMessage = {
     id?: string;
@@ -102,18 +102,7 @@ export type ChatAttachment = {
     disabled?: boolean;
     onClick?: () => void;
 };
-export type ChatStat = {
-    id?: string;
-    label: string;
-    /** A ONE-line hint. A multi-line explanation is a `detail` (the message footer spec:
-     *  every workflow chip opens the structured panel, never a native multi-line tooltip). */
-    title?: string;
-    icon?: React.ReactNode;
-    onClick?: () => void;
-    /** Structured detail (tokens / time / tools). When present the chip opens
-     *  a hover/focus panel instead of a native one-line `title`. */
-    detail?: StatDetail;
-};
+export type { ChatStat } from "./chat_stats.js";
 export type ChatMessageCardProps = {
     message: ChatMessage;
     className?: string;
