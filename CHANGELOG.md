@@ -16,6 +16,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.11] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.13 (`@abstractframework/panel-chat` 0.9.6, `@abstractframework/ui-kit` 0.9.24), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.10.
+
+### Fixed
+
+- **Stop while the second message of a conversation is starting.** The message vanished and the top bar kept the
+  previous answer's "Completed". Now "Stopping…" stays until the run of THIS message is shown stopped, and the
+  message stays on screen meanwhile.
+- **A Stop remembered across a reload never cancels the wrong run.** The next page cancels a run only when exactly one
+  unfinished run of that conversation started at the moment you pressed Stop (from 1 s before to 60 s after). When
+  none is listed yet it waits (90 s at most); when several match, it cancels nothing and the conversation shows them,
+  with one Stop button each, so you choose. Starting a new message in that conversation drops the old stop. A start
+  that the network cut (no answer, page still open) is not guessed later: Code says it cannot tell whether a reply
+  began.
+- **No background requests from a hidden tab.** The tab's retry for a remembered stop pauses while the tab is hidden.
+- **Turning Read aloud off also closes the player of a paused reply.**
+
+### Corrected (web 0.15.10 overclaimed)
+
+- "The message box is cleared … and the run the gateway returns is stopped the moment it arrives" held only in a new
+  conversation; the second message of a conversation was broken (fixed above).
+- "A stopped start never keeps running unseen" was not true: a stop remembered across a reload could match another
+  run first and miss its own. Now it cancels only a single exact match, asks you when several match, and still cannot
+  act when the tab is closed before the gateway answers.
+- "Leaves no audio player running" was not true for a paused reply (fixed above); a reply that is already speaking
+  still finishes first.
+
 ## [web 0.15.10] - 2026-11-08 (local build, not published)
 
 Built on AbstractUIC 0.10.12 (`@abstractframework/panel-chat` 0.9.5, `@abstractframework/ui-kit` 0.9.23), vendored
