@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.13] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.12 (0.10.13). The sidebar's own styles only; the shared cards are unchanged.
+
+### Changed
+
+- **Quieter Conversations and Automations lists** (operator 2026-11-08: "I am not a huge fan of the design"). The
+  cards become list rows: no frame or tinted background per card, one rhythm (8 px rows, 12 px sides, 2 px between
+  rows), one type scale (names 13 px medium, details 12 px muted), every row the same height. The open conversation
+  is a soft tone with a hairline. The section headers are a light label row instead of a raised band.
+- **Details in words, on one line:** "3 turns · just now"; for an automation "7 runs · next 21h · Every day at 08:00
+  (Europe/Paris)", where the schedule's words end in "…" in a narrow sidebar (hover shows the whole rule). While an
+  automation needs you, "Needs you" takes the place of the next run time. The state marker and the new-results count
+  share one column at the right edge.
+- **A long name is never cut silently:** it wraps to two lines; beyond that it ends in "…" and the whole name shows in
+  the tooltip on hover and on keyboard focus.
+
 ## [web 0.15.12] - 2026-11-08 (local build, not published)
 
 Same AbstractUIC as web 0.15.11 (0.10.13: `@abstractframework/panel-chat` 0.9.6, `@abstractframework/ui-kit` 0.9.24).

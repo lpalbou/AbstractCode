@@ -143,7 +143,7 @@ test.describe("AbstractCode sidebar", () => {
     }
   });
 
-  test("Automations and Conversations headers are 44 px rows on the raised surface (with the New conversation + in the Conversations header); no row is ever hidden under a header", async ({ page }) => {
+  test("Automations and Conversations headers are quiet 44 px label rows (with the New conversation + in the Conversations header); no row is ever hidden under a header", async ({ page }) => {
     // The ui-kit canonical wire fixture + one copy (the 0.9.0 panel clipped the fourth row).
     const fixture = JSON.parse(readFileSync(new URL("../../tui/tests/fixtures/automations/list.json", import.meta.url), "utf8"));
     const autos = [...fixture.items, { ...fixture.items[1], automation_id: "copy-5", title: "Release notes digest" }];
@@ -192,7 +192,8 @@ test.describe("AbstractCode sidebar", () => {
       });
       expect(g.headers, `${width}`).toHaveLength(2);
       for (const h of g.headers) {
-        expect(h.background, `${width} header background`).toBe(g.newChat);
+        // Operator 2026-11-08 (sidebar design pass): a light label row, no raised band.
+        expect(h.background, `${width} header background`).toBe("rgba(0, 0, 0, 0)");
         expect(h.height, `${width} header height`).toBeGreaterThanOrEqual(44);
         expect(h.expanded).toBe("true");
         expect(h.chevronFirst).toBe(true);

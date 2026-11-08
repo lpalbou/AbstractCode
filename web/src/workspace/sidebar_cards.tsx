@@ -6,7 +6,7 @@ import "../vendor/abstractsessions/session_cards.css";
 //   figure is the gateway's (`tool_calls` per turn, totalled over its sub-runs; catalog.ts adds the
 //   listed turns); without it the card shows no tool figure rather than a guess.
 // - Automations use the same shared card shell, with Watch run/schedule/next facts.
-import React, { useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import {
   AfSwitch,
   AfModal,
@@ -59,6 +59,32 @@ export function searchConversations<T extends Pick<SessionSummary, "prompt" | "s
   return items.filter((item) => `${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
 }
 
+/**
+ * A row's name keeps two lines; a longer one ends in "…" (ADR 0053: never truncated silently):
+ * the whole name is then the kit tooltip of the row's button, on hover and on keyboard focus.
+ * A name that fits carries no tooltip (nothing to reveal), and the title's own `title` attribute
+ * is removed so the browser does not show a second tooltip.
+ */
+export function useRevealClampedTitle(title: string): React.RefObject<HTMLDivElement> {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = ref.current;
+    const name = root?.querySelector<HTMLElement>(".af-session-card__title");
+    const button = root?.querySelector<HTMLElement>(".af-session-card__open");
+    if (!root || !name || !button) return;
+    name.removeAttribute("title");
+    const update = () => {
+      if (name.scrollHeight > name.clientHeight + 1) button.setAttribute("data-af-tip", title);
+      else button.removeAttribute("data-af-tip");
+    };
+    update();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null;
+    observer?.observe(name);
+    return () => observer?.disconnect();
+  }, [title]);
+  return ref;
+}
+
 /** Shared compact session presentation; the host owns archive confirmation. */
 export function ConversationCard(props: {
   item: SessionSummary;
@@ -74,8 +100,9 @@ export function ConversationCard(props: {
 }): React.ReactElement {
   const { item } = props;
   const title = conversationTitle(item);
+  const reveal = useRevealClampedTitle(title);
   return (
-    <div className={`code-session-item${props.confirm ? " is-confirming" : ""}`} data-item-id={item.sessionId}>
+    <div ref={reveal} className={`code-session-item${props.confirm ? " is-confirming" : ""}`} data-item-id={item.sessionId}>
       <SessionCard sessionId={item.sessionId} title={title} selected={props.selected} unread={props.unread}
         needsAttention={props.needsAttention ?? props.activity?.needsAttention} working={props.activity?.working ?? item.state === "running"}
         turnCount={item.turnCount} toolCount={item.toolCalls} countsPartial={item.truncated} updatedAt={item.updatedAt} nowMs={Date.now()}
@@ -140,7 +167,8 @@ export function AutomationCard(props: {
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState("");
   const archive = automationControls(s, [], props.busy || archiving).archive;
-  return <div className="code-automation-item" data-automation-id={s.automation_id} data-status={s.status}>
+  const reveal = useRevealClampedTitle(s.title || "Automation");
+  return <div ref={reveal} className="code-automation-item" data-automation-id={s.automation_id} data-status={s.status}>
     <SharedAutomationCard summary={s} selected={props.selected} nowMs={props.nowMs} onOpen={props.onSelect}
       onArchive={props.onArchive ? () => { setError(""); setConfirm(true); } : undefined}
       archiveDisabled={!archive.enabled} archiveTitle={archive.reason || "Archive automation"} />

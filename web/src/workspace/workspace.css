@@ -2901,3 +2901,117 @@ select option {
 @media (max-width: 479.98px) {
   .code-view-choice button[aria-pressed="true"] { display: none; }
 }
+
+/* ===========================================================================
+   Sidebar rows (operator 2026-11-08: "I am not a huge fan of the design" of the session and
+   automation cards). The kit's SessionCard / AutomationCard, restyled in the sidebar only as
+   quiet list rows (ADR 0053): no card chrome, one rhythm (8 px rows, 12 px sides, 2 px between
+   rows), one type scale (title 13 px medium, meta 12 px muted), every row the same height (the
+   title keeps room for two lines; a longer name ends in "…" and is shown whole in the kit tooltip,
+   sidebar_cards.tsx), the active row a tone and a hairline, hover and focus calm but visible.
+   The meta row is one line of words: the kit's own labels for each figure ("3 turns",
+   "7 runs", "Every day at 08:00 (Europe/Paris)", "Next run in 21h"), separated by "·".
+   =========================================================================== */
+.code-sidebar .code-session-item,
+.code-sidebar .code-automation-item,
+.code-sidebar .code-session-placeholder { margin-bottom: 2px; }
+.code-sidebar .af-session-card {
+  --code-row-title: var(--font-size-md, 13px);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.code-sidebar .af-session-card[data-unread],
+.code-sidebar .af-session-card[data-attention] { border: 0; background: transparent; }
+.code-sidebar .af-session-card:hover { background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+.code-sidebar .af-session-card[data-selected] {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* Every row the height of a two-line name and its meta line; shorter content is centred. */
+.code-sidebar .af-session-card__open {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(16px + 2 * 1.35 * var(--code-row-title) + 4px + 1.35 * var(--font-size-sm, 12px));
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+.code-sidebar .af-session-card__open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.code-sidebar .af-session-card__heading { align-items: flex-start; gap: 8px; }
+.code-sidebar .af-session-card__title {
+  flex: 1 1 auto;
+  font-size: var(--code-row-title);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+.code-sidebar .af-session-card[data-selected] .af-session-card__title { font-weight: 500; }
+/* The state marker and the new-results count share one column at the row's right edge. */
+.code-sidebar .af-session-card__marker {
+  order: 2;
+  margin: calc((1.35 * var(--code-row-title) - 7px) / 2) calc((20px - 7px) / 2) 0 auto;
+}
+.code-sidebar .af-session-card__marker.is-working {
+  margin: calc((1.35 * var(--code-row-title) - 9px) / 2) calc((20px - 9px) / 2) 0 auto;
+}
+.code-sidebar .af-session-card__meta {
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm, 12px);
+  line-height: 1.35;
+}
+.code-sidebar .af-session-card__meta svg { display: none; }
+.code-sidebar .af-session-card__meta > span[aria-label] > span[aria-hidden="true"] { display: none; }
+.code-sidebar .af-session-card__meta > span[aria-label]:not(.af-automation-card__unseen)::before { content: attr(aria-label); }
+.code-sidebar .af-session-card__meta > span { flex: none; gap: 0; }
+.code-sidebar .af-session-card__meta > .af-automation-card__schedule,
+.code-sidebar .af-session-card__meta > .af-session-card__time { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Automations: the figures first, the schedule's words last (they end in "…" when the row is
+   narrow; the whole rule is the tooltip of that part). While it needs you, "Needs you" replaces
+   the next run time. */
+.code-sidebar .af-automation-card .af-session-card__meta > [data-field="runs"] { order: 1; }
+.code-sidebar .af-automation-card .af-session-card__meta > [data-field="next"] { order: 2; }
+.code-sidebar .af-automation-card .af-session-card__meta > .af-session-card__attention { order: 3; }
+.code-sidebar .af-automation-card .af-session-card__meta > [data-field="cadence"] { order: 4; }
+.code-sidebar .af-automation-card .af-session-card__meta > .af-automation-card__unseen { order: 5; }
+.code-sidebar .af-automation-card .af-session-card__meta:has(> .af-session-card__attention) > [data-field="next"] { display: none; }
+/* "next 5h": the kit's own short value after one word, so the schedule keeps more room. */
+.code-sidebar .af-session-card__meta > span[aria-label][data-field="next"]:not(.af-automation-card__unseen)::before { content: "next "; white-space: pre; }
+.code-sidebar .af-session-card__meta > span[aria-label][data-field="next"] > span[aria-hidden="true"] { display: inline; }
+.code-sidebar .af-session-card:not(.af-automation-card) .af-session-card__meta > span:not(:last-child)::after,
+.code-sidebar .af-automation-card .af-session-card__meta > span:is([data-field="runs"], [data-field="next"], .af-session-card__attention)::after {
+  content: "·";
+  margin-left: 6px;
+}
+.code-sidebar .af-session-card__meta > .af-automation-card__unseen {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font-size: var(--font-size-xs, 11px);
+  line-height: 16px;
+  text-align: center;
+}
+.code-sidebar .af-session-card__attention { color: var(--warning); }
+@media (pointer: coarse) {
+  .code-sidebar .af-session-card__meta { font-size: max(13px, var(--font-size-sm, 12px)); }
+}
+/* Section headers: a quiet label row, not a raised band. */
+.code-sidebar .code-panel-header {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm, 12px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.code-sidebar .code-panel-header:hover { color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.code-sidebar .code-panel-toggle { min-height: 44px; padding-left: 12px; }
+.code-sidebar .code-panel > nav,
+.code-sidebar .code-panel > [role="region"] { padding: 4px 8px 8px; }
+.code-sidebar .code-automation-item > .code-card-notif { padding: 0 12px 6px; }
