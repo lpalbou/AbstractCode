@@ -1434,8 +1434,9 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         .getByText("welcome.md", { exact: true }),
     ).toBeVisible();
 
-    // The composer's file input (the docs assistant drawer has its own).
-    await page.locator('input[type="file"]:not(#code-rail-panel-docs input)').setInputFiles({
+    // The composer's file input (the docs assistant drawer has its own, mounted while closed:
+    // the Docs assistant is the kit's top-bar drawer, .pc-docs-assistant-drawer, not a rail panel).
+    await page.locator('input[type="file"]:not(.pc-docs-assistant-drawer input)').setInputFiles({
       name: "browser-upload.txt",
       mimeType: "text/plain",
       buffer: Buffer.from("AbstractCode isolated browser upload\n"),
