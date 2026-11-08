@@ -78,6 +78,7 @@ import {
 import { gateway, gatewayRequest, formatError, newId, csrfHeaders } from "./transport";
 import { createCodeSessionPolicyClient } from "./session_policy_client";
 import { createWorkflowTransport } from "./session_transport";
+import { cancelStartedRun, finishPendingStops, forgetStopWhileStarting, noteStartedRun, rememberStopWhileStarting } from "./start_stop";
 import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
 import { AccountWorkflowDefault } from "./account_workflow_default";
 import { AgentSettings } from "./agent_settings";
@@ -293,7 +294,9 @@ export function CodeWorkspace() {
   const [notice, setNotice] = useState("");
   const [sending, setSending] = useState(false);
   const sendLock = useRef(false);
-  const [stopWhenLoaded, setStopWhenLoaded] = useState("");
+  // A Stop pressed while the run was starting: answered at once ("Stopping…" at the top) until the
+  // run the gateway returns is stopped (start_stop.ts).
+  const [stoppingStart, setStoppingStart] = useState(false);
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -1026,15 +1029,65 @@ export function CodeWorkspace() {
       if (avatarMode) Object.assign(body, { conversation: true });
       // Stop pressed before the start left: nothing is started, nothing to cancel.
       if (signal?.aborted) throw new DOMException("Stopped before the run started.", "AbortError");
-      const result = await gatewayRequest(gatewayApiPath("runs/start"), {
+      // Stop pressed while the gateway is starting the run (review 2026-11-08 D1, D3, R12): the
+      // press is answered now ("Stopping…" at the top, the message box cleared and free) and kept
+      // in this tab until the run the gateway returns is cancelled, even if the person reloads or
+      // opens another conversation meanwhile.
+      let pendingStop = "";
+      const sameConversation = () =>
+        sessionRef.current.sessionId === startedSession &&
+        identityRef.current === startedIdentity &&
+        authEpoch.current === startedEpoch;
+      const onStop = () => {
+        pendingStop = rememberStopWhileStarting(startedSession);
+        if (!sameConversation()) return;
+        setStoppingStart(true);
+        setDraft("");
+      };
+      signal?.addEventListener("abort", onStop, { once: true });
+      const starting = gatewayRequest<any>(gatewayApiPath("runs/start"), {
         method: "POST",
         body: JSON.stringify(body),
       });
+      void starting.then(
+        (answer) => {
+          if (!signal?.aborted) return;
+          const runId = String(answer?.run_id || "");
+          if (!runId) {
+            forgetStopWhileStarting(pendingStop);
+            if (sameConversation()) setStoppingStart(false);
+            return;
+          }
+          noteStartedRun(pendingStop, runId);
+          void cancelStartedRun(runId).then(
+            () => forgetStopWhileStarting(pendingStop),
+            (e) => { if (sameConversation()) { setStoppingStart(false); setError(`The run could not be stopped: ${formatError(e)}`); } },
+          );
+          // Still on this conversation: show the run, which the gateway now stops ("Stopped").
+          if (sameConversation()) {
+            setSession({ sessionId: startedSession, runId });
+            writeRoute(startedSession, runId);
+          }
+        },
+        (e) => {
+          if (!signal?.aborted) return;
+          // The gateway refused the start: nothing was started. A start cut by the network or a
+          // reload may have started a run: the stop stays remembered (finishPendingStops).
+          if (typeof (e as { status?: unknown })?.status === "number") forgetStopWhileStarting(pendingStop);
+          if (sameConversation()) setStoppingStart(false);
+        },
+      );
+      const result = signal
+        ? await Promise.race([
+            starting,
+            new Promise<never>((_, reject) =>
+              signal.addEventListener("abort", () => reject(new DOMException("Stopped while the run was starting.", "AbortError")), { once: true }),
+            ),
+          ])
+        : await starting;
+      signal?.removeEventListener("abort", onStop);
       if (!result.run_id)
         throw new Error("The gateway did not return a run identifier.");
-      // Stop pressed while the start was in flight (review 2026-11-08 D1): the gateway has the run
-      // now, so it is stopped as soon as it is loaded here (a run nobody sees must not go on).
-      if (signal?.aborted) setStopWhenLoaded(String(result.run_id));
       // The conversation may already show this new run (it follows its session's newest run on a
       // slow start): that is this start, not a change of conversation.
       if (
@@ -1076,7 +1129,8 @@ export function CodeWorkspace() {
       if (
         sessionRef.current.sessionId === startedSession &&
         (sessionRef.current.runId === startedRun ||
-          sessionRef.current.runId === attachedRun) &&
+          sessionRef.current.runId === attachedRun ||
+          Boolean(signal?.aborted)) &&
         identityRef.current === startedIdentity &&
         authEpoch.current === startedEpoch
       ) {
@@ -1241,14 +1295,28 @@ export function CodeWorkspace() {
       setNotice("");
     }
   }
-  // The run a Stop asked for before it existed (startTurn): cancel it once it is loaded here.
+  // "Stopping…" for a Stop pressed while starting ends when the run shown here has stopped, or
+  // when the person opens another conversation (the stop itself still completes).
   useEffect(() => {
-    const runId = stopWhenLoaded;
-    if (!runId || session.runId !== runId || String(snapshot.run?.run_id || "") !== runId) return;
-    setStopWhenLoaded("");
-    if (terminal(snapshot.status)) return;
-    void controller.cancel().catch((e) => setError(formatError(e)));
-  }, [controller, stopWhenLoaded, session.runId, snapshot.run?.run_id, snapshot.status]);
+    if (stoppingStart && session.runId && terminal(snapshot.status)) setStoppingStart(false);
+  }, [stoppingStart, session.runId, snapshot.status]);
+  useEffect(() => setStoppingStart(false), [session.sessionId, identity]);
+  // An earlier page of this tab stopped a run while it was starting and never saw its answer
+  // (a reload): finish that stop now.
+  useEffect(() => {
+    if (!connection.connected) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = () =>
+      void finishPendingStops().then((left) => {
+        if (alive && left) timer = setTimeout(run, 3_000);
+      });
+    run();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [connection.connected, identity]);
   const act = (callback: () => Promise<unknown>) => {
     const epoch = authEpoch.current;
     const sid = session.sessionId;
@@ -1932,10 +2000,11 @@ export function CodeWorkspace() {
               </div>
             ) : null}
             {/* Kit gap K2 (ui-primitives 0030): WorkflowChat has no runStatus slot (metrics, pause/resume, activity). */}
-            {active || terminal(snapshot.status) ? (
+            {active || terminal(snapshot.status) || stoppingStart ? (
               <RunStatusBar
                 publicView={avatarMode}
-                active={active}
+                stopping={stoppingStart}
+                active={active && !stoppingStart}
                 paused={paused}
                 snapshot={snapshot}
                 onInteraction={
@@ -2024,7 +2093,7 @@ export function CodeWorkspace() {
               draft={draft}
               onDraftChange={setDraft}
               onSend={send}
-              busy={locked}
+              busy={locked && !stoppingStart}
               busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
               working={working}
               workingLabel={sending ? "Starting" : "Working"}

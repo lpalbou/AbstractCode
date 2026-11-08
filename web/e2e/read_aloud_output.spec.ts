@@ -214,7 +214,17 @@ test("Stop pressed while a new conversation's run is starting stops that run", a
   await expect(primary).toHaveAttribute("aria-label", "Stop", { timeout: 1_000 });
   await primary.click();
   expect(Date.now() - sentAt).toBeLessThan(400); // pressed while the start is in flight
+  // D3 (review 2026-11-08): the press is answered at once, long before the start returns.
+  await expect(page.locator(".code-run-strip")).toContainText("Stopping…", { timeout: 600 });
+  await expect(primary).toHaveAttribute("data-mode", "send", { timeout: 600 });
+  await expect(page.locator(".code-conversation .pc-composer textarea")).toHaveValue("", { timeout: 600 });
+  await shot(page, "stop-at-once-stopping-desktop");
   await expect(page.locator(".code-run-strip")).toContainText("Stopped", { timeout: 20_000 });
+  // D4: the pointer still rests on the button it pressed; no "Stop" tooltip over the idle Send.
+  await primary.hover();
+  await page.waitForTimeout(600);
+  const tips = await page.locator(".af-tooltip:not([hidden])").allTextContents();
+  expect(tips.filter((t) => /Stop/.test(t))).toEqual([]);
   await expect(page.getByText(/Could not stop the run/)).toHaveCount(0);
   await expect(primary).toHaveAttribute("data-mode", "send");
   await expect(primary).toHaveAttribute("aria-label", "Send");
@@ -231,4 +241,51 @@ test("Stop pressed while a new conversation's run is starting stops that run", a
   await expect(primary).toHaveAttribute("data-mode", "send");
   await shot(page, "stop-at-once-new-conversation-400");
   expect(errors).toEqual([]);
+});
+
+// R12 (review 2026-11-08): Stop while the run is starting, then a reload before the gateway
+// answers. The page that pressed Stop is gone; the next page of the tab cancels that run.
+test("a Stop pressed while starting is finished after a reload", async ({ page }) => {
+  test.setTimeout(90_000);
+  const allowed = new URL(appOrigin).origin;
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== allowed) return route.abort("blockedbyclient");
+    if (!url.pathname.endsWith("/api/gateway/runs/start")) return route.continue();
+    const response = await route.fetch(); // the gateway starts the run now ...
+    await new Promise((r) => setTimeout(r, 4000)); // ... its answer comes after the reload
+    return route.fulfill({ response }).catch(() => undefined);
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const dialog = page.getByRole("dialog", { name: "Gateway connection" });
+  await page.locator("#gateway-session-url").fill(fixtureGateway);
+  await page.locator("#gateway-session-user").fill(fixtureUser);
+  await page.locator("#gateway-session-token").fill(fixtureToken);
+  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await chooseWorkflow(page, "Event listener");
+  const primary = page.locator(".code-conversation .pc-composer .pc-composer__send--compact");
+  await page.locator(".code-conversation .pc-composer textarea").fill("Stop me, then reload.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(primary).toHaveAttribute("aria-label", "Stop", { timeout: 1_000 });
+  await primary.click();
+  await expect(page.locator(".code-run-strip")).toContainText("Stopping…", { timeout: 600 });
+  const key = "abstractcode.stop-while-starting.v1";
+  const pending = await page.evaluate((k) => JSON.parse(sessionStorage.getItem(k) || "[]"), key);
+  expect(pending).toHaveLength(1);
+  await page.waitForTimeout(500); // the gateway has created the run; its answer is still held
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(() => page.evaluate((k) => sessionStorage.getItem(k), key), { timeout: 30_000 }).toBeNull();
+  const runs = await page.evaluate(async (sid) => {
+    const r = await fetch(`api/gateway/runs?session_id=${encodeURIComponent(sid)}&root_only=true&limit=20`, { credentials: "same-origin" });
+    return ((await r.json()).items || []).map((run: any) => ({ id: run.run_id, status: run.status }));
+  }, pending[0].sessionId);
+  expect(runs.length).toBeGreaterThanOrEqual(1);
+  await expect.poll(async () => {
+    const now = await page.evaluate(async (sid) => {
+      const r = await fetch(`api/gateway/runs?session_id=${encodeURIComponent(sid)}&root_only=true&limit=20`, { credentials: "same-origin" });
+      return ((await r.json()).items || []).map((run: any) => run.status);
+    }, pending[0].sessionId);
+    return now.every((status: string) => status === "cancelled");
+  }, { timeout: 20_000 }).toBe(true);
 });

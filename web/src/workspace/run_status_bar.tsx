@@ -16,6 +16,7 @@ export function RunStatusBar({
   onActivity,
   onInteraction,
   publicView = false,
+  stopping = false,
 }: {
   active: boolean;
   paused: boolean;
@@ -24,8 +25,13 @@ export function RunStatusBar({
   onActivity: () => void;
   onInteraction?: () => void;
   publicView?: boolean;
+  /** A Stop was pressed while the run was starting: "Stopping…" until the run has stopped. */
+  stopping?: boolean;
 }) {
-  const progress = useMemo(() => workflowProgress(snapshot), [snapshot]);
+  const recorded = useMemo(() => workflowProgress(snapshot), [snapshot]);
+  const progress = stopping && !["completed", "failed", "cancelled"].includes(snapshot.status)
+    ? { ...recorded, label: "Stopping…", detail: "", tone: "working" as const }
+    : recorded;
   // Live model phase, when the provider reports one. "Generating the next
   // response" is true of a 2-second prefill and of a 40-second one; this
   // replaces it with what the call is actually doing right now. Empty when no
@@ -33,10 +39,10 @@ export function RunStatusBar({
   // stands unchanged — never a synthesized phase.
   const phase = useMemo(
     () =>
-      progress.tone === "working"
+      progress.tone === "working" && !stopping
         ? llm_phase_text(snapshot.view ? view_progress_records(snapshot.view as never) : snapshot.records.map((entry) => entry.record))
         : "",
-    [progress.tone, snapshot.records, snapshot.view],
+    [progress.tone, stopping, snapshot.records, snapshot.view],
   );
   const detail = publicView ? "" : phase || progress.detail;
   const label = publicView && progress.tone === "working" ? "Working" : progress.label;
