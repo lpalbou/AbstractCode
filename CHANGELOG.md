@@ -36,6 +36,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the automation's keys, then the selected row's. Phone-width and short terminals stack the
   panels without frames and put the details at the end of the output.
 
+## [web 0.15.18] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.16 (`@abstractframework/panel-chat` 0.9.8, `@abstractframework/ui-kit` 0.9.25), vendored
+from local packs (installed with `--no-save`: the floors and the lockfile follow the kit publish).
+
+### Fixed
+
+- **A conversation comes back by itself after the app server or the gateway restarts** (backlog 1163). The page gave
+  up after about three seconds and said "Disconnected": a restart under an open page left it stale, and an approval
+  raised afterwards appeared only in the tray. It now keeps reconnecting while the run is live (backing off to one
+  attempt every 30 seconds), reads the whole conversation again on each reconnection, and shows a question or an
+  approval raised meanwhile within seconds of the server's return, with no reload. On the test gateway: the approval
+  card appeared 2.4 s after the app server came back and 0.3 s after the gateway came back; before, never.
+- **The page says what is happening meanwhile.** The run status bar reads "Reconnecting" with the reason, and the
+  composer says "Reconnecting to this conversation. You can send again as soon as it is back." while sending is off.
+
 ## [web 0.15.17] - 2026-11-08 (local build, not published)
 
 ### Changed
