@@ -2906,7 +2906,7 @@ select option {
    Sidebar rows (operator 2026-11-08: "I am not a huge fan of the design" of the session and
    automation cards). The kit's SessionCard / AutomationCard, restyled in the sidebar only as
    quiet list rows (ADR 0053): no card chrome, one rhythm (8 px rows, 12 px sides, 2 px between
-   rows), the title 13 px medium, every row the same height (a longer name ends in "…" and is shown
+   rows), the title 13 px regular (operator: "remove the boldness of the title"), every row the same height (a longer name ends in "…" and is shown
    whole in the kit tooltip, sidebar_cards.tsx), the active row a tone and a hairline, hover and
    focus calm but visible. The details line stays the kit's own symbol row (below).
    =========================================================================== */
@@ -2942,11 +2942,11 @@ select option {
 .code-sidebar .af-session-card__title {
   flex: 1 1 auto;
   font-size: var(--code-row-title);
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.35;
   color: var(--text-primary);
 }
-.code-sidebar .af-session-card[data-selected] .af-session-card__title { font-weight: 500; }
+.code-sidebar .af-session-card[data-selected] .af-session-card__title { font-weight: 400; }
 /* The state marker and the new-results count share one column at the row's right edge. */
 .code-sidebar .af-session-card__marker {
   order: 2;

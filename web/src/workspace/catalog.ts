@@ -682,6 +682,10 @@ export function normalizeSessionSummaries(
   const wantNotes = options.purpose === "notes";
   const body = record(value);
   const truncated = body?.has_more === true || body?.hasMore === true;
+  // The gateway's exact per-session totals for the sessions on this page (`session_totals`,
+  // {<session_id>: {turns: N}}, from its run index). Absent on an older gateway: the counts of
+  // a cut page stay lower bounds ("≥").
+  const totals = record(body?.session_totals);
   const runs = responseItems(value, ["items", "runs"]);
   const groups = new Map<string, Array<{ run: JsonObject; index: number }>>();
   runs.forEach((rawRun, index) => {
@@ -737,6 +741,11 @@ export function normalizeSessionSummaries(
       const count = run.tool_calls;
       toolCalls = typeof count === "number" && Number.isFinite(count) && toolCalls !== undefined ? toolCalls + count : undefined;
     }
+    // Exact totals: the real turn count, never "≥"; the tool count is exact only when every turn
+    // of the session is on this page, else it is not shown (a partial sum is no value).
+    const exactTurns = Number(record(totals?.[sessionId])?.turns);
+    const exact = Number.isSafeInteger(exactTurns) && exactTurns >= group.length;
+    if (exact && exactTurns > group.length) toolCalls = undefined;
     summaries.push({
       sessionId,
       state,
@@ -748,10 +757,10 @@ export function normalizeSessionSummaries(
       ) as string,
       latestRunId: runIds[0],
       runIds,
-      turnCount: group.length,
+      turnCount: exact ? exactTurns : group.length,
       ...(toolCalls !== undefined ? { toolCalls } : {}),
       ...(prompt ? { prompt } : {}),
-      truncated,
+      truncated: exact ? false : truncated,
     });
   }
   // Match the gateway page and Rust session picker: recency orders rows;

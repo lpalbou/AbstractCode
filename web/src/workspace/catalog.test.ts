@@ -271,6 +271,41 @@ describe("normalizers", () => {
   });
 });
 
+describe("normalizeSessionSummaries session_totals", () => {
+  const page = (extra: Record<string, unknown>) => ({
+    has_more: true,
+    runs: [
+      { run_id: "a2", session_id: "sa", status: "completed", created_at: "2026-01-02T00:00:00Z", tool_calls: 3 },
+      { run_id: "a1", session_id: "sa", status: "completed", created_at: "2026-01-01T00:00:00Z", tool_calls: 1 },
+      { run_id: "b1", session_id: "sb", status: "completed", created_at: "2026-01-03T00:00:00Z", tool_calls: 2 },
+    ],
+    ...extra,
+  });
+  const byId = (body: unknown) =>
+    Object.fromEntries(normalizeSessionSummaries(body, {}).map((s) => [s.sessionId, s]));
+
+  it("shows the gateway's exact turn count and hides the tool sum of a cut session", () => {
+    const s = byId(page({ session_totals: { sa: { turns: 9 }, sb: { turns: 1 } } }));
+    expect(s.sa).toMatchObject({ turnCount: 9, truncated: false });
+    expect(s.sa.toolCalls).toBeUndefined();
+    // Every turn of sb is on the page: its tool count is exact.
+    expect(s.sb).toMatchObject({ turnCount: 1, toolCalls: 2, truncated: false });
+  });
+
+  it("keeps lower bounds when the gateway sends no totals (older gateway)", () => {
+    const s = byId(page({}));
+    expect(s.sa).toMatchObject({ turnCount: 2, toolCalls: 4, truncated: true });
+    expect(s.sb).toMatchObject({ turnCount: 1, toolCalls: 2, truncated: true });
+  });
+
+  it("keeps lower bounds for a session missing from the totals or with an unusable value", () => {
+    const s = byId(page({ session_totals: { sa: { turns: 1 } } }));
+    // 1 < the 2 turns listed: not a total, ignored.
+    expect(s.sa).toMatchObject({ turnCount: 2, truncated: true });
+    expect(s.sb).toMatchObject({ turnCount: 1, truncated: true });
+  });
+});
+
 describe("buildWorkflowInput", () => {
   it("keeps generic public inputs exact while applying Gateway runtime controls", () => {
     const schemaInputs = {

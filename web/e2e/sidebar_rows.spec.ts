@@ -253,3 +253,63 @@ test("counts the gateway gives as a lower bound keep the kit's ≥ beside the sy
   await expect(line.locator("[aria-label]").first()).toHaveAttribute("aria-label", "At least 1 turn");
   expect(await line.locator("svg").count()).toBe(2);
 });
+
+// A gateway that knows each session's real total sends `session_totals` ({<session_id>: {turns}})
+// with the page (operator 2026-11-08: "just put the real value if you can"): the row shows that
+// exact count with no "≥". The tool count of a session only partly on the page is hidden (a sum
+// of some of its turns is no value); a session wholly on the page keeps its exact tool count.
+test("exact session totals from the gateway: the real turn count, no ≥, tools only when whole", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.route("**/api/gateway/runs?*", async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() !== "GET" || !url.pathname.endsWith("/api/gateway/runs")) return route.continue();
+    try {
+      const response = await route.fetch();
+      const body = await response.json();
+      const key = Array.isArray(body.items) ? "items" : "runs";
+      const runs = (Array.isArray(body[key]) ? body[key] : []).map((run: Record<string, unknown>) => ({ ...run, tool_calls: 2 }));
+      // Seeded oldest first (long, two, short): the newest session is the short one.
+      const sessions = [...new Map(runs.filter((r: Record<string, unknown>) => !r.parent_run_id).sort((a: Record<string, unknown>, b: Record<string, unknown>) => String(b.created_at).localeCompare(String(a.created_at))).map((r: Record<string, unknown>) => [r.session_id, r])).keys()] as string[];
+      const session_totals: Record<string, { turns: number }> = {};
+      if (sessions[0]) session_totals[sessions[0]] = { turns: 4 }; // short: 3 turns not on this page
+      for (const sid of sessions.slice(1)) session_totals[sid] = { turns: 1 }; // two, long: wholly on the page
+      return await route.fulfill({ response, json: { ...body, [key]: runs, has_more: true, session_totals } });
+    } catch {
+      return route.abort().catch(() => undefined); // the app dropped this request itself (a newer list)
+    }
+  });
+  await open(page, "observer-night");
+  await seedConversations(page);
+  const short = row(page, TITLES.short).locator(".af-session-card__meta");
+  await expect.poll(() => rendered(short)).toMatch(/^4 (just now|\d+ min ago)$/);
+  await expect(short.locator("[aria-label]").first()).toHaveAttribute("aria-label", "4 turns");
+  expect(await short.locator("svg").count(), "short: chat + clock, no tool symbol").toBe(2);
+  const two = row(page, TITLES.two).locator(".af-session-card__meta");
+  await expect.poll(() => rendered(two)).toMatch(/^1 2 (just now|\d+ min ago)$/);
+  expect(await two.locator("svg").count(), "two: chat + tools + clock").toBe(3);
+  expect(await page.locator(".code-sessions .af-session-card__meta").allTextContents()).not.toContain(expect.stringContaining("≥"));
+  await page.mouse.move(700, 500);
+  await shoot(page, "exact-totals-dark");
+});
+
+// The row titles read regular, the selected one too (operator 2026-11-08: "try to remove the
+// boldness of the title"); the selection keeps its tint and hairline.
+test("row titles are regular weight, the selected row too, in both themes", async ({ page }) => {
+  test.setTimeout(120_000);
+  await open(page, "observer-night");
+  await seedConversations(page);
+  await expect(page.locator(".code-automation-item")).toHaveCount(5, { timeout: 20_000 });
+  for (const theme of ["observer-night", "light"]) {
+    await page.evaluate((t) => localStorage.setItem("af_appearance_abstractcode_v1", JSON.stringify({ theme: t, font_scale: "md", header_density: "standard" })), theme);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator(".code-automation-item")).toHaveCount(5, { timeout: 20_000 });
+    await row(page, TITLES.two).locator(".af-session-card__open").click();
+    await expect(row(page, TITLES.two)).toHaveAttribute("data-selected", "true");
+    const weights = await page.locator(".code-sidebar .af-session-card__title").evaluateAll((els) => els.map((el) => getComputedStyle(el).fontWeight));
+    expect(weights.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(weights), `${theme} title weights`).toEqual(new Set(["400"]));
+    const tint = await row(page, TITLES.two).evaluate((el) => getComputedStyle(el).backgroundColor);
+    const plain = await row(page, TITLES.short).evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(tint, `${theme} selected tint`).not.toBe(plain);
+  }
+});

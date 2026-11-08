@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the automation's keys, then the selected row's. Phone-width and short terminals stack the
   panels without frames and put the details at the end of the output.
 
+## [web 0.15.17] - 2026-11-08 (local build, not published)
+
+### Changed
+
+- **Sidebar row titles are regular weight**, conversations and automations alike, the selected row too; the selected
+  row keeps its tint and hairline.
+- **A conversation's turn count is the real one when the gateway knows it.** A gateway that sends `session_totals`
+  (`{<session_id>: {"turns": N}}`) with its run listing gets the exact count, with no "≥". A conversation only partly
+  on the listing page shows no tool count (a sum over some of its turns would be no value); one wholly on the page
+  keeps its exact tool count. An older gateway without `session_totals` still gets the "≥" lower bound.
+
 ## [web 0.15.16] - 2026-11-08 (local build, not published)
 
 Built on AbstractUIC 0.10.15 (`@abstractframework/panel-chat` 0.9.7, `@abstractframework/ui-kit` 0.9.25), vendored
