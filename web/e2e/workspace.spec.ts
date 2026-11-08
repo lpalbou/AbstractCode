@@ -883,9 +883,10 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await capture(page, "basic-agent-zero-configuration");
 
     await openWorkflowInputs(page);
-    await expect(
-      drawer.getByText("Ready to chat", { exact: true }),
-    ).toBeVisible();
+    // The compact Agent panel (6b4d62d) shows no "Ready to chat" block: with nothing required it
+    // asks for nothing at all, so the proof of "no setup" is the absence of the inputs block.
+    await expect(drawer.getByRole("heading", { name: "Workflow inputs", exact: true })).toHaveCount(0);
+    await expect(drawer.getByText("Ready to chat", { exact: true })).toHaveCount(0);
     await expect(drawer.getByLabel("memory", { exact: true })).toBeHidden();
     await capture(page, "basic-agent-optional-advanced-inputs");
     await drawer
@@ -893,7 +894,8 @@ test.describe("AbstractCode isolated gateway workspace", () => {
       .click();
     await expect(drawer.getByLabel("memory", { exact: true })).toBeVisible();
     await expect(drawer.locator('[aria-label="required"]')).toHaveCount(0);
-    await drawer.getByRole("button", { name: "Back to chat" }).click();
+    // "Back to chat" became the panel's own collapse button in 6b4d62d.
+    await closeWorkspaceDrawer(page);
     await expect(drawer).toBeHidden();
 
     // The same legacy adapter must not erase a real author requirement.
