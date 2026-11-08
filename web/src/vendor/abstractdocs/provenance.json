@@ -52,7 +52,7 @@
     "dist/workflow_interaction.d.ts": "c37ec92df17d76cc4a598c3f38b4d43249680169e8fbf6f27e89edfd27ea5673",
     "dist/workflow_interaction_core.d.ts": "59f4b6e51e94c4fa01a74a6f06949362d0f42148536428360e93467c4b3ccc18",
     "dist/workflow_progress.d.ts": "2abe83cf32233aefd09afae29fedf6dd9dcefbf4cecbe1fe86addba3209e237d",
-    "dist/workflow_runtime.d.ts": "bfb52de783f8ccc45f53f3ac3c9d0968d48fd25601a5bdbfbb717cdbcaaf87c5",
+    "dist/workflow_runtime.d.ts": "a0c3d8724fabb8e68c17330f5169d4164beb7bf5e0897eb126f2c2b895fed2ec",
     "dist/working_dots.d.ts": "73b7268e0ccd5ba8bd8ecc826ad52d771ab3711de3fa1b376393a56fa37141e1",
     "dist/workspace_browser.d.ts": "15a20e5e6075b5ef3393844002616cdec5812ef2a7af99b297b0f1375327cf7e",
     "dist/chat_composer.js": "df7db336be41e691b6e8b61a5f559e9f3e4697000cf920d278fd057def8043f6",
@@ -128,7 +128,7 @@
     "workflow_interaction.d.ts": "c37ec92df17d76cc4a598c3f38b4d43249680169e8fbf6f27e89edfd27ea5673",
     "workflow_interaction_core.d.ts": "59f4b6e51e94c4fa01a74a6f06949362d0f42148536428360e93467c4b3ccc18",
     "workflow_progress.d.ts": "2abe83cf32233aefd09afae29fedf6dd9dcefbf4cecbe1fe86addba3209e237d",
-    "workflow_runtime.d.ts": "bfb52de783f8ccc45f53f3ac3c9d0968d48fd25601a5bdbfbb717cdbcaaf87c5",
+    "workflow_runtime.d.ts": "a0c3d8724fabb8e68c17330f5169d4164beb7bf5e0897eb126f2c2b895fed2ec",
     "working_dots.d.ts": "73b7268e0ccd5ba8bd8ecc826ad52d771ab3711de3fa1b376393a56fa37141e1",
     "workspace_browser.d.ts": "15a20e5e6075b5ef3393844002616cdec5812ef2a7af99b297b0f1375327cf7e"
   }

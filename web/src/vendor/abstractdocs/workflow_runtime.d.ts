@@ -288,6 +288,12 @@ export type WorkflowSessionControllerOptions = {
     /** Called with the stored policy and its `clamped` list after every write/read/reset. */
     onSessionPolicy?: (policy: SessionToolPolicy | null, clamped: SessionToolPolicyClamp[]) => void;
 };
+/**
+ * The wait before reconnection attempt `failures` (1, 2, …) of a live stream: 150 ms doubling to a
+ * 30 s ceiling. There is no last attempt while the run is live (backlog 1163: a server restart
+ * under an open page must never leave it stale).
+ */
+export declare function reconnectDelay(failures: number): number;
 export declare class WorkflowSessionController {
     private readonly transport;
     private readonly options;

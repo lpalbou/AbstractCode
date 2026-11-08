@@ -153,6 +153,7 @@ import {
   workspacePrincipalIdentity,
   type QueueIntent,
 } from "./app_state";
+import { liveConnectionNotice } from "./live_connection";
 
 const APP_IDENTITY = appIdentity("abstractcode", __APP_VERSION__);
 
@@ -2181,7 +2182,7 @@ export function CodeWorkspace() {
               onCancel={cancelCurrentRun}
               stopState={snapshot.stop ?? null}
               disabled={!connection.connected}
-              blockedNotice={restore.readOnlyNotice || undefined}
+              blockedNotice={restore.readOnlyNotice || liveConnectionNotice({ runId: session.runId, status: snapshot.status, connection: snapshot.connection }) || undefined}
               interaction={interaction}
               onAttach={() => fileInput.current?.click()}
               onFiles={(files) => { attachUploads(files); }}

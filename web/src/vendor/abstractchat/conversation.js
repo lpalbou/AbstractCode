@@ -4648,6 +4648,9 @@ function statusOf(run) {
 function terminal(status) {
   return ["completed", "failed", "cancelled"].includes(status.toLowerCase());
 }
+function reconnectDelay(failures) {
+  return Math.min(3e4, 150 * 2 ** Math.max(0, failures - 1));
+}
 function authError(error) {
   const value = object(error);
   const status = Number(value?.status ?? value?.statusCode);
@@ -5619,6 +5622,12 @@ var WorkflowSessionController = class {
     while (this.live(generation) && this.viewFold === fold && !fold.terminal) {
       this.set({ ...this.snapshot, connection: failures ? "reconnecting" : "connecting" });
       try {
+        if (failures) {
+          await this.refreshView(generation);
+          if (!this.live(generation) || this.viewFold !== fold)
+            return;
+          this.set({ ...this.snapshot, connection: "connected", error: null });
+        }
         await rv.streamView(runId, {
           lastEventId: fold.lastEventId,
           signal: this.controller.signal,
@@ -5651,18 +5660,14 @@ var WorkflowSessionController = class {
           return;
         }
       }
-      if (failures >= 5 || !this.live(generation))
+      if (!this.live(generation))
         break;
-      await this.waitForRetry(Math.min(2e3, 150 * 2 ** (failures - 1)));
+      await this.waitForRetry(reconnectDelay(failures));
     }
     this.viewStreamEnded = true;
     if (!this.live(generation) || this.viewFold !== fold)
       return;
-    if (fold.terminal || terminal(this.snapshot.status)) {
-      this.set({ ...this.snapshot, connection: "disconnected" });
-      return;
-    }
-    this.set({ ...this.snapshot, connection: "disconnected", error: this.snapshot.error || "Replay view stream reconnect limit reached. Reconnect the workflow to continue." });
+    this.set({ ...this.snapshot, connection: "disconnected" });
   }
   /**
    * Live reply text (`llm.delta`) is not part of the view: it rides the root's ledger stream
@@ -5693,9 +5698,7 @@ var WorkflowSessionController = class {
             return;
           }
         }
-        if (failures >= 5)
-          return;
-        await this.waitForRetry(Math.min(2e3, 150 * 2 ** (failures - 1)));
+        await this.waitForRetry(reconnectDelay(failures));
       }
     } finally {
       if (this.live(generation))
@@ -5844,21 +5847,13 @@ var WorkflowSessionController = class {
           return;
         }
       }
-      if (attempt >= 5 || !this.live(generation))
+      if (!this.live(generation))
         break;
-      await this.waitForRetry(Math.min(2e3, 150 * 2 ** (attempt - 1)));
+      await this.waitForRetry(reconnectDelay(attempt));
     }
     if (!this.live(generation))
       return;
-    if (terminal(statusOf(this.runStates.get(runId) || null))) {
-      this.set({ ...this.snapshot, connection: "disconnected" });
-      return;
-    }
-    this.set({
-      ...this.snapshot,
-      connection: "disconnected",
-      error: this.snapshot.error || "Ledger stream reconnect limit reached. Reconnect the workflow to continue."
-    });
+    this.set({ ...this.snapshot, connection: "disconnected" });
   }
   async ingestHistory(history, fallbackRunId, generation) {
     const bundle = object(history);
@@ -6490,12 +6485,12 @@ var WorkflowSessionController = class {
       }
     }
   }
-  waitForRetry(delayMs) {
+  async waitForRetry(delayMs) {
     const signal = this.controller?.signal;
     if (!signal || signal.aborted)
-      return Promise.resolve();
+      return;
     const activeSignal = signal;
-    return new Promise((resolve) => {
+    await new Promise((resolve) => {
       const timer = setTimeout(done, delayMs);
       const onAbort = () => {
         clearTimeout(timer);
@@ -6506,6 +6501,21 @@ var WorkflowSessionController = class {
         resolve();
       }
       activeSignal.addEventListener("abort", onAbort, { once: true });
+    });
+    if (typeof document === "undefined" || typeof document.addEventListener !== "function" || document.visibilityState !== "hidden" || activeSignal.aborted)
+      return;
+    await new Promise((resolve) => {
+      const done = () => {
+        document.removeEventListener("visibilitychange", onVisibility);
+        activeSignal.removeEventListener("abort", done);
+        resolve();
+      };
+      const onVisibility = () => {
+        if (document.visibilityState !== "hidden")
+          done();
+      };
+      document.addEventListener("visibilitychange", onVisibility);
+      activeSignal.addEventListener("abort", done, { once: true });
     });
   }
 };

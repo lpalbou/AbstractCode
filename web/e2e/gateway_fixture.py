@@ -169,6 +169,29 @@ def _tool_approval_flow() -> dict[str, Any]:
     }
 
 
+def _delayed_approval_flow() -> dict[str, Any]:
+    """The native write_file approval, raised only after a timer (backlog 1163): the page is
+    open on a running conversation when the app server or the gateway restarts, and the wait is
+    raised while it is away (a 12 s timer)."""
+
+    call = {"id": "fixture-delayed-write", "name": "write_file", "arguments": {"file_path": "fixture-delayed-approval.txt", "content": "e2e fixture\n"}}
+    return {
+        "id": "delayed-approval", "name": "Delayed tool approval", "interfaces": ["tools", "abstractcode.agent.v1"],
+        "nodes": [
+            _node("start", "on_flow_start"),
+            _node("delay", "wait_until", pin_defaults={"duration": 12}),
+            _node("tool", "tool_calls", pin_defaults={"tool_calls": [call]}),
+            _node("end", "on_flow_end"),
+        ],
+        "edges": [
+            _edge("start", "exec-out", "delay", "exec-in", "e1"),
+            _edge("delay", "exec-out", "tool", "exec-in", "e2"),
+            _edge("tool", "exec-out", "end", "exec-in", "e3"),
+        ],
+        "entryNode": "start",
+    }
+
+
 def _delegated_approval_flow() -> dict[str, Any]:
     """The root run parked on `subworkflow:<child>` while the CHILD asks for the approval.
 
@@ -301,7 +324,7 @@ def _timer_flow() -> dict[str, Any]:
 
 
 def _write_bundle(bundles: Path) -> Path:
-    flows = {flow["id"]: flow for flow in (_prompt_flow(), _event_listener_flow(), _event_emitter_flow(), _tool_approval_flow(), _delegated_approval_flow(), _tool_supervision_flow(), _assistant_contract_flow(), _assistant_contract_flow(authored=True), _assistant_contract_flow(authored=True, generic=True), _basic_agent_contract_flow(), _coding_contract_flow(), _timer_flow())}
+    flows = {flow["id"]: flow for flow in (_prompt_flow(), _event_listener_flow(), _event_emitter_flow(), _tool_approval_flow(), _delayed_approval_flow(), _delegated_approval_flow(), _tool_supervision_flow(), _assistant_contract_flow(), _assistant_contract_flow(authored=True), _assistant_contract_flow(authored=True, generic=True), _basic_agent_contract_flow(), _coding_contract_flow(), _timer_flow())}
     manifest = {
         "bundle_format_version": "1", "bundle_id": BUNDLE_ID, "bundle_version": BUNDLE_VERSION,
         "created_at": "2026-09-20T00:00:00+00:00", "default_entrypoint": "prompt-structured",
@@ -313,6 +336,7 @@ def _write_bundle(bundles: Path) -> Path:
             {"flow_id": "event-listener", "name": "Event listener", "description": "on_event fixture.ping", "interfaces": ["event", "abstractcode.agent.v1"]},
             {"flow_id": "event-emitter", "name": "Event emitter", "description": "emit_event fixture.ping", "interfaces": ["event", "abstractcode.agent.v1"]},
             {"flow_id": "tool-approval", "name": "Native tool approval", "description": "harmless write_file Tool Calls request", "interfaces": ["tools", "abstractcode.agent.v1"]},
+            {"flow_id": "delayed-approval", "name": "Delayed tool approval", "description": "a 12 s timer, then the harmless write_file approval (backlog 1163)", "interfaces": ["tools", "abstractcode.agent.v1"]},
             {"flow_id": "delegated-approval", "name": "Delegated tool approval", "description": "root parked on a subflow that requests the write_file approval", "interfaces": ["tools", "abstractcode.agent.v1"]},
             {"flow_id": "tool-supervision", "name": "Tool supervision", "description": "Multiple approval batches, failures, and a real question", "interfaces": ["tools", "abstractcode.agent.v1"]},
             {"flow_id": "assistant-contract", "name": "Assistant contract", "description": "Real Assistant inputs; deterministic no-model execution", "interfaces": ["abstractassistant.agent.v1", "abstractcode.agent.v1"]},
@@ -333,7 +357,7 @@ def _write_bundle(bundles: Path) -> Path:
     return path
 
 
-def _configure(root: Path, app_origins: tuple[str, ...] = ("http://127.0.0.1:18782", "http://localhost:18782")) -> dict[str, Path]:
+def _configure(root: Path, app_origins: tuple[str, ...] = ("http://127.0.0.1:18782", "http://localhost:18782"), *, restart: bool = False) -> dict[str, Path]:
     _clear_inherited_runtime_environment()
     data, bundles, workspace = root / "data", root / "bundles", root / "workspace"
     for directory in (data, bundles, workspace):
@@ -360,6 +384,10 @@ def _configure(root: Path, app_origins: tuple[str, ...] = ("http://127.0.0.1:187
         "ABSTRACTGATEWAY_ALLOWED_ORIGINS": ",".join(app_origins),
         "ABSTRACTGATEWAY_DEV_ALLOW_UNAUTHENTICATED_READS": "0",
     })
+    if restart:
+        # The same gateway again on the root an earlier run configured (backlog 1163: a gateway
+        # restart under an open page): its catalog and user are already there.
+        return {"root": root, "data": data, "bundles": bundles, "workspace": workspace}
     # Separate published bundle proves installed/catalog/version dedup through
     # real registry endpoints without changing the main fixture's identities.
     from abstractgateway.workflow_catalog import WorkflowCatalogStore
@@ -394,14 +422,19 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--root", type=Path, default=None, help="Optional empty fixture root. Defaults to a fresh temp directory.")
     parser.add_argument("--app-origin", action="append", default=None, help="Origin of the Code app under test (repeatable; default http://127.0.0.1:18782 and http://localhost:18782).")
+    parser.add_argument("--restart", action="store_true", help="Start again on a --root an earlier run configured (keeps its runs, catalog and user).")
     args = parser.parse_args()
     if args.host != HOST:
         parser.error("fixture only binds 127.0.0.1")
     root = args.root.resolve() if args.root else Path(tempfile.mkdtemp(prefix="abstractcode-e2e-gateway-"))
     if args.root:
         root.mkdir(parents=True, exist_ok=True)
-    paths = _configure(root, tuple(args.app_origin)) if args.app_origin else _configure(root)
-    _mint_user()
+    if args.restart and not args.root:
+        parser.error("--restart needs the --root of the earlier run")
+    origins = tuple(args.app_origin) if args.app_origin else ("http://127.0.0.1:18782", "http://localhost:18782")
+    paths = _configure(root, origins, restart=args.restart)
+    if not args.restart:
+        _mint_user()
     fixture = {
         "url": f"http://{HOST}:{args.port}", "user_id": USER_ID, "token": TOKEN,
         "bundle_id": BUNDLE_ID, "bundle_version": BUNDLE_VERSION,
