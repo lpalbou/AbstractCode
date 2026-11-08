@@ -78,7 +78,7 @@ import {
 import { gateway, gatewayRequest, formatError, newId, csrfHeaders } from "./transport";
 import { createCodeSessionPolicyClient } from "./session_policy_client";
 import { createWorkflowTransport } from "./session_transport";
-import { cancelStartedRun, finishPendingStops, forgetStopWhileStarting, noteStartedRun, rememberStopWhileStarting } from "./start_stop";
+import { cancelStartedRun, finishPendingStops, forgetStopWhileStarting, forgetStopsOfConversation, noteStartedRun, rememberStopWhileStarting, type PendingStop } from "./start_stop";
 import { selectionFromAccountValue, useAccountWorkflow } from "./account_preferences";
 import { AccountWorkflowDefault } from "./account_workflow_default";
 import { AgentSettings } from "./agent_settings";
@@ -296,7 +296,15 @@ export function CodeWorkspace() {
   const sendLock = useRef(false);
   // A Stop pressed while the run was starting: answered at once ("Stopping…" at the top) until the
   // run the gateway returns is stopped (start_stop.ts).
-  const [stoppingStart, setStoppingStart] = useState(false);
+  // `runId` is the run THIS start returned ("" until it answers): "Stopping…" ends only when that
+  // run is shown stopped, never on the previous run's state (review 2026-11-08 D5). `text` keeps
+  // the message on screen meanwhile (the box was cleared at the press).
+  const [stopping, setStopping] = useState<{ pressId: string; runId: string; text: string } | null>(null);
+  const stoppingStart = Boolean(stopping);
+  // Stops an earlier page of this tab left behind that match more than one run: the person chooses.
+  const [stopChoices, setStopChoices] = useState<PendingStop[]>([]);
+  const [stopsVersion, setStopsVersion] = useState(0);
+  const unloadingRef = useRef(false);
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -463,8 +471,13 @@ export function CodeWorkspace() {
     snapshot.status !== "idle";
   const paused = snapshot.run?.paused === true || snapshot.status === "paused";
   const locked = active || sending;
-  const baseMessages =
+  const recordedMessages =
     snapshot.loading && optimistic.length ? optimistic : snapshot.messages;
+  // A message stopped while its run was starting stays on screen until that run is shown.
+  const baseMessages =
+    stopping?.text && (!stopping.runId || session.runId !== stopping.runId)
+      ? [...recordedMessages, { id: `stopping:${stopping.pressId}`, role: "user", content: stopping.text }]
+      : recordedMessages;
   const lastBase = baseMessages[baseMessages.length - 1];
   lastMessageIdRef.current = lastBase?.id ? String(lastBase.id) : null;
   const messages = mergeStreamNotes(baseMessages, [
@@ -1041,9 +1054,10 @@ export function CodeWorkspace() {
       const onStop = () => {
         pendingStop = rememberStopWhileStarting(startedSession);
         if (!sameConversation()) return;
-        setStoppingStart(true);
+        setStopping({ pressId: pendingStop, runId: "", text: text.trim() });
         setDraft("");
       };
+      const endStopping = () => setStopping((now) => (now?.pressId === pendingStop ? null : now));
       signal?.addEventListener("abort", onStop, { once: true });
       const starting = gatewayRequest<any>(gatewayApiPath("runs/start"), {
         method: "POST",
@@ -1055,26 +1069,35 @@ export function CodeWorkspace() {
           const runId = String(answer?.run_id || "");
           if (!runId) {
             forgetStopWhileStarting(pendingStop);
-            if (sameConversation()) setStoppingStart(false);
+            if (sameConversation()) endStopping();
             return;
           }
           noteStartedRun(pendingStop, runId);
           void cancelStartedRun(runId).then(
             () => forgetStopWhileStarting(pendingStop),
-            (e) => { if (sameConversation()) { setStoppingStart(false); setError(`The run could not be stopped: ${formatError(e)}`); } },
+            (e) => {
+              setStopsVersion((v) => v + 1); // kept: the tab's retry loop tries again
+              if (sameConversation()) { endStopping(); setError(`The run could not be stopped: ${formatError(e)}`); }
+            },
           );
           // Still on this conversation: show the run, which the gateway now stops ("Stopped").
           if (sameConversation()) {
+            setStopping((now) => (now?.pressId === pendingStop ? { ...now, runId } : now));
             setSession({ sessionId: startedSession, runId });
             writeRoute(startedSession, runId);
           }
         },
         (e) => {
           if (!signal?.aborted) return;
-          // The gateway refused the start: nothing was started. A start cut by the network or a
-          // reload may have started a run: the stop stays remembered (finishPendingStops).
-          if (typeof (e as { status?: unknown })?.status === "number") forgetStopWhileStarting(pendingStop);
-          if (sameConversation()) setStoppingStart(false);
+          // A reload cut the start: the stop stays remembered for the next page (finishPendingStops).
+          if (unloadingRef.current) return;
+          forgetStopWhileStarting(pendingStop);
+          if (!sameConversation()) return;
+          endStopping();
+          // The gateway refused the start: nothing was started. The network cut it: Code cannot
+          // tell whether a run began, and says so instead of guessing later.
+          if (typeof (e as { status?: unknown })?.status !== "number")
+            setError("The gateway did not answer the start, so Code cannot tell whether a reply began. If one appears in this conversation, stop it.");
         },
       );
       const result = signal
@@ -1098,6 +1121,8 @@ export function CodeWorkspace() {
       )
         throw staleSendAbort();
       attachedRun = String(result.run_id);
+      // A new run here: a stop an earlier page left for this conversation no longer applies.
+      forgetStopsOfConversation(startedSession);
       startedRunInput.current = { runId: attachedRun, input };
       // "@default" resolves at every start: refresh the label from each one.
       setResolvedNote({
@@ -1295,28 +1320,54 @@ export function CodeWorkspace() {
       setNotice("");
     }
   }
-  // "Stopping…" for a Stop pressed while starting ends when the run shown here has stopped, or
-  // when the person opens another conversation (the stop itself still completes).
+  // "Stopping…" for a Stop pressed while starting ends when THE RUN THIS START RETURNED is shown
+  // stopped (never on the previous run's state), when the start failed, or when the person opens
+  // another conversation (the stop itself still completes).
   useEffect(() => {
-    if (stoppingStart && session.runId && terminal(snapshot.status)) setStoppingStart(false);
-  }, [stoppingStart, session.runId, snapshot.status]);
-  useEffect(() => setStoppingStart(false), [session.sessionId, identity]);
+    if (stopping?.runId && session.runId === stopping.runId && String(snapshot.run?.run_id || "") === stopping.runId && terminal(snapshot.status)) setStopping(null);
+  }, [stopping, session.runId, snapshot.run?.run_id, snapshot.status]);
+  useEffect(() => setStopping(null), [session.sessionId, identity]);
+  useEffect(() => {
+    const leaving = () => { unloadingRef.current = true; };
+    window.addEventListener("pagehide", leaving);
+    window.addEventListener("beforeunload", leaving);
+    return () => {
+      window.removeEventListener("pagehide", leaving);
+      window.removeEventListener("beforeunload", leaving);
+    };
+  }, []);
   // An earlier page of this tab stopped a run while it was starting and never saw its answer
-  // (a reload): finish that stop now.
+  // (a reload): finish that stop now, retrying every 3 s while its run is not listed yet. The loop
+  // pauses while the tab is hidden (a slow gateway pays for every list).
   useEffect(() => {
     if (!connection.connected) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const run = () =>
-      void finishPendingStops().then((left) => {
-        if (alive && left) timer = setTimeout(run, 3_000);
+    const run = () => {
+      timer = undefined;
+      if (typeof document !== "undefined" && document.hidden) return;
+      void finishPendingStops().then(({ waiting, choices }) => {
+        if (!alive) return;
+        setStopChoices(choices);
+        if (waiting && !timer) timer = setTimeout(run, 3_000);
       });
+    };
+    const onVisible = () => {
+      if (!document.hidden && !timer) run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     run();
     return () => {
       alive = false;
+      document.removeEventListener("visibilitychange", onVisible);
       if (timer) clearTimeout(timer);
     };
-  }, [connection.connected, identity]);
+  }, [connection.connected, identity, stopsVersion]);
+  const chooseStop = (choice: PendingStop, runId: string | null) => {
+    forgetStopWhileStarting(choice.id);
+    setStopChoices((list) => list.filter((c) => c.id !== choice.id));
+    if (runId) void cancelStartedRun(runId).catch((e) => setError(`The run could not be stopped: ${formatError(e)}`));
+  };
   const act = (callback: () => Promise<unknown>) => {
     const epoch = authEpoch.current;
     const sid = session.sessionId;
@@ -1988,6 +2039,20 @@ export function CodeWorkspace() {
                 </button>
               </div>
             ) : null}
+            {stopChoices.filter((c) => c.sessionId === session.sessionId).map((choice) => (
+              <div key={choice.id} className="code-notice code-stop-choice" role="status">
+                <span>
+                  You pressed Stop while a message was starting, then the page reloaded. {choice.candidates?.length} runs of this
+                  conversation started at that moment; Code will not guess which one you meant.
+                </span>
+                {(choice.candidates || []).map((c) => (
+                  <button key={c.runId} type="button" onClick={() => chooseStop(choice, c.runId)}>
+                    Stop the run started at {new Date(c.createdAt).toLocaleTimeString()}
+                  </button>
+                ))}
+                <button type="button" onClick={() => chooseStop(choice, null)}>Keep them running</button>
+              </div>
+            ))}
             {notice ? (
               <div className="code-notice" role="status">
                 {notice}

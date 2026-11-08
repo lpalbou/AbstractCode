@@ -1181,6 +1181,17 @@ select option {
 .code-discovery-errors {
   display: block;
 }
+/* A reloaded Stop that matches several runs: the sentence, then one button per run (they wrap). */
+.code-stop-choice {
+  flex-wrap: wrap;
+}
+.code-stop-choice > span {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+.code-stop-choice button {
+  margin-left: 0;
+}
 .code-discovery-errors p {
   font-size: var(--font-size-xs);
 }

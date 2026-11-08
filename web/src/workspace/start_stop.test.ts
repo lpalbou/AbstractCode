@@ -1,24 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  WAIT_FOR_RUN_MS,
   finishPendingStops,
   forgetStopWhileStarting,
+  forgetStopsOfConversation,
   noteStartedRun,
   pendingStops,
   rememberStopWhileStarting,
 } from "./start_stop";
 
-// Review 2026-11-08 R12: a Stop pressed while a run was starting must stop that run even when the
-// page that pressed it is gone (a reload) or shows another conversation.
+// Reviews 2026-11-08 R12 and D6: a Stop pressed while a run was starting is finished after a
+// reload, but only on the run it was for: exactly one candidate is cancelled, several are left
+// to the person, none waits (bounded); a new run of the conversation drops the stop.
 describe("stop while starting", () => {
   let store: Map<string, string>;
   let calls: Array<{ url: string; body?: any }>;
   let runs: Array<Record<string, unknown>>;
-  let refuseCancel = false;
+  let cancelAnswer: { status: number; body: unknown };
+  const cancels = () => calls.filter((c) => c.url === "api/gateway/commands").map((c) => c.body.run_id);
+  const run = (id: string, at: number, status = "running") => ({ run_id: id, status, created_at: new Date(at).toISOString() });
   beforeEach(() => {
     store = new Map();
     calls = [];
     runs = [];
-    refuseCancel = false;
+    cancelAnswer = { status: 200, body: { accepted: true } };
     vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => store.set(k, String(v)),
@@ -28,53 +33,85 @@ describe("stop while starting", () => {
     vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
       calls.push({ url, body: init.body ? JSON.parse(String(init.body)) : undefined });
       if (url.startsWith("api/gateway/runs?")) return new Response(JSON.stringify({ items: runs }), { status: 200 });
-      if (url === "api/gateway/commands") return refuseCancel ? new Response(JSON.stringify({ detail: "busy" }), { status: 503 }) : new Response("{}", { status: 200 });
+      if (url === "api/gateway/commands") return new Response(JSON.stringify(cancelAnswer.body), { status: cancelAnswer.status });
       return new Response("{}", { status: 404 });
     });
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("keeps the stop until the started run is cancelled, by id once known", async () => {
+  it("cancels by id once the start answered", async () => {
     const id = rememberStopWhileStarting("s1");
-    expect(pendingStops()).toHaveLength(1);
     noteStartedRun(id, "run-7");
-    await finishPendingStops();
-    const cancel = calls.find((c) => c.url === "api/gateway/commands");
-    expect(cancel?.body).toMatchObject({ run_id: "run-7", type: "cancel" });
+    expect(await finishPendingStops()).toEqual({ waiting: 0, choices: [] });
+    expect(cancels()).toEqual(["run-7"]);
     expect(pendingStops()).toHaveLength(0);
   });
 
-  it("after a reload with no run id: cancels the conversation's run started around the press, nothing older or finished", async () => {
+  it("after a reload: exactly one unfinished run in the press's window is cancelled; older, later or finished ones never", async () => {
     rememberStopWhileStarting("s1");
     const at = pendingStops()[0].at;
     runs = [
-      { run_id: "older", status: "running", created_at: new Date(at - 60_000).toISOString() },
-      { run_id: "done", status: "completed", created_at: new Date(at + 500).toISOString() },
-      { run_id: "started", status: "running", created_at: new Date(at + 800).toISOString() },
+      run("older", at - 3_000),
+      run("done", at + 500, "completed"),
+      run("started", at - 300),
+      run("next-day", at + 61_000),
     ];
     await finishPendingStops();
     expect(calls[0].url).toContain("session_id=s1");
-    expect(calls.filter((c) => c.url === "api/gateway/commands").map((c) => c.body.run_id)).toEqual(["started"]);
+    expect(cancels()).toEqual(["started"]);
     expect(pendingStops()).toHaveLength(0);
   });
 
-  it("a run the gateway does not list yet keeps the stop for the next try", async () => {
+  it("two candidates: nothing is cancelled, the person chooses", async () => {
     rememberStopWhileStarting("s1");
-    runs = [];
-    expect(await finishPendingStops()).toBe(1);
-    runs = [{ run_id: "late", status: "running", created_at: new Date(pendingStops()[0].at + 200).toISOString() }];
-    expect(await finishPendingStops()).toBe(0);
-    expect(calls.filter((c) => c.url === "api/gateway/commands").map((c) => c.body.run_id)).toEqual(["late"]);
+    const at = pendingStops()[0].at;
+    runs = [run("a", at + 100), run("b", at + 4_000)];
+    const { waiting, choices } = await finishPendingStops();
+    expect(cancels()).toEqual([]);
+    expect(waiting).toBe(0);
+    expect(choices).toHaveLength(1);
+    expect(choices[0].candidates?.map((c) => c.runId)).toEqual(["a", "b"]);
+    // Asked again: still no guess, no new list request.
+    const before = calls.length;
+    await finishPendingStops();
+    expect(calls.length).toBe(before);
+    forgetStopWhileStarting(choices[0].id);
+    expect(pendingStops()).toHaveLength(0);
   });
 
-  it("a refused cancel is kept for the next load; a start that failed is forgotten", async () => {
+  it("no run listed yet: the stop waits, then is dropped after the bound", async () => {
+    rememberStopWhileStarting("s1");
+    const at = pendingStops()[0].at;
+    expect((await finishPendingStops(() => at + 2_000)).waiting).toBe(1);
+    runs = [run("late", at + 1_500)];
+    expect((await finishPendingStops(() => at + 5_000)).waiting).toBe(0);
+    expect(cancels()).toEqual(["late"]);
+    rememberStopWhileStarting("s2");
+    runs = [];
+    const at2 = pendingStops()[0].at;
+    expect((await finishPendingStops(() => at2 + WAIT_FOR_RUN_MS + 1)).waiting).toBe(0);
+    expect(pendingStops()).toHaveLength(0);
+  });
+
+  it("a refused cancel (an error or accepted: false) keeps the stop", async () => {
     const id = rememberStopWhileStarting("s1");
     noteStartedRun(id, "run-8");
-    refuseCancel = true;
+    cancelAnswer = { status: 503, body: { detail: "busy" } };
     await finishPendingStops();
     expect(pendingStops()).toHaveLength(1);
-    forgetStopWhileStarting(id);
+    cancelAnswer = { status: 200, body: { accepted: false, detail: "not yet" } };
+    await finishPendingStops();
+    expect(pendingStops()).toHaveLength(1);
+    cancelAnswer = { status: 200, body: { accepted: true } };
+    await finishPendingStops();
     expect(pendingStops()).toHaveLength(0);
+  });
+
+  it("a new run started by the tab in that conversation drops the stop there (never cancels the new run)", async () => {
+    rememberStopWhileStarting("s1");
+    rememberStopWhileStarting("s2");
+    forgetStopsOfConversation("s1");
+    expect(pendingStops().map((p) => p.sessionId)).toEqual(["s2"]);
   });
 
   it("drops a stop older than ten minutes", () => {

@@ -218,6 +218,7 @@ test("Stop pressed while a new conversation's run is starting stops that run", a
   await expect(page.locator(".code-run-strip")).toContainText("Stopping…", { timeout: 600 });
   await expect(primary).toHaveAttribute("data-mode", "send", { timeout: 600 });
   await expect(page.locator(".code-conversation .pc-composer textarea")).toHaveValue("", { timeout: 600 });
+  await expect(page.locator(".pc-chat-item--user").last()).toContainText("Stop me at once."); // the message stays on screen
   await shot(page, "stop-at-once-stopping-desktop");
   await expect(page.locator(".code-run-strip")).toContainText("Stopped", { timeout: 20_000 });
   // D4: the pointer still rests on the button it pressed; no "Stop" tooltip over the idle Send.
@@ -288,4 +289,147 @@ test("a Stop pressed while starting is finished after a reload", async ({ page }
     }, pending[0].sessionId);
     return now.every((status: string) => status === "cancelled");
   }, { timeout: 20_000 }).toBe(true);
+});
+
+async function signIn(page: import("@playwright/test").Page): Promise<void> {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const dialog = page.getByRole("dialog", { name: "Gateway connection" });
+  await page.locator("#gateway-session-url").fill(fixtureGateway);
+  await page.locator("#gateway-session-user").fill(fixtureUser);
+  await page.locator("#gateway-session-token").fill(fixtureToken);
+  await dialog.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
+// D5 (review 2026-11-08): Stop while the SECOND message of a conversation is starting. The previous
+// run is already over ("Stopped" here); that must not end "Stopping…", and the message stays shown.
+test("Stop while the second message of a conversation is starting", async ({ page }) => {
+  test.setTimeout(120_000);
+  const allowed = new URL(appOrigin).origin;
+  let hold = 0;
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== allowed) return route.abort("blockedbyclient");
+    if (!url.pathname.endsWith("/api/gateway/runs/start") || !hold) return route.continue();
+    const response = await route.fetch();
+    await new Promise((r) => setTimeout(r, hold));
+    return route.fulfill({ response });
+  });
+  await signIn(page);
+  await chooseWorkflow(page, "Event listener");
+  const strip = page.locator(".code-run-strip");
+  const primary = page.locator(".code-conversation .pc-composer .pc-composer__send--compact");
+  const box = page.locator(".code-conversation .pc-composer textarea");
+  // First message: started, then stopped normally (the conversation's previous run is over).
+  await box.fill("First message.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(strip).toContainText("Working");
+  await primary.click();
+  await expect(strip).toContainText("Stopped", { timeout: 20_000 });
+  // Second message: the gateway answers the start 2.5 s later; Stop pressed at once.
+  hold = 2500;
+  await box.fill("Second message.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(primary).toHaveAttribute("aria-label", "Stop", { timeout: 1_000 });
+  await primary.click();
+  // Sampled every 100 ms for 1.5 s: "Stopping…", never the previous run's "Stopped"; the message shown.
+  for (let i = 0; i < 15; i++) {
+    await expect(strip).toContainText("Stopping…", { timeout: 300 });
+    await expect(page.locator(".pc-chat-item--user").last()).toContainText("Second message.");
+    await page.waitForTimeout(100);
+  }
+  await expect(box).toHaveValue("");
+  await shot(page, "stop-second-message-stopping-desktop");
+  // Then the run this start returned is shown stopped.
+  await expect(strip).toContainText("Stopped", { timeout: 20_000 });
+  await expect(strip).not.toContainText("Stopping…");
+  const runId = new URLSearchParams(new URL(page.url()).hash.slice(1)).get("run");
+  const run = await page.evaluate(async (id) => (await (await fetch(`api/gateway/runs/${id}`, { credentials: "same-origin" })).json()), runId);
+  expect(run.status).toBe("cancelled");
+  await expect(page.locator(".pc-chat-item--user").filter({ hasText: "Second message." })).toHaveCount(1);
+  await shot(page, "stop-second-message-stopped-desktop");
+});
+
+// D6 (review 2026-11-08): a start the network cut (no answer, page still here): the stop record is
+// dropped and the person is told; nothing is left to match a later run.
+test("a start cut by the network drops its stop and says so", async ({ page }) => {
+  test.setTimeout(90_000);
+  const allowed = new URL(appOrigin).origin;
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== allowed) return route.abort("blockedbyclient");
+    if (!url.pathname.endsWith("/api/gateway/runs/start")) return route.continue();
+    await new Promise((r) => setTimeout(r, 1200));
+    return route.abort("failed");
+  });
+  await signIn(page);
+  await chooseWorkflow(page, "Event listener");
+  const primary = page.locator(".code-conversation .pc-composer .pc-composer__send--compact");
+  await page.locator(".code-conversation .pc-composer textarea").fill("The network will cut this.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(primary).toHaveAttribute("aria-label", "Stop", { timeout: 1_000 });
+  await primary.click();
+  await expect(page.locator(".code-run-strip")).toContainText("Stopping…", { timeout: 600 });
+  await expect(page.getByText("The gateway did not answer the start, so Code cannot tell whether a reply began. If one appears in this conversation, stop it.")).toBeVisible({ timeout: 10_000 });
+  expect(await page.evaluate(() => sessionStorage.getItem("abstractcode.stop-while-starting.v1"))).toBeNull();
+  await expect(page.locator(".code-run-strip")).toHaveCount(0);
+});
+
+// D6 + (b): a stop an earlier page left behind. While its run is not listed, the tab asks again
+// every 3 s, never while the tab is hidden; a stop that matches several runs is never guessed:
+// the conversation names them, one Stop each, and the person decides.
+test("a left-behind stop waits only while the tab is visible, and never guesses between runs", async ({ page }) => {
+  test.setTimeout(120_000);
+  const allowed = new URL(appOrigin).origin;
+  const lists: number[] = [];
+  const commands: any[] = [];
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== allowed) return route.abort("blockedbyclient");
+    if (url.pathname.endsWith("/api/gateway/runs") && url.searchParams.get("session_id") === "planted-wait") lists.push(Date.now());
+    if (url.pathname.endsWith("/api/gateway/commands")) commands.push(route.request().postDataJSON());
+    return route.continue();
+  });
+  await signIn(page);
+  await chooseWorkflow(page, "Event listener");
+  // A conversation of this test with two unfinished runs started a moment apart.
+  const box = page.locator(".code-conversation .pc-composer textarea");
+  await box.fill("Run one.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.locator(".code-run-strip")).toContainText("Working");
+  const route1 = new URLSearchParams(new URL(page.url()).hash.slice(1));
+  const sessionId = String(route1.get("session"));
+  const runs = await page.evaluate(async (sid) => ((await (await fetch(`api/gateway/runs?session_id=${sid}&root_only=true&limit=20`, { credentials: "same-origin" })).json()).items || []).map((r: any) => ({ id: r.run_id, created: r.created_at })), sessionId);
+  expect(runs.length).toBeGreaterThanOrEqual(1);
+  const at = Date.parse(runs[0].created);
+  // Plant: one stop waiting for a run that never comes (another conversation), one with two candidates here.
+  await page.evaluate(({ sid, at, run }) => {
+    sessionStorage.setItem("abstractcode.stop-while-starting.v1", JSON.stringify([
+      { id: "wait", sessionId: "planted-wait", at: Date.now() },
+      { id: "choose", sessionId: sid, at, candidates: [{ runId: run, createdAt: new Date(at).toISOString() }, { runId: "another-run", createdAt: new Date(at + 2000).toISOString() }] },
+    ]));
+  }, { sid: sessionId, at, run: runs[0].id });
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  const choice = page.locator(".code-stop-choice");
+  await expect(choice).toBeVisible({ timeout: 10_000 });
+  await expect(choice.getByRole("button", { name: /^Stop the run started at / })).toHaveCount(2);
+  expect(commands).toEqual([]); // nothing guessed
+  // The waiting stop asks every 3 s while visible ...
+  await expect.poll(() => lists.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  // ... and not at all while the tab is hidden.
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await page.waitForTimeout(1_000);
+  const hiddenFrom = lists.length;
+  await page.waitForTimeout(7_000);
+  expect(lists.length).toBe(hiddenFrom);
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect.poll(() => lists.length, { timeout: 5_000 }).toBeGreaterThan(hiddenFrom);
+  await shot(page, "stop-choice-desktop");
+  // The person chooses: that run (and only it) is stopped; the choice is gone.
+  await choice.getByRole("button", { name: /^Stop the run started at / }).first().click();
+  await expect(choice).toHaveCount(0);
+  await expect.poll(() => commands.length).toBe(1);
+  expect(commands[0]).toMatchObject({ run_id: runs[0].id, type: "cancel" });
+  const left = await page.evaluate(() => JSON.parse(sessionStorage.getItem("abstractcode.stop-while-starting.v1") || "[]").map((p: any) => p.id));
+  expect(left).toEqual(["wait"]);
 });

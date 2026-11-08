@@ -29,8 +29,10 @@ export function RunStatusBar({
   stopping?: boolean;
 }) {
   const recorded = useMemo(() => workflowProgress(snapshot), [snapshot]);
-  const progress = stopping && !["completed", "failed", "cancelled"].includes(snapshot.status)
-    ? { ...recorded, label: "Stopping…", detail: "", tone: "working" as const }
+  // The caller ends `stopping` when the run it stops is shown stopped; the run on screen until
+  // then may be the previous one (its "Completed" is not this Stop's answer).
+  const progress = stopping
+    ? { ...recorded, label: "Stopping…", detail: "", tone: "working" as const, toolCalls: 0, totalTokens: undefined }
     : recorded;
   // Live model phase, when the provider reports one. "Generating the next
   // response" is true of a 2-second prefill and of a 40-second one; this
