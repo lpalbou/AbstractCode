@@ -59,29 +59,99 @@ export function searchConversations<T extends Pick<SessionSummary, "prompt" | "s
   return items.filter((item) => `${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
 }
 
+const WEEKDAYS: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th"}`;
+
+/** "30m" (a stored interval) → "Every 30 min"; "1h" → "Every hour"; "1d" → "Every day". */
+function intervalWords(every: string): string {
+  const match = /^([1-9][0-9]*)([smhd])$/.exec(every.trim());
+  if (!match) return "";
+  const n = Number(match[1]);
+  const unit = match[2];
+  if (n === 1) return { s: "Every second", m: "Every minute", h: "Every hour", d: "Every day" }[unit] || "";
+  return `Every ${n} ${{ s: "s", m: "min", h: "h", d: "d" }[unit]}`;
+}
+
 /**
- * A row's name keeps two lines; a longer one ends in "…" (ADR 0053: never truncated silently):
- * the whole name is then the kit tooltip of the row's button, on hover and on keyboard focus.
- * A name that fits carries no tooltip (nothing to reveal), and the title's own `title` attribute
- * is removed so the browser does not show a second tooltip.
+ * The automation's schedule in a few words for a sidebar row ("Daily 08:00", "Every 8 h",
+ * "Weekly Mon, Thu 09:00", "Monthly 1st 09:00", "Every 2 min"), from the recorded rule's
+ * STRUCTURE (its interval or calendar fields), never by reading the gateway's sentence. The time
+ * is the rule's own wall time; its zone and bounds stay in the whole rule (the row's tooltip and
+ * the automation's details). A state (Paused, …) or a trigger the row cannot word briefly gives
+ * the kit's own word, or "" (the row then shows no schedule).
  */
-export function useRevealClampedTitle(title: string): React.RefObject<HTMLDivElement> {
+export function compactSchedule(s: Pick<AutomationSummary, "status" | "trigger">): string {
+  const state = { paused: "Paused", archived: "Archived", failed: "Failed", completed: "Ended" }[String(s.status)];
+  if (state) return state;
+  const trigger = s.trigger;
+  if (trigger.source_id === "manual") return "Manual";
+  if (trigger.source_id.startsWith("email")) return "On new email";
+  if (trigger.source_id !== "schedule") return "";
+  const c = (trigger.config || {}) as Record<string, unknown>;
+  const at = typeof c.at === "string" ? c.at : "";
+  const time = /^\d{2}:\d{2}/.test(at) ? at.slice(0, 5) : "";
+  if (typeof c.every === "string") return intervalWords(c.every);
+  if (c.kind === "daily") return time ? `Daily ${time}` : "Daily";
+  if (c.kind === "weekly") {
+    const days = (Array.isArray(c.days) ? c.days : []).map((d) => WEEKDAYS[String(d)] || "").filter(Boolean).join(", ");
+    return ["Weekly", days, time].filter(Boolean).join(" ");
+  }
+  if (c.kind === "monthly") {
+    const day = c.day === "last" ? "last day" : Number.isSafeInteger(Number(c.day)) ? ordinal(Number(c.day)) : "";
+    return ["Monthly", day, time].filter(Boolean).join(" ");
+  }
+  if (c.kind === "once") return at ? `Once ${at.replace("T", " ").slice(0, 16)}` : "Once";
+  if (c.start_at && !c.every) return "Once";
+  return "";
+}
+
+/**
+ * A sidebar row shows nothing cut (ADR 0053 §2). Its name keeps two lines; a longer one ends in
+ * "…" and the whole name is the kit tooltip of the row's button (hover and keyboard focus). Its
+ * details are one line: when they do not fit, whole parts leave the line, lowest value first
+ * (`drop`: the schedule, then the tool count, then the next run), never an ellipsis inside a part;
+ * what left is said in the same tooltip, and stays in the conversation or automation details.
+ * `schedule` puts the compact schedule words on the automation's schedule part.
+ */
+export function useRevealClampedTitle(title: string, schedule = ""): React.RefObject<HTMLDivElement> {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const root = ref.current;
     const name = root?.querySelector<HTMLElement>(".af-session-card__title");
     const button = root?.querySelector<HTMLElement>(".af-session-card__open");
+    const meta = root?.querySelector<HTMLElement>(".af-session-card__meta");
     if (!root || !name || !button) return;
     name.removeAttribute("title");
+    // Recomputed after every render (the kit re-renders the figures: a next run time changes).
+    for (const el of Array.from(meta?.children || [])) if (el.hasAttribute("data-drop")) el.removeAttribute("data-drop");
+    const cadence = meta?.querySelector<HTMLElement>('[data-field="cadence"]') || null;
+    if (cadence) {
+      if (schedule) cadence.setAttribute("data-short", schedule);
+      else cadence.setAttribute("data-drop", "empty");
+    }
+    // While an automation needs you, "Needs you" says more than the next run time.
+    const next = meta?.querySelector<HTMLElement>('[data-field="next"]') || null;
+    if (next && meta?.querySelector(".af-session-card__attention")) next.setAttribute("data-drop", "attention");
+    const tools = meta ? Array.from(meta.children).find((el) => /tool call/.test(el.getAttribute("aria-label") || "")) as HTMLElement | undefined : undefined;
+    const droppable = [cadence, tools || null, next].filter((el): el is HTMLElement => Boolean(el) && el!.getAttribute("data-drop") !== "empty" && el!.getAttribute("data-drop") !== "attention");
     const update = () => {
-      if (name.scrollHeight > name.clientHeight + 1) button.setAttribute("data-af-tip", title);
-      else button.removeAttribute("data-af-tip");
+      for (const el of droppable) el.removeAttribute("data-drop");
+      const dropped: string[] = [];
+      for (const el of droppable) {
+        if (!meta || meta.scrollWidth <= meta.clientWidth + 1) break;
+        el.setAttribute("data-drop", "fit");
+        dropped.push(el.getAttribute("title") || el.getAttribute("aria-label") || el.textContent || "");
+      }
+      const tip = [name.scrollHeight > name.clientHeight + 1 ? title : "", ...dropped.filter(Boolean)].filter(Boolean).join(" · ");
+      // Written only when it changes: the kit tooltip hides when its sentence is rewritten.
+      if (tip && button.getAttribute("data-af-tip") !== tip) button.setAttribute("data-af-tip", tip);
+      else if (!tip && button.hasAttribute("data-af-tip")) button.removeAttribute("data-af-tip");
     };
     update();
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null;
-    observer?.observe(name);
+    observer?.observe(root);
     return () => observer?.disconnect();
-  }, [title]);
+  });
   return ref;
 }
 
@@ -167,7 +237,7 @@ export function AutomationCard(props: {
   const [archiving, setArchiving] = useState(false);
   const [error, setError] = useState("");
   const archive = automationControls(s, [], props.busy || archiving).archive;
-  const reveal = useRevealClampedTitle(s.title || "Automation");
+  const reveal = useRevealClampedTitle(s.title || "Automation", compactSchedule(s));
   return <div ref={reveal} className="code-automation-item" data-automation-id={s.automation_id} data-status={s.status}>
     <SharedAutomationCard summary={s} selected={props.selected} nowMs={props.nowMs} onOpen={props.onSelect}
       onArchive={props.onArchive ? () => { setError(""); setConfirm(true); } : undefined}

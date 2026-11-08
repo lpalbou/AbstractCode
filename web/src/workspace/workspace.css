@@ -2956,7 +2956,7 @@ select option {
 .code-sidebar .af-session-card__marker.is-working {
   margin: calc((1.35 * var(--code-row-title) - 9px) / 2) calc((20px - 9px) / 2) 0 auto;
 }
-.code-sidebar .af-session-card__meta {
+.code-sidebar .af-session-card .af-session-card__meta {
   flex-wrap: nowrap;
   gap: 6px;
   margin-top: 4px;
@@ -2969,22 +2969,16 @@ select option {
 .code-sidebar .af-session-card__meta > span[aria-label] > span[aria-hidden="true"] { display: none; }
 .code-sidebar .af-session-card__meta > span[aria-label]:not(.af-automation-card__unseen)::before { content: attr(aria-label); }
 .code-sidebar .af-session-card__meta > span { flex: none; gap: 0; }
-.code-sidebar .af-session-card__meta > .af-automation-card__schedule,
-.code-sidebar .af-session-card__meta > .af-session-card__time { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Automations: the figures first, the schedule's words last (they end in "…" when the row is
-   narrow; the whole rule is the tooltip of that part). While it needs you, "Needs you" replaces
-   the next run time. */
-.code-sidebar .af-automation-card .af-session-card__meta > [data-field="runs"] { order: 1; }
-.code-sidebar .af-automation-card .af-session-card__meta > [data-field="next"] { order: 2; }
-.code-sidebar .af-automation-card .af-session-card__meta > .af-session-card__attention { order: 3; }
-.code-sidebar .af-automation-card .af-session-card__meta > [data-field="cadence"] { order: 4; }
-.code-sidebar .af-automation-card .af-session-card__meta > .af-automation-card__unseen { order: 5; }
-.code-sidebar .af-automation-card .af-session-card__meta:has(> .af-session-card__attention) > [data-field="next"] { display: none; }
-/* "next 5h": the kit's own short value after one word, so the schedule keeps more room. */
+/* Nothing is cut inside the details line: a part that does not fit leaves the line whole
+   (sidebar_cards.tsx sets data-drop; the row's tooltip names it), and the automation's schedule
+   reads in its compact form (data-short: "Daily 08:00", "Every 8 h"). */
+.code-sidebar .af-session-card__meta > [data-drop] { display: none; }
+.code-sidebar .af-session-card__meta > span[aria-label][data-field="cadence"][data-short]:not(.af-automation-card__unseen)::before { content: attr(data-short); }
+/* "next 5h": the kit's own short value after one word. */
 .code-sidebar .af-session-card__meta > span[aria-label][data-field="next"]:not(.af-automation-card__unseen)::before { content: "next "; white-space: pre; }
 .code-sidebar .af-session-card__meta > span[aria-label][data-field="next"] > span[aria-hidden="true"] { display: inline; }
-.code-sidebar .af-session-card:not(.af-automation-card) .af-session-card__meta > span:not(:last-child)::after,
-.code-sidebar .af-automation-card .af-session-card__meta > span:is([data-field="runs"], [data-field="next"], .af-session-card__attention)::after {
+/* "·" between the parts still on the line (dropped ones and the count excluded). */
+.code-sidebar .af-session-card__meta > span:not([data-drop]):has(~ span:not([data-drop]):not(.af-automation-card__unseen))::after {
   content: "·";
   margin-left: 6px;
 }
@@ -3000,6 +2994,19 @@ select option {
 .code-sidebar .af-session-card__attention { color: var(--warning); }
 @media (pointer: coarse) {
   .code-sidebar .af-session-card__meta { font-size: max(13px, var(--font-size-sm, 12px)); }
+}
+/* With a mouse the archive button floats over the row's right edge on hover/focus instead of
+   reserving its width on every row (the details line keeps that room); on touch it stays in place. */
+@media (hover: hover) and (pointer: fine) {
+  .code-sidebar .af-session-card { position: relative; }
+  .code-sidebar .af-session-card__archive {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    margin: 0;
+    transform: translateY(-50%);
+    background: var(--ui-surface-2);
+  }
 }
 /* Section headers: a quiet label row, not a raised band. */
 .code-sidebar .code-panel-header {

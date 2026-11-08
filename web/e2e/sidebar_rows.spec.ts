@@ -33,6 +33,11 @@ function automations(): unknown {
     item.next_run_at = next;
     item.next_fire_at = next;
   });
+  // One rule too long for a desktop row even in its compact form (five weekdays): it must leave
+  // the line whole, never be cut.
+  const news = list.items[1];
+  news.trigger = { ...news.trigger, source_version: 2, config: { kind: "weekly", days: ["mon", "tue", "wed", "thu", "fri"], at: "09:00", time_zone: "Europe/Paris" } };
+  news.schedule_rule_text = "Every Monday, Tuesday, Wednesday, Thursday and Friday at 09:00 (Europe/Paris)";
   return list;
 }
 
@@ -147,12 +152,22 @@ async function checkRows(page: Page, heights: (selector: string) => Promise<numb
   expect(await rendered(meta(TITLES.short))).toMatch(/^1 turn · (just now|\d+ min ago)$/);
   expect(await meta(TITLES.short).evaluate((el) => el.getBoundingClientRect().height < 24)).toBe(true);
   const morning = page.locator(".code-automation-item .af-session-card").filter({ hasText: "Morning briefing" });
-  expect(await rendered(morning.locator(".af-session-card__meta"))).toMatch(/^7 runs · next 2[12]h · Every day at 08:00 \(Europe\/Paris\)$/);
-  // The whole schedule rule stays readable on that part (it may end in "…" in a narrow row).
-  await expect(morning.locator('[data-field="cadence"]')).toHaveAttribute("title", "Every day at 08:00 (Europe/Paris)");
+  // The schedule in its compact form, from the rule's structure (the fixture's daily 08:00 rule).
+  expect(await rendered(morning.locator(".af-session-card__meta"))).toMatch(/^7 runs · Daily 08:00 · next 2[12]h$/);
   // It needs you: "Needs you" instead of the next run; the new-results count stays on the row.
   const triage = page.locator(".code-automation-item .af-session-card").filter({ hasText: "Inbox triage" });
-  expect(await rendered(triage.locator(".af-session-card__meta"))).toMatch(/^7 runs · Needs you · Every 30 minutes \(UTC\) 2$/);
+  const triageLine = await rendered(triage.locator(".af-session-card__meta"));
+  expect(triageLine).toMatch(/^7 runs · (Every 30 min · )?Needs you 2$/);
+  // When the schedule had to leave this busier line, the row's tooltip names it.
+  if (!triageLine.includes("Every 30 min")) await expect(triage.locator(".af-session-card__open")).toHaveAttribute("data-af-tip", "Every 30 minutes (UTC)");
+  // Too long even compact: the schedule leaves the line whole, and the row's tooltip says it.
+  const news = page.locator(".code-automation-item").filter({ hasText: "AI news monitor" });
+  expect(await rendered(news.locator(".af-session-card__meta"))).toMatch(/^6 runs · next [56]h$/);
+  await expect(news.locator(".af-session-card__open")).toHaveAttribute("data-af-tip", "Every Monday, Tuesday, Wednesday, Thursday and Friday at 09:00 (Europe/Paris)");
+  // Nothing is ever cut inside a row's details: no part and no line wider than its box.
+  const cut = await page.locator(".code-sidebar .af-session-card__meta").evaluateAll((metas) => metas.flatMap((m) =>
+    [m, ...Array.from(m.children)].filter((el) => getComputedStyle(el).display !== "none" && (el as HTMLElement).scrollWidth > (el as HTMLElement).clientWidth + 1).map((el) => el.textContent || el.className)));
+  expect(cut).toEqual([]);
   // The state marker and the count sit in one column at the right edge.
   const centreX = (loc: import("@playwright/test").Locator) => loc.evaluate((el) => { const r = el.getBoundingClientRect(); return Math.round(r.left + r.width / 2); });
   expect(Math.abs((await centreX(triage.locator(".af-session-card__marker"))) - (await centreX(triage.locator(".af-automation-card__unseen"))))).toBeLessThanOrEqual(1);
