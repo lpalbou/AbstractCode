@@ -1076,10 +1076,11 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await drawer.getByRole("button", { name: /^Collapse / }).click();
     await selectWorkflow(page, "Authored model contract");
     await openWorkspaceSection(page, "Model");
-    await expect(
-      page.locator(".code-rail .af-rail__panel")
-        .getByText("Workflow default: fixture-authored · reasoner-authored."),
-    ).toBeVisible();
+    // The compact Model panel (6b4d62d) names the authored defaults in the selects themselves
+    // (the kit's compact picker shows no separate hint sentence): unchanged by the edits above.
+    const modelPanel = page.locator(".code-rail .af-rail__panel");
+    await expect(modelPanel.getByRole("button", { name: "Provider", exact: true })).toHaveText(/^Workflow default · fixture-authored/);
+    await expect(modelPanel.getByRole("button", { name: "Model", exact: true })).toHaveText(/^Workflow default · reasoner-authored/);
   });
 
   test("shares per-message read, pause, resume and stop with configurable Gateway voice", async ({
