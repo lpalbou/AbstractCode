@@ -1,7 +1,7 @@
 import { gatewayApiPath, joinBaseUrl } from "@abstractframework/ui-kit";
 import { LedgerStreamEvent, type AttachmentRef } from "./types";
 import { SseParser } from "./sse_parser";
-import { llmDeltaFromSse, type LlmDeltaEvent } from "@abstractframework/panel-chat";
+import { chatAuthorOf, llmDeltaFromSse, type ChatAuthor, type LlmDeltaEvent } from "@abstractframework/panel-chat";
 
 export type GatewayClientConfig = {
   base_url: string; // e.g. "http://localhost:8081" (no trailing slash) or "" for same-origin
@@ -200,7 +200,7 @@ export class GatewayClient {
    * live lane never ends the ledger stream. Without `on_delta`, delta frames
    * are ignored, as they were before live replies existed.
    */
-  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal; on_open?: () => void; on_delta?: (ev: LlmDeltaEvent) => void; on_delta_error?: (error: Error, frame: { event: string; data: string }) => void }): Promise<void> {
+  async stream_ledger(run_id: string, opts: { after: number; on_step: (ev: LedgerStreamEvent) => void; signal?: AbortSignal; on_open?: () => void; on_delta?: (ev: LlmDeltaEvent, frame?: { author: ChatAuthor | null }) => void; on_delta_error?: (error: Error, frame: { event: string; data: string }) => void }): Promise<void> {
     const rid = String(run_id || "").trim();
     if (!rid) throw new Error("stream_ledger: run_id is required");
     if (opts.on_delta && !opts.on_delta_error)
@@ -242,7 +242,15 @@ export class GatewayClient {
             return;
           }
           if (delta) {
-            on_delta(delta);
+            // Who is replying (AbstractGateway mention follow-ups: every live reply frame carries
+            // the root turn's `author`); the kit's delta contract does not keep it, so it rides beside.
+            let author: ChatAuthor | null = null;
+            try {
+              author = chatAuthorOf((JSON.parse(data) as { author?: unknown })?.author);
+            } catch {
+              author = null;
+            }
+            on_delta(delta, { author });
             return;
           }
         }

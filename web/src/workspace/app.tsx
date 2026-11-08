@@ -1,6 +1,6 @@
-import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, type ChatMentionCandidate, type ChatMentionSent} from "../vendor/abstractchat/conversation.js";
+import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, isMentionTurn, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions } from "./mentions";
+import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, isMentionTurn, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -322,6 +322,9 @@ export function CodeWorkspace() {
   const [followTurn, setFollowTurn] = useState<{ sessionId: string; runId: string; identity: string } | null>(null);
   const refusedEntities = useRef(new Set<string>());
   const entityRoster = useRef<{ identity: string; load: Promise<ChatMentionCandidate[]> } | null>(null);
+  // Who is writing each live reply, from its stream frames (by run): the bubble is labelled before
+  // the saved message, which carries its own author, replaces it.
+  const liveAuthors = useRef(new Map<string, ChatAuthor>());
   const unloadingRef = useRef(false);
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
@@ -445,6 +448,9 @@ export function CodeWorkspace() {
   const workflowTransport = useMemo(
     () =>
       createWorkflowTransport({
+        onDeltaAuthor: (runId, author) => {
+          liveAuthors.current.set(runId, author);
+        },
         onDeltaError: (report) => {
           const scope = streamScopeRef.current;
           const note = malformedDeltaNote(report, lastMessageIdRef.current);
@@ -498,7 +504,7 @@ export function CodeWorkspace() {
       : recordedMessages;
   const lastBase = baseMessages[baseMessages.length - 1];
   lastMessageIdRef.current = lastBase?.id ? String(lastBase.id) : null;
-  const messages = mergeStreamNotes(baseMessages, [
+  const messages = mergeStreamNotes(withLiveAuthors(baseMessages, liveAuthors.current), [
     streamingUnsupportedNote(preferences.streamReplies, catalog.streaming, baseMessages),
     ...(streamNotes.scope === streamScope ? streamNotes.notes : []),
   ]);
@@ -1216,6 +1222,7 @@ export function CodeWorkspace() {
   useEffect(() => {
     entityRoster.current = null;
     refusedEntities.current = new Set();
+    liveAuthors.current = new Map();
     setMentionsOff(null);
     setFollowTurn(null);
   }, [identity]);
@@ -1227,7 +1234,7 @@ export function CodeWorkspace() {
    * back in the composer (the chips stay: the send rejects). Each reply is a session turn the
    * gateway recorded; the conversation opens on the newest once the current reply has ended.
    */
-  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { signal?: AbortSignal; keepDraft: boolean }) {
+  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { repeatOf: string; signal?: AbortSignal; keepDraft: boolean }) {
     if (!mentions.length) return;
     const askedBy = identityRef.current;
     const epoch = authEpoch.current;
@@ -1238,7 +1245,7 @@ export function CodeWorkspace() {
       (mention) =>
         gatewayRequest(gatewayApiPath(`sessions/${encodeURIComponent(sessionId)}/mentions`), {
           method: "POST",
-          body: JSON.stringify(mentionRequestBody(text, mention)),
+          body: JSON.stringify(mentionRequestBody(text, mention, options.repeatOf)),
         }),
       {
         signal: options.signal,
@@ -1341,10 +1348,11 @@ export function CodeWorkspace() {
             setMentionStatus(null);
             if (mode === "queue") return queueNextTurn(text, mentions);
             const sessionId = session.sessionId;
+            const guided = session.runId;
             const result = await guideRun(text);
             // The guidance is in the run: then the picked entities are asked (WorkflowChat keeps
-            // the draft and the chips when this rejects).
-            if (result.accepted) await askMentions(sessionId, text, mentions, { keepDraft: false });
+            // the draft and the chips when this rejects). The guided turn carries the same words.
+            if (result.accepted) await askMentions(sessionId, text, mentions, { repeatOf: guided, keepDraft: false });
             return result;
           },
         }
@@ -1358,16 +1366,17 @@ export function CodeWorkspace() {
     const sessionId = session.sessionId;
     setMentionStatus(null);
     if (!active) {
-      await startTurn(text, opts?.signal);
-      await askMentions(sessionId, text, mentions, { signal: opts?.signal, keepDraft: true });
+      const started = await startTurn(text, opts?.signal);
+      await askMentions(sessionId, text, mentions, { repeatOf: started, signal: opts?.signal, keepDraft: true });
       return;
     }
+    const guided = session.runId;
     const queued = !avatarMode && Boolean(interaction);
     const result = queued ? queueNextTurn(text, mentions) : await guideRun(text);
     if (!result.accepted) throw new Error("The gateway did not accept this message.");
     setDraft("");
     setNotice(avatarMode ? "Sent. Your message is available to the assistant." : queued ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
-    if (!queued) await askMentions(sessionId, text, mentions, { signal: opts?.signal, keepDraft: true });
+    if (!queued) await askMentions(sessionId, text, mentions, { repeatOf: guided, signal: opts?.signal, keepDraft: true });
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");
@@ -1384,7 +1393,7 @@ export function CodeWorkspace() {
     const nextRunId = await startTurn(intent.text);
     setQueue((items) => advanceQueueIntents(items, intent, nextRunId));
     // Its names are asked now; a refusal is said and never pauses the queue (the turn started).
-    await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { keepDraft: false }).catch((e) => setError(formatError(e)));
+    await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { repeatOf: nextRunId, keepDraft: false }).catch((e) => setError(formatError(e)));
   }
   useEffect(() => {
     if (

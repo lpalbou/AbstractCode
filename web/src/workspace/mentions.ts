@@ -7,7 +7,8 @@
 //
 // DOM-free: app.tsx wires these rules; mentions.test.ts checks them. Nothing here reads `@` out
 // of the message text (no-heuristics ruling): a mention is only ever a picked chip.
-import type { ChatMentionCandidate, ChatMentionSent } from "../vendor/abstractchat/conversation.js";
+import type { ChatAuthor, ChatMentionCandidate, ChatMentionSent } from "../vendor/abstractchat/conversation.js";
+import type { ChatMessage } from "@abstractframework/panel-chat";
 
 /** The sentence an older gateway gets (no mentions route): shown, chips disabled, never silent. */
 export const MENTIONS_UNAVAILABLE = "This gateway does not offer mentions yet.";
@@ -77,7 +78,7 @@ export type MentionRefusal =
   /** Anything else (a server error, the network): said, the message stays, mentions stop. */
   | { kind: "failed"; sentence: string };
 
-function errorBody(error: unknown): { status: number; detail: string; code: string; raw: Row | null } {
+function errorBody(error: unknown): { status: number; detail: string; code: string } {
   const e = record(error);
   const status = Number(e?.status);
   let raw: Row | null = null;
@@ -88,24 +89,23 @@ function errorBody(error: unknown): { status: number; detail: string; code: stri
     raw = null;
   }
   const detail = text(raw?.detail) || (error instanceof Error ? error.message.trim() : "");
-  return { status: Number.isFinite(status) ? status : 0, detail, code: text(raw?.code), raw };
+  return { status: Number.isFinite(status) ? status : 0, detail, code: text(raw?.code) };
 }
 
 /**
- * The refusal an error of `POST /sessions/{sid}/mentions` stands for. The gateway's codes decide
- * (`{detail, code}`); a 404 whose body is exactly FastAPI's unmatched-route answer
- * (`{"detail": "Not Found"}`, the rule panel-chat's replay-view probe uses) is the route missing,
- * any other 404 is this entity (a member's foreign entity answers like a missing one).
+ * The refusal an error of `POST /sessions/{sid}/mentions` stands for: the gateway's codes decide
+ * (`{detail, code}`). A 404 with a code (`entity_not_found`: a missing entity, or one this account
+ * may not see) is this entity; a plain 404 without a code is the route itself missing (an older
+ * gateway). A 422 (`repeat_of_unknown`, …) is a failure with the gateway's sentence.
  */
 export function mentionRefusal(error: unknown, name: string): MentionRefusal {
-  const { status, detail, code, raw } = errorBody(error);
+  const { status, detail, code } = errorBody(error);
   if (status === 409) {
     if (code === "in_another_conversation" || !detail) return { kind: "elsewhere", sentence: `${name} is in another conversation.` };
     return { kind: "elsewhere", sentence: detail };
   }
   if (status === 404) {
-    const routeMissing = raw !== null && Object.keys(raw).length === 1 && raw.detail === "Not Found";
-    if (routeMissing) return { kind: "unavailable", sentence: MENTIONS_UNAVAILABLE };
+    if (!code) return { kind: "unavailable", sentence: MENTIONS_UNAVAILABLE };
     return { kind: "not_offerable", sentence: `${name} cannot be mentioned here.` };
   }
   if (status === 503) return { kind: "cannot_answer", sentence: detail || `${name} cannot answer right now.` };
@@ -162,9 +162,57 @@ export async function sendMentions(
   return outcome;
 }
 
-/** The request body of one mention: the message as typed, the entity's id, its position. */
-export function mentionRequestBody(text: string, mention: ChatMentionSent): { entity: string; text: string; mention_index: number } {
-  return { entity: mention.id, text: String(text ?? "").trim(), mention_index: mention.index };
+/** The request body of one mention: the message as typed, the entity's id, its position, and
+ * `repeat_of`, the person's own turn of this session that carries the same words (the gateway marks
+ * the mention turn with it, and Code folds the repeated prompt by it). */
+export function mentionRequestBody(
+  text: string,
+  mention: ChatMentionSent,
+  repeatOf?: string,
+): { entity: string; text: string; mention_index: number; repeat_of?: string } {
+  const turn = String(repeatOf ?? "").trim();
+  return { entity: mention.id, text: String(text ?? "").trim(), mention_index: mention.index, ...(turn ? { repeat_of: turn } : {}) };
+}
+
+/**
+ * A view (or a view delta) without the prompts that repeat another turn's (`repeat_of` on a mention
+ * turn's input message): the person's words show once, on their own turn, and the entity's answer
+ * follows it. Anything else is returned unchanged (the same object when nothing is folded).
+ */
+export function foldRepeatedPrompts<V>(view: V): V {
+  const row = record(view);
+  const messages = Array.isArray(row?.messages) ? (row!.messages as unknown[]) : null;
+  if (!messages) return view;
+  const kept = messages.filter((m) => !text(record(m)?.repeat_of));
+  return kept.length === messages.length ? view : ({ ...row, messages: kept } as V);
+}
+
+/** The same fold on a `/view/stream` frame (`view` and `delta` carry messages; others pass). */
+export function foldRepeatedPromptsFrame<F extends { event?: string; data: string }>(frame: F): F {
+  if ((frame.event !== "view" && frame.event !== "delta") || !frame.data.includes('"repeat_of"')) return frame;
+  let data: unknown;
+  try {
+    data = JSON.parse(frame.data);
+  } catch {
+    return frame; // the kit reports the malformed frame itself
+  }
+  const folded = foldRepeatedPrompts(data);
+  return folded === data ? frame : { ...frame, data: JSON.stringify(folded) };
+}
+
+/** Live (streamed) replies labelled with the author their frames named, by run, until the saved
+ * message (which carries its own `author`) replaces them. Unchanged list when nothing is labelled. */
+export function withLiveAuthors(messages: ChatMessage[], authors: ReadonlyMap<string, ChatAuthor>): ChatMessage[] {
+  if (!authors.size) return messages;
+  let changed = false;
+  const out = messages.map((m) => {
+    if (!m.live || m.role !== "assistant" || m.author !== undefined || !m.runId) return m;
+    const author = authors.get(m.runId);
+    if (!author) return m;
+    changed = true;
+    return { ...m, author };
+  });
+  return changed ? out : messages;
 }
 
 /** "Castor", "Castor and Hypnos", "Castor, Hypnos and Ada". */

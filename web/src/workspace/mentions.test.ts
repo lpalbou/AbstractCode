@@ -72,11 +72,9 @@ describe("what a refused mention means", () => {
   it("the visit door's own 409s pass through with their sentence, handled the same way", () => {
     expect(mentionRefusal(httpError(409, { detail: "Castor is asleep.", code: "entity_asleep" }), "Castor")).toEqual({ kind: "elsewhere", sentence: "Castor is asleep." });
   });
-  it("404 with FastAPI's unmatched-route body is an older gateway; any other 404 is this entity", () => {
+  it("404 with a code (entity_not_found) is this entity; a plain 404 is an older gateway", () => {
     expect(mentionRefusal(httpError(404, { detail: "Not Found" }), "Castor")).toEqual({ kind: "unavailable", sentence: MENTIONS_UNAVAILABLE });
-    expect(mentionRefusal(httpError(404, { detail: "Entity 'castor' not found" }), "Castor")).toEqual({ kind: "not_offerable", sentence: "Castor cannot be mentioned here." });
-    // A body with more than the route answer is the mention door's own.
-    expect(mentionRefusal(httpError(404, { detail: "Not Found", code: "entity_missing" }), "Castor").kind).toBe("not_offerable");
+    expect(mentionRefusal(httpError(404, { detail: "Entity 'castor' not found", code: "entity_not_found" }), "Castor")).toEqual({ kind: "not_offerable", sentence: "Castor cannot be mentioned here." });
   });
   it("503 entity_cannot_answer: the gateway's sentence", () => {
     expect(mentionRefusal(httpError(503, { detail: "Castor cannot answer: no mind resolved", code: "entity_cannot_answer" }), "Castor")).toEqual({
@@ -119,7 +117,7 @@ describe("asking the mentions of one message", () => {
     const outcome = await sendMentions([castor, hypnos, ada], async (m) => {
       calls.push(m.id);
       if (m.id === "castor") throw httpError(409, { detail: "x", code: "in_another_conversation" });
-      if (m.id === "hypnos") throw httpError(404, { detail: "Entity 'hypnos' not found" });
+      if (m.id === "hypnos") throw httpError(404, { detail: "Entity 'hypnos' not found", code: "entity_not_found" });
       return { run_id: "turn-ada" };
     });
     expect(calls).toEqual(["castor", "hypnos", "ada"]);
