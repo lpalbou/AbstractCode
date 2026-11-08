@@ -16,6 +16,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
 
+## [web 0.15.10] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.12 (`@abstractframework/panel-chat` 0.9.5, `@abstractframework/ui-kit` 0.9.23), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.9.
+
+### Fixed
+
+- **Stop answers at once, even while the run is starting.** On a slow gateway a Stop pressed right after Send looked
+  ignored for seconds. Now the top bar says "Stopping…" at once, the message box is cleared and back to the
+  microphone and Send, and the run the gateway returns is stopped the moment it arrives ("Stopped").
+- **A stopped start never keeps running unseen.** If you reload, or open another conversation, before the gateway has
+  answered, Code still stops that run: this tab remembers the stop until it is done.
+- **No "Stop" tooltip over the Send button after a stop.**
+- **Turning Read aloud off** no longer speaks a reply that was still loading, and leaves no audio player running.
+- **Read aloud on a phone or tablet:** a tap keeps the reply player ready, so the next reply is spoken.
+- **The speaker Test's failure message in Safari** suggests Re-open audio, not another output.
+
+### Known limits
+
+- Headphones connected while the model is thinking: Safari cannot start the reply by itself; Code says "Audio
+  playback is paused by the browser. Press Play to try again."
+- The macOS output switched less than 30 s after your last click or key press: the next reply may be silent with no
+  message. Press Play (after 30 s of silence) or pick Re-open audio in Voice settings.
+- A saved speaker that is no longer connected: replies play on the system default output without saying so.
+- A stop is remembered for this browser tab only: closing the tab before the gateway answers leaves that run going.
+- "Request cancelled." is still shown inside your own message after a stop.
+
 ## [web 0.15.9] - 2026-11-08 (local build, not published)
 
 Built on AbstractUIC 0.10.11 (`@abstractframework/panel-chat` 0.9.4, `@abstractframework/ui-kit` 0.9.22), vendored

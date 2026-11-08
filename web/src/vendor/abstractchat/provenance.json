@@ -61,7 +61,7 @@
     "conversation_model.d.ts": "805f1d795c3370a9e27a29d3f919f0541cce87ef35b7972b4fa06372703fd96a",
     "conversation_preferences.d.ts": "4b6706b1841bc4e547ec20170b2ba8bcc9a55373d808ddb002123bfc2d5c3881",
     "docs_assistant.d.ts": "16ea1c5ba584a85aa939c5a04a88a82473a4999159e13decf9685da8c678c15c",
-    "docs_voice.d.ts": "91e2e6a2e558ab2ef83557c8e8a466709592c2b23e0a41e5013e8f59a8738955",
+    "docs_voice.d.ts": "859ce07233f6bf3502aea81874f3f93a4ff46def9a901751a6cc14de857abfbf",
     "event_target.d.ts": "e2e37bca777ee7495505498858c66b04e8080a8d40f048864108c26b17591db3",
     "file_drop.d.ts": "93a1b75a2a26f34f84a43ee13eb6eaf6e9261bff48fb65e83d148b9b7282679f",
     "file_viewer.d.ts": "d00866be1f231c5f254996c6c030915dc04eee9d84e94ee2adf41863637f5066",
