@@ -17,7 +17,8 @@ test('optional avatar keeps drafts, answers the real current question, and prese
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await expect(page.getByRole('dialog',{name:'Gateway connection'})).toBeHidden();
  await expect(page.locator('.code-session-placeholder .af-session-card__open')).toHaveAttribute('aria-current','page');
- await expect(page.locator('.code-session-placeholder')).toHaveCSS('box-shadow', /inset.*2px|2px.*inset/);
+ // The open row: a tone and a 1 px hairline (sidebar rows, 2026-11-08), never a 2 px frame.
+ await expect(page.locator('.code-session-placeholder')).toHaveCSS('box-shadow', /inset.*\b1px|\b1px.*inset/);
  await page.locator('.code-session-placeholder').screenshot({path:testInfo.outputPath('new-conversation-selected.png')});
  await openWorkspaceSection(page,'Workflow');
  const picker=page.getByRole('combobox',{name:'Workflow',exact:true});await expect(picker).toBeEnabled();await picker.click();
@@ -40,7 +41,8 @@ test('optional avatar keeps drafts, answers the real current question, and prese
  await expect.poll(()=>commands.some(c=>c.type==='resume'&&c.payload?.payload?.response==='continue')).toBe(true);
  await expect(page.locator('.pc-avatar-conversation__status')).toHaveText('Completed');
  await expect(page.locator('.pc-avatar-conversation__answer')).toContainText('structured-output');
- await expect(page.locator('.pc-avatar-conversation__answer .pc-chat-item')).toHaveCSS('border-inline-start-width','0px');
+ // No accent stripe on the answer: its leading border is no wider than its other sides.
+ expect(await page.locator('.pc-avatar-conversation__answer .pc-chat-item').evaluate((el)=>{const s=getComputedStyle(el);return parseFloat(s.borderInlineStartWidth)<=parseFloat(s.borderInlineEndWidth);})).toBe(true);
  await expect(page.locator('.pc-avatar-conversation .af-voice-mic')).toHaveCount(0);
  await expect(page.locator('.code-conversation .pc-composer .af-voice-mic')).toHaveCount(1);
  await page.screenshot({path:testInfo.outputPath('avatar-code-desktop.png')});

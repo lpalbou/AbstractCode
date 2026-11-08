@@ -119,7 +119,7 @@ test("workflow and tool pickers persist; email recipients remain visible; refres
     expect(await position()).toBe(before);
     await expect(refresh).toBeEnabled();
   }
-  const sessions = page.locator(".code-sessions .code-session");
+  const sessions = page.locator(".code-sessions .code-session-item");
   const titles = await sessions.allTextContents();
   expect(titles.length).toBeGreaterThan(0);
   await page.route("**/api/gateway/runs?*", route => route.fulfill({ status: 503, json: { detail: "Temporary fixture failure" } }));

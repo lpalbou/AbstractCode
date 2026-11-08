@@ -147,7 +147,7 @@ test("creates, runs, approves, browses, discusses and archives an automation", a
   await main.locator('[data-action="archive-confirm"]').click();
   await expect(main.locator('.code-auto-header [data-field="result"]')).toHaveText("Automation archived.");
   await expect(row).toHaveCount(0, { timeout: 15_000 });
-  const archivedFooter = page.locator('.code-archived[data-list="automations"]');
+  const archivedFooter = page.locator('.code-archived[data-section="archived"][data-list="automations"]');
   await expect(archivedFooter.locator(".code-archived-toggle")).toHaveText(/^Archived · \d+$/);
   if ((await archivedFooter.locator(".code-archived-toggle").getAttribute("aria-expanded")) !== "true") await archivedFooter.locator(".code-archived-toggle").click();
   const archivedRow = archivedFooter.locator(".code-archived-row", { hasText: title });
@@ -263,7 +263,7 @@ test("list refreshes preserve sidebar rows without adding loading messages", asy
   ] as const) {
     const button = page.getByRole("button", { name: label, exact: true });
     await expect(button).toBeEnabled();
-    const rows = page.locator(".code-automation-item, .code-session");
+    const rows = page.locator(".code-automation-item, .code-session-item");
     const before = await rows.allTextContents();
     expect(before.length).toBeGreaterThan(0);
     const bounds = await button.boundingBox();

@@ -182,9 +182,9 @@ test.describe("AbstractCode sidebar", () => {
           background: getComputedStyle(l).backgroundColor, overflowY: getComputedStyle(l).overflowY,
         }));
         const hidden: string[] = [];
-        for (const row of document.querySelectorAll<HTMLElement>(".code-automation-item, .code-sessions .code-session")) {
+        for (const row of document.querySelectorAll<HTMLElement>(".code-automation-item, .code-sessions .code-session-item")) {
           row.scrollIntoView({ block: "nearest" });
-          const last = (row.querySelector(".code-card-meta") || row).getBoundingClientRect();
+          const last = (row.querySelector(".af-session-card__meta") || row).getBoundingClientRect();
           const hit = document.elementFromPoint(last.left + 4, last.top + last.height / 2);
           if (!hit || !row.contains(hit)) hidden.push(row.textContent || "");
         }
@@ -227,12 +227,20 @@ test.describe("AbstractCode sidebar", () => {
     // The list asks the gateway for the per-turn tool totals.
     expect(runLimits.length).toBeGreaterThan(0);
     // Synthetic conversation 3 (s = 2): 3 turns, 2 tools each.
-    await expect(page.locator(".code-sessions .code-session", { hasText: "Synthetic conversation 3" }).locator('[data-field="meta"]')).toHaveText(/ · 3 turns · 6 tools$/);
+    // One details line carrying the gateway's figures (3 turns, 6 tool calls), never counted here.
+    const synthetic = page.locator(".code-sessions .code-session-item", { hasText: "Synthetic conversation 3" }).locator(".af-session-card__meta");
+    await expect(synthetic.locator('[aria-label="3 turns"]')).toBeVisible();
+    // The tool total is on the line when it fits, else named in the row's tooltip (never cut).
+    const tools = synthetic.locator('[aria-label="6 tool calls"]');
+    await expect(tools).toHaveCount(1);
+    if (!(await tools.isVisible())) await expect(page.locator(".code-sessions .code-session-item", { hasText: "Synthetic conversation 3" }).locator(".af-session-card__open")).toHaveAttribute("data-af-tip", /6 tool calls/);
+    expect(await synthetic.evaluate((el) => el.getBoundingClientRect().height < 24 && el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     // Watch-style automation facts share the conversation card shell; Active is in the editor.
     const first = page.locator(".code-automation-item").first();
     await expect(first.getByRole("switch")).toHaveCount(0);
     await expect(first.locator('[data-field="runs"]')).toBeVisible();
-    await expect(first.locator('[data-field="cadence"]')).toBeVisible();
+    // The schedule is on the line when it fits, else named in the row's tooltip (never cut).
+    if (!(await first.locator('[data-field="cadence"]').isVisible())) await expect(first.locator(".af-session-card__open")).toHaveAttribute("data-af-tip", /.+/);
     await expect(first.locator('[data-field="next"]')).toHaveText(/^(now|\d+[mhd])$/);
     await expect(first.locator('.af-session-card')).toHaveAttribute('data-attention', 'true');
 
@@ -245,7 +253,7 @@ test.describe("AbstractCode sidebar", () => {
       }
       // The lists have loaded (after the previous size's reload too).
       await expect(page.locator(".code-automation-item")).toHaveCount(14);
-      await expect(page.locator(".code-sessions .code-session[data-session-id]")).toHaveCount(25);
+      await expect(page.locator(".code-sessions .af-session-card__open[data-session-id]")).toHaveCount(25);
       const geometry = () =>
         page.evaluate(() => {
           const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
@@ -317,7 +325,7 @@ test.describe("AbstractCode sidebar", () => {
     await route(page, runLimits, { syntheticOnly: true });
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(page);
-    const rows = page.locator(".code-sessions .code-session:not(.is-selected)");
+    const rows = page.locator(".code-sessions .code-session-item");
     await expect(rows).toHaveCount(25);
     // 100 runs fold into fewer than 26 conversations here: the fetch grew instead of showing fewer.
     expect(runLimits[0]).toBe(100);

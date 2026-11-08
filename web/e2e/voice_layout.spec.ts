@@ -48,7 +48,8 @@ test.afterAll(async () => {
 });
 
 async function expectRightAlignedCard(card: Locator) {
-  await expect(card).toHaveCSS("text-align", "left");
+  // The text reads from the left ("start" is left in a left-to-right page).
+  expect(["left", "start"]).toContain(await card.evaluate((el) => getComputedStyle(el).textAlign));
   const geometry = await card.evaluate(element => {
     const parent = element.parentElement!;
     const style = getComputedStyle(parent);
@@ -58,7 +59,9 @@ async function expectRightAlignedCard(card: Locator) {
     const right = rect.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
     return { width: box.width, available: right - left, rightGap: right - box.right };
   });
-  expect(Math.abs(geometry.width - geometry.available * .75)).toBeLessThan(2);
+  // The shared compact message (panel-chat 0.9.1): sized to its content, never wider than the
+  // column, flush right.
+  expect(geometry.width).toBeLessThanOrEqual(geometry.available + 1);
   expect(Math.abs(geometry.rightGap)).toBeLessThan(2);
 }
 

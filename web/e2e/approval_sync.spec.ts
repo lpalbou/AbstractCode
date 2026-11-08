@@ -88,8 +88,13 @@ async function expectGate(page: Page, who: string): Promise<void> {
   await expect(strip, `${who}: never "Running a tool" while parked`).not.toContainText("Running a tool");
   // The composer cannot steer past the decision: only "Queue" (the next turn) is offered
   // (kit WorkflowChat steer, modes ["queue"]) and the textarea points at the card.
+  // (Since panel-chat 0.9.2 the one primary button is Stop while nothing is typed; with words
+  // typed it becomes the send action, here "Queue".)
+  const box = page.locator(".code-conversation .pc-composer textarea");
+  await box.fill("For the next turn");
   await expect(page.locator(".pc-composer").getByRole("button", { name: "Queue", exact: true }), `${who}: only the next turn can be queued`).toBeVisible();
   await expect(page.locator(".pc-composer").getByRole("button", { name: "Steer", exact: true }), `${who}: never steer past the decision`).toHaveCount(0);
+  await box.fill("");
   await expect(page.locator(".code-conversation .pc-composer textarea"), `${who}: the composer points at the request`).toHaveAttribute("placeholder", /Answer the request above/);
 }
 

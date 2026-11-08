@@ -168,8 +168,9 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText(/structured-output/).first()).toBeVisible();
     const restoredTranscript = page.locator(".code-conversation .pc-chat-thread");
+    // The person's message, restored as theirs (the fixture's agent also repeats the words).
     await expect(
-      restoredTranscript.getByText(prompt, { exact: true }),
+      restoredTranscript.locator(".pc-chat-item--user").getByText(prompt, { exact: true }),
     ).toBeVisible();
     await expect(
       restoredTranscript.getByText(
@@ -196,7 +197,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     // Creating and then reopening the prior session asserts the sidebar is a
     // durable session selector rather than a transient run list.
     await page.locator(".code-new-chat").click();
-    const priorSession = page.locator(".code-session", { hasText: prompt });
+    const priorSession = page.locator(".code-session-item", { hasText: prompt }).locator(".af-session-card__open");
     await expect(priorSession).toBeVisible();
     await priorSession.click();
     await expect(page.getByText(/structured-output/).first()).toBeVisible();
@@ -262,11 +263,12 @@ test.describe("AbstractCode isolated gateway workspace", () => {
 
     await page.reload({ waitUntil: "domcontentloaded" });
     const transcript = page.locator(".code-conversation .pc-chat-thread");
+    // The person's messages, restored as theirs (the fixture's agent also repeats the words).
     await expect(
-      transcript.getByText(firstPrompt, { exact: true }),
+      transcript.locator(".pc-chat-item--user").getByText(firstPrompt, { exact: true }),
     ).toBeVisible();
     await expect(
-      transcript.getByText(secondPrompt, { exact: true }),
+      transcript.locator(".pc-chat-item--user").getByText(secondPrompt, { exact: true }),
     ).toBeVisible();
     const turns = await transcript.locator(".pc-chat-item").allTextContents();
     const firstPromptIndex = turns.findIndex((text) =>

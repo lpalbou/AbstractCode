@@ -17,7 +17,8 @@ const shots = process.env.ABSTRACTCODE_E2E_SHOTS || "";
 let app: http.Server;
 
 test.beforeAll(async () => {
-  app = createCodeServer({ defaultGatewayUrl: gateway });
+  // ABSTRACTCODE_E2E_DIST: run these checks against another build's dist/ (e.g. an installed release).
+  app = createCodeServer({ defaultGatewayUrl: gateway, ...(process.env.ABSTRACTCODE_E2E_DIST ? { distDir: process.env.ABSTRACTCODE_E2E_DIST } : {}) });
   await new Promise<void>((resolve) => app.listen(Number(new URL(origin).port), "127.0.0.1", resolve));
 });
 test.afterAll(async () => {
@@ -73,7 +74,7 @@ test("automations: Archived · N footer, inline list, Unarchive brings it back (
   await expect(section.getByText(/Show archived/)).toHaveCount(0);
   await expect(section.locator('[data-action="show-archived"]')).toHaveCount(0);
   await expect(section.locator(".code-automation-item", { hasText: title })).toHaveCount(0);
-  const footer = section.locator('.code-archived[data-list="automations"]');
+  const footer = section.locator('.code-archived[data-section="archived"][data-list="automations"]');
   const toggle = footer.locator(".code-archived-toggle");
   await expect(toggle).toHaveText(`Archived · ${n}`);
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -83,17 +84,21 @@ test("automations: Archived · N footer, inline list, Unarchive brings it back (
   await shot(page, "archived-automations-open");
   // Remembered across a reload.
   await page.reload();
-  await expect(page.locator('.code-archived[data-list="automations"] .code-archived-toggle')).toHaveAttribute("aria-expanded", "true");
-  await page.locator(`.code-archived[data-list="automations"] .code-archived-row[data-id="${id}"] [data-action="unarchive"]`).click();
-  // Back in the list (paused: the Active switch is off), gone from the archived ones.
-  const card = section.locator(".code-automation-item", { hasText: title });
+  await expect(page.locator('.code-archived[data-section="archived"][data-list="automations"] .code-archived-toggle')).toHaveAttribute("aria-expanded", "true");
+  await page.locator(`.code-archived[data-section="archived"][data-list="automations"] .code-archived-row[data-id="${id}"] [data-action="unarchive"]`).click();
+  // Back among the automations, paused (ADR 0048: under "Paused · N" after the active ones),
+  // gone from the archived ones.
+  const paused = section.locator('.code-archived[data-section="paused"][data-list="automations"]');
+  await expect(paused.locator(".code-archived-toggle")).toHaveText(/^Paused · \d+$/);
+  if ((await paused.locator(".code-archived-toggle").getAttribute("aria-expanded")) !== "true") await paused.locator(".code-archived-toggle").click();
+  const card = paused.locator(".code-automation-item", { hasText: title });
   await expect(card).toBeVisible();
-  await expect(card.locator('[data-field="cadence"]')).toHaveText("Paused");
+  await expect(card.locator('[data-field="cadence"]')).toHaveAttribute("aria-label", "Paused");
   await expect(page.locator(`.code-archived-row[data-id="${id}"]`)).toHaveCount(0);
   expect((await api(`automations/${encodeURIComponent(id)}`)).summary.status).toBe("paused");
   // A count of 0 leaves no footer at all.
-  if (n === 1) await expect(section.locator(".code-archived")).toHaveCount(0);
-  else await expect(page.locator('.code-archived[data-list="automations"] .code-archived-toggle')).toHaveText(`Archived · ${n - 1}`);
+  if (n === 1) await expect(section.locator('.code-archived[data-section="archived"]')).toHaveCount(0);
+  else await expect(page.locator('.code-archived[data-section="archived"][data-list="automations"] .code-archived-toggle')).toHaveText(`Archived · ${n - 1}`);
   await api(`automations/${encodeURIComponent(id)}/commands`, { method: "POST", body: JSON.stringify({ type: "automation.archive", command_id: `archive-${Date.now()}-${Math.random()}` }) }).catch(() => {});
 });
 
@@ -116,7 +121,7 @@ test("conversations: Archived · N footer, inline list, Unarchive brings it back
 
   await page.getByRole("button", { name: "Refresh conversations", exact: true }).click();
   const list = page.locator(".code-conversations");
-  await expect(list.locator(`.code-session[data-session-id="${sessionId}"]`)).toHaveCount(0);
+  await expect(list.locator(`.af-session-card__open[data-session-id="${sessionId}"]`)).toHaveCount(0);
   const footer = list.locator('.code-archived[data-list="conversations"]');
   await expect(footer.locator(".code-archived-toggle")).toHaveText(`Archived · ${n}`);
   await footer.locator(".code-archived-toggle").click();
@@ -124,7 +129,7 @@ test("conversations: Archived · N footer, inline list, Unarchive brings it back
   await expect(row).toBeVisible();
   await shot(page, "archived-conversations-open");
   await row.locator('[data-action="unarchive"]').click();
-  await expect(list.locator(`.code-session[data-session-id="${sessionId}"]`)).toBeVisible();
+  await expect(list.locator(`.af-session-card__open[data-session-id="${sessionId}"]`)).toBeVisible();
   await expect(footer.locator(`.code-archived-row[data-id="${sessionId}"]`)).toHaveCount(0);
   expect((await api("runs?root_only=true&limit=1")).archived_sessions).toBe(n - 1);
 });
@@ -142,15 +147,16 @@ async function startConversation(page: Page, prompt: string): Promise<string> {
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.locator(".pc-chat-item--assistant").first()).toBeVisible();
   // The new conversation is the selected card once the list knows it.
-  const current = page.locator(".code-conversations .code-session[aria-current='page'][data-session-id]");
+  const current = page.locator(".code-conversations .af-session-card__open[aria-current='page'][data-session-id]");
   await expect.poll(async () => {
     await page.getByRole("button", { name: "Refresh conversations", exact: true }).click();
-    return (await current.count()) ? String(await current.getAttribute("title")) : "";
+    // The row's name leads its accessible name ("<name>. <details>").
+    return (await current.count()) ? String(await current.getAttribute("aria-label")) : "";
   }).toContain(prompt);
   return String(await current.getAttribute("data-session-id"));
 }
 
-test("archive a conversation from the card ⋯ and from the header ⋯; Unarchive returns it", async ({ page }) => {
+test("archive a conversation from its row and from the header ⋯; Unarchive returns it", async ({ page }) => {
   const methods: string[] = [];
   page.on("request", (req) => { if (req.url().includes("/sessions/")) methods.push(`${req.method()} ${new URL(req.url()).pathname}`); });
   await signIn(page);
@@ -160,42 +166,41 @@ test("archive a conversation from the card ⋯ and from the header ⋯; Unarchiv
   const third = await startConversation(page, `Stays active ${stamp}`);
   await page.getByRole("button", { name: "Refresh conversations", exact: true }).click();
   const list = page.locator(".code-conversations");
-  for (const id of [first, second, third]) await expect(list.locator(`.code-session[data-session-id="${id}"]`)).toBeVisible();
+  for (const id of [first, second, third]) await expect(list.locator(`.af-session-card__open[data-session-id="${id}"]`)).toBeVisible();
   const n0 = (await api("runs?root_only=true&limit=1")).archived_sessions || 0;
 
-  // 1) The card ⋯ of a conversation that is NOT active: confirm, Cancel first, then Archive.
+  // 1) The row of a conversation that is NOT active: confirm, Cancel first, then Archive.
   const item = list.locator(`.code-session-item[data-item-id="${first}"]`);
+  // The row's archive button (the kit card's; shown on hover, always on touch).
   await item.hover();
-  await item.getByRole("button", { name: /^More actions for / }).click();
-  await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
+  await item.getByRole("button", { name: /^Archive / }).click();
   const confirm = item.locator(".code-archive-confirm");
   await expect(confirm).toContainText("Archive this conversation? It stays searchable and auditable; it just leaves this list.");
   await confirm.locator('[data-action="cancel-archive"]').click();
   await expect(item.locator(".code-archive-confirm")).toHaveCount(0);
   expect((await api("runs?root_only=true&limit=1")).archived_sessions || 0).toBe(n0);
   await item.hover();
-  await item.getByRole("button", { name: /^More actions for / }).click();
-  await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
+  await item.getByRole("button", { name: /^Archive / }).click();
   await item.locator('[data-action="confirm-archive"]').click();
-  await expect(list.locator(`.code-session[data-session-id="${first}"]`)).toHaveCount(0);
+  await expect(list.locator(`.af-session-card__open[data-session-id="${first}"]`)).toHaveCount(0);
   const footer = list.locator('.code-archived[data-list="conversations"]');
   await expect(footer.locator(".code-archived-toggle")).toHaveText(`Archived · ${n0 + 1}`);
   // The active conversation did not change.
-  await expect(list.locator(`.code-session[data-session-id="${third}"]`)).toHaveAttribute("aria-current", "page");
+  await expect(list.locator(`.af-session-card__open[data-session-id="${third}"]`)).toHaveAttribute("aria-current", "page");
 
   // 2) The header ⋯ on the ACTIVE conversation: it hands over to the next one.
-  await list.locator(`.code-session[data-session-id="${second}"]`).click();
-  await expect(list.locator(`.code-session[data-session-id="${second}"]`)).toHaveAttribute("aria-current", "page");
+  await list.locator(`.af-session-card__open[data-session-id="${second}"]`).click();
+  await expect(list.locator(`.af-session-card__open[data-session-id="${second}"]`)).toHaveAttribute("aria-current", "page");
   await page.locator(".code-topbar").getByRole("button", { name: "Conversation actions", exact: true }).click();
   await page.getByRole("menuitem", { name: "Archive", exact: true }).click();
   const bar = page.locator(".code-archive-confirm-bar .code-archive-confirm");
   await expect(bar).toContainText("It stays searchable and auditable");
   await bar.locator('[data-action="confirm-archive"]').click();
   await expect(bar).toHaveCount(0);
-  await expect(list.locator(`.code-session[data-session-id="${second}"]`)).toHaveCount(0);
+  await expect(list.locator(`.af-session-card__open[data-session-id="${second}"]`)).toHaveCount(0);
   await expect(footer.locator(".code-archived-toggle")).toHaveText(`Archived · ${n0 + 2}`);
-  await expect(list.locator(".code-session[aria-current='page']")).toHaveCount(1);
-  await expect(list.locator(`.code-session[aria-current='page']`)).not.toHaveAttribute("data-session-id", second);
+  await expect(list.locator(".af-session-card__open[aria-current='page']")).toHaveCount(1);
+  await expect(list.locator(`.af-session-card__open[aria-current='page']`)).not.toHaveAttribute("data-session-id", second);
   await shot(page, "archived-after-header-archive");
 
   // Nothing deleted: the gateway still reads both sessions' runs.
@@ -209,8 +214,8 @@ test("archive a conversation from the card ⋯ and from the header ⋯; Unarchiv
   await expect(footer.locator(`.code-archived-row[data-id="${first}"]`)).toBeVisible();
   await expect(footer.locator(`.code-archived-row[data-id="${second}"]`)).toBeVisible();
   await footer.locator(`.code-archived-row[data-id="${first}"] [data-action="unarchive"]`).click();
-  await expect(list.locator(`.code-session[data-session-id="${first}"]`)).toBeVisible();
+  await expect(list.locator(`.af-session-card__open[data-session-id="${first}"]`)).toBeVisible();
   await expect(toggle).toHaveText(`Archived · ${n0 + 1}`);
   await footer.locator(`.code-archived-row[data-id="${second}"] [data-action="unarchive"]`).click();
-  await expect(list.locator(`.code-session[data-session-id="${second}"]`)).toBeVisible();
+  await expect(list.locator(`.af-session-card__open[data-session-id="${second}"]`)).toBeVisible();
 });
