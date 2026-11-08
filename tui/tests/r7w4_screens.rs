@@ -261,6 +261,36 @@ fn flat(screen: &str) -> String {
         .join(" ")
 }
 
+/// The automation's header text: inside its "Schedule" panel when framed
+/// (wide terminals: the panel's own rows joined, the Details beside it
+/// left out), else the whole screen flattened (narrow: unframed lines).
+fn header_text(screen: &str) -> String {
+    let rows: Vec<Vec<char>> = screen.lines().map(|l| l.chars().collect()).collect();
+    let needle: Vec<char> = "╭ Schedule ".chars().collect();
+    let Some((top, left)) = rows.iter().enumerate().find_map(|(y, r)| {
+        r.windows(needle.len())
+            .position(|w| w == needle.as_slice())
+            .map(|x| (y, x))
+    }) else {
+        return flat(screen);
+    };
+    let right = (left + 1..rows[top].len())
+        .find(|&x| rows[top][x] == '╮')
+        .expect("the panel's top-right corner");
+    let mut parts = Vec::new();
+    for r in &rows[top + 1..] {
+        if r.get(left) == Some(&'╰') {
+            break;
+        }
+        parts.push(r[left + 1..right.min(r.len())].iter().collect::<String>());
+    }
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn sizes() -> [Size; 2] {
     [Size::new(80, 24), Size::new(120, 40)]
 }
@@ -436,7 +466,7 @@ fn the_automation_screen_has_the_web_header() {
         assert!(screen.contains("Automations / Inbox triage"), "{screen}");
         assert!(screen.contains("[x] Active"), "{screen}");
         assert!(
-            flat(&screen).contains("Every 30 minutes (UTC) · waiting since"),
+            header_text(&screen).contains("Every 30 minutes (UTC) · waiting since"),
             "{screen}"
         );
         assert!(screen.contains("g Run now"), "{screen}");
@@ -655,7 +685,7 @@ fn r16_calendar_when_and_served_cards_fit_every_width() {
             // terminal gives them no room (as before round 16).
             if size.w >= 104 {
                 assert!(
-                    flat(&screen).contains("Next scheduled run: 2026-09-27 09:00 Europe/Paris."),
+                    header_text(&screen).contains("Next scheduled run: 2026-09-27 09:00 Europe/Paris."),
                     "{screen}"
                 );
             }

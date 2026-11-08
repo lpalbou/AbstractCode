@@ -15,6 +15,7 @@ use crate::commands::HELP_LINES;
 use crate::runner::Cmd;
 use crate::store::Store;
 use crate::transcript::{PendingWait, WaitKind};
+use crate::ui::cards::CardScroll;
 use crate::ui::UiCtx;
 
 /// " — gate: X" when a served-disabled row names its gate; empty when it
@@ -1905,8 +1906,13 @@ pub(crate) struct RowSpec {
     pub(crate) dim: bool,
 }
 
-pub(crate) fn draw_rows(rows: Vec<RowSpec>, cursor: usize, selectable: Vec<usize>) -> View {
-    draw_rows_pinned(rows, cursor, selectable, 0)
+pub(crate) fn draw_rows(
+    rows: Vec<RowSpec>,
+    cursor: usize,
+    selectable: Vec<usize>,
+    scroll: &CardScroll,
+) -> View {
+    draw_rows_pinned(rows, cursor, selectable, 0, scroll)
 }
 
 /// [`draw_rows`] with the first `pinned` rows held as a NON-SCROLLING
@@ -1928,13 +1934,23 @@ pub(crate) fn draw_rows(rows: Vec<RowSpec>, cursor: usize, selectable: Vec<usize
 ///
 /// The head never takes more than half the window — a head taller than
 /// the body it introduces only moves the problem down one row.
+///
+/// THE WHEEL (operator 2026-11-08): `scroll` holds the body's window. A
+/// key that moves the cursor sets it following again (the window keeps the
+/// cursor in view, as before); the wheel (`CardScroll::on_wheel` on the
+/// screen's root) frees it and moves it three rows a notch — so a panel
+/// without a cursor (`/mcp`, `/status`) reaches its tail too.
 fn draw_rows_pinned(
     rows: Vec<RowSpec>,
     cursor: usize,
     selectable: Vec<usize>,
     pinned: usize,
+    scroll: &CardScroll,
 ) -> View {
     let t = abstracttui::app::current_theme().tokens;
+    // Tracked: a wheel notch repaints the window.
+    let _ = scroll.tick.get();
+    let scroll = scroll.clone();
     let cursor_row = selectable.get(cursor).copied();
     Element::new()
         .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
@@ -1952,7 +1968,13 @@ fn draw_rows_pinned(
             // target ever lands in the head (the head is the preamble), so
             // a cursor below it is the only case.
             let anchor = cursor_row.unwrap_or(head).max(head) - head;
-            let start = if body_len <= body_h || cursor == 0 {
+            scroll.height.set(body_h);
+            let start = if body_len <= body_h {
+                0
+            } else if !scroll.follow.get() {
+                // The wheel's window, clamped to the body.
+                scroll.top.get().min(body_len - body_h)
+            } else if cursor == 0 {
                 // AT REST (cursor on the FIRST target) the body shows its
                 // own top. The window follows the cursor, so body rows
                 // above the first target can never be scrolled back to —
@@ -1974,6 +1996,7 @@ fn draw_rows_pinned(
                     (anchor + pad + 1 - body_h).min(body_len - body_h)
                 }
             };
+            scroll.top.set(start);
             let shown = body_h.min(body_len - start);
             let cut_above = start;
             let cut_below = body_len - start - shown;
@@ -2208,6 +2231,9 @@ pub fn open_run_files(
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let cursor = mcx.signal(0usize);
+        // The listing's window: keys keep the cursor in view, the wheel
+        // scrolls it (anywhere on the screen).
+        let scroll = CardScroll::new(mcx);
         // The selectable rows: ".." (below the root) then the entries.
         let items = move || -> Vec<Option<crate::workspace_files::WorkspaceEntry>> {
             store.files.with_untracked(|f| {
@@ -2223,6 +2249,7 @@ pub fn open_run_files(
         };
         let navigate = {
             let ctx = ctx2.clone();
+            let scroll = scroll.clone();
             move |dir: String| {
                 let run_id = store.files.with_untracked(|f| f.run_id.clone());
                 store.files.update(|f| {
@@ -2230,6 +2257,7 @@ pub fn open_run_files(
                     f.listing = crate::store::Fetch::Loading;
                 });
                 cursor.set(0);
+                scroll.reset();
                 ctx.send(Cmd::LoadWorkspaceFiles {
                     run_id,
                     dir,
@@ -2328,14 +2356,18 @@ pub fn open_run_files(
                 }
             }
         };
-        let move_cursor = move |delta: i64| {
-            let n = items().len();
-            if n == 0 {
-                return;
+        let move_cursor = {
+            let scroll = scroll.clone();
+            move |delta: i64| {
+                let n = items().len();
+                if n == 0 {
+                    return;
+                }
+                scroll.follow_cursor();
+                cursor.update(|c| {
+                    *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize;
+                });
             }
-            cursor.update(|c| {
-                *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize;
-            });
         };
         let go_up = {
             let navigate = navigate.clone();
@@ -2362,10 +2394,12 @@ pub fn open_run_files(
             }
         };
         let hint_base_url = base_url.clone();
+        let rows_scroll = scroll.clone();
         Element::new()
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, scroll.on_wheel())
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 let back = back.clone();
@@ -2374,7 +2408,10 @@ pub fn open_run_files(
                     None => ctx.close_modal(),
                 }
             })
-            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
+            .shortcut(KeyChord::plain(Key::Up), {
+                let move_cursor = move_cursor.clone();
+                move |_| move_cursor(-1)
+            })
             .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
             .shortcut(KeyChord::plain(Key::Enter), {
                 let activate = activate.clone();
@@ -2454,7 +2491,7 @@ pub fn open_run_files(
                     });
                     let (rows, selectable) = rows_src;
                     let cur = cur.min(selectable.len().saturating_sub(1));
-                    draw_rows(rows, cur, selectable)
+                    draw_rows(rows, cur, selectable, &rows_scroll)
                 },
             ))
             .child(dyn_view(LayoutStyle::line(1).shrink(0.0), move || {
@@ -2644,12 +2681,18 @@ pub(crate) const SESSION_LIST_LIMIT: u32 = 5000;
 pub fn open_mcp(cx: Scope, store: Store, ctx: &UiCtx) {
     let ctx2 = ctx.clone();
     let size = modal_size(84, 18);
-    ctx.open_modal(cx, size, move |_mcx| {
+    ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
-        Element::new()
+        // No cursor here: the wheel and the arrow/page keys scroll it.
+        let scroll = CardScroll::new(mcx);
+        let rows_scroll = scroll.clone();
+        let root = Element::new()
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, scroll.on_wheel());
+        scroll
+            .bind_keys(root)
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| ctx.close_modal()
@@ -2738,7 +2781,7 @@ pub fn open_mcp(cx: Scope, store: Store, ctx: &UiCtx) {
                             }
                         }
                     }
-                    draw_rows(rows, usize::MAX, Vec::new())
+                    draw_rows(rows, usize::MAX, Vec::new(), &rows_scroll)
                 },
             ))
             .child(hint_row(
@@ -2767,14 +2810,20 @@ pub fn open_status(cx: Scope, store: Store, ctx: &UiCtx) {
     // card that hides its own point (the client-vs-server rows) behind
     // "↓ N more" defeats the command.
     let size = modal_size(78, 23);
-    ctx.open_modal(cx, size, move |_mcx| {
+    ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let gateway_label = gateway_label.clone();
         let workspace_root = workspace_root.clone();
-        Element::new()
+        // No cursor here: the wheel and the arrow/page keys scroll it.
+        let scroll = CardScroll::new(mcx);
+        let rows_scroll = scroll.clone();
+        let root = Element::new()
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, scroll.on_wheel());
+        scroll
+            .bind_keys(root)
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| ctx.close_modal()
@@ -2839,7 +2888,7 @@ pub fn open_status(cx: Scope, store: Store, ctx: &UiCtx) {
                         }
                         None => {}
                     }
-                    draw_rows(rows, usize::MAX, Vec::new())
+                    draw_rows(rows, usize::MAX, Vec::new(), &rows_scroll)
                 },
             ))
             .child(hint_row(
@@ -4296,6 +4345,10 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
         let t = abstracttui::app::current_theme().tokens;
         // Cursor over the MODEL rows (the k-th selectable is models[k]).
         let cursor = mcx.signal(0usize);
+        // The body's window: keys keep the cursor in view, the wheel
+        // scrolls it (anywhere on the screen); the meters stay pinned.
+        let scroll = CardScroll::new(mcx);
+        let rows_scroll = scroll.clone();
         // Armed unload confirmation: (provider, model, force).
         let confirm = mcx.signal(Option::<(String, String, bool)>::None);
 
@@ -4337,11 +4390,13 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                 .and_then(|t| t.model)
                 .and_then(|ix| facts.models.get(ix).cloned())
         };
+        let follow = scroll.clone();
         let move_cursor = move |delta: i64| {
             let (targets, _) = current_targets();
             if targets.is_empty() {
                 return;
             }
+            follow.follow_cursor();
             cursor.update(|c| {
                 // Re-clamp BEFORE stepping: a shrink since the last move
                 // must not leave a step landing out of range.
@@ -4386,6 +4441,7 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, scroll.on_wheel())
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| {
@@ -4406,7 +4462,10 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                     }
                 }
             })
-            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
+            .shortcut(KeyChord::plain(Key::Up), {
+                let move_cursor = move_cursor.clone();
+                move |_| move_cursor(-1)
+            })
             .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
             .shortcut(KeyChord::plain(Key::Char('u')), move |_| arm_unload(false))
             .shortcut(KeyChord::plain(Key::Char('f')), move |_| arm_unload(true))
@@ -4541,7 +4600,7 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                                 dim: false,
                             })
                             .collect::<Vec<_>>();
-                        draw_rows(rows, usize::MAX, Vec::new())
+                        draw_rows(rows, usize::MAX, Vec::new(), &rows_scroll)
                     };
                     let Some(contracts) = contracts else {
                         // Capabilities not answered yet: an honest probing
@@ -4569,7 +4628,7 @@ pub fn open_resources(cx: Scope, store: Store, ctx: &UiCtx) {
                             // The meters are PINNED: no cursor position
                             // can scroll them away, because no cursor
                             // position could ever scroll them back.
-                            draw_rows_pinned(rows, cur, selectable, head)
+                            draw_rows_pinned(rows, cur, selectable, head, &rows_scroll)
                         }
                         HostState::Idle | HostState::Pending => plain(
                             "fetching host state… (a slow endpoint by contract — fetched \

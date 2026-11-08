@@ -245,6 +245,21 @@ pub fn window_start(rows: &[Row], selected: Option<usize>, height: usize) -> usi
 
 /// Paint `cards` with the `cursor`-th selectable card highlighted.
 pub fn draw_cards(cards: Vec<Card>, cursor: usize) -> View {
+    draw_cards_window(cards, cursor, None)
+}
+
+/// [`draw_cards`] whose window the WHEEL can move (operator 2026-11-08: a
+/// modal's content scrolls with the mouse): while `scroll` follows (a key
+/// moved the cursor) the window is exactly [`draw_cards`]' — the cursor's
+/// card in view, "↑ N more" / "↓ N more" on the edge rows; after a wheel
+/// notch ([`CardScroll::on_wheel`] on the screen's root) it stays where the
+/// wheel put it, clamped to the list.
+pub fn draw_cards_wheel(cards: Vec<Card>, cursor: usize, scroll: &CardScroll) -> View {
+    let _ = scroll.tick.get();
+    draw_cards_window(cards, cursor, Some(scroll.clone()))
+}
+
+fn draw_cards_window(cards: Vec<Card>, cursor: usize, scroll: Option<CardScroll>) -> View {
     let t = abstracttui::app::current_theme().tokens;
     let selected = selected_card(&cards, cursor);
     Element::new()
@@ -252,7 +267,14 @@ pub fn draw_cards(cards: Vec<Card>, cursor: usize) -> View {
         .draw(move |canvas, rect| {
             let rows = layout(&cards, rect.w.max(10) as usize);
             let h = rect.h.max(1) as usize;
-            let start = window_start(&rows, selected, h);
+            let start = match &scroll {
+                Some(sc) if !sc.follow.get() => sc.top.get().min(rows.len().saturating_sub(h)),
+                _ => window_start(&rows, selected, h),
+            };
+            if let Some(sc) = &scroll {
+                sc.top.set(start);
+                sc.height.set(h);
+            }
             let shown = h.min(rows.len() - start.min(rows.len()));
             let cut_above = start;
             let cut_below = rows.len().saturating_sub(start + shown);
@@ -352,10 +374,16 @@ impl CardScroll {
 
     /// The mouse wheel: three rows, the cursor stays where it is.
     pub fn wheel(&self, up: bool) {
+        self.scroll_by(if up { -3 } else { 3 });
+    }
+
+    /// Scroll the window by `rows` (the cursor stays): the wheel, and the
+    /// arrow/page keys of a panel that has no cursor. The painter clamps
+    /// it to the list.
+    pub fn scroll_by(&self, rows: i64) {
         self.follow.set(false);
-        let top = self.top.get();
-        self.top
-            .set(if up { top.saturating_sub(3) } else { top + 3 });
+        let top = self.top.get() as i64;
+        self.top.set((top + rows).max(0) as usize);
         self.tick.update(|n| *n += 1);
     }
 
@@ -373,6 +401,59 @@ impl CardScroll {
     /// Cards a page key moves the cursor by.
     pub fn page(&self) -> i64 {
         (self.height.get() / 3).max(1) as i64
+    }
+
+    /// The arrow/page/Home/End keys of a panel with no cursor (`/mcp`,
+    /// `/status`): they scroll its window, as the wheel does.
+    pub fn bind_keys(&self, el: abstracttui::ui::Element) -> abstracttui::ui::Element {
+        use abstracttui::ui::{Key, KeyChord};
+        let mut el = el;
+        for (key, rows) in [
+            (Key::Up, -1i64),
+            (Key::Down, 1),
+            (Key::PageUp, -10),
+            (Key::PageDown, 10),
+            (Key::Home, -(i32::MAX as i64)),
+            (Key::End, i32::MAX as i64),
+        ] {
+            let scroll = self.clone();
+            el = el.shortcut(KeyChord::plain(key), move |_| {
+                let rows = if rows.abs() == 10 {
+                    rows.signum() * scroll.height.get().saturating_sub(1).max(1) as i64
+                } else {
+                    rows
+                };
+                // End: past the end; the painter clamps to the last page.
+                let rows = if rows == i32::MAX as i64 {
+                    1 << 30
+                } else {
+                    rows
+                };
+                scroll.scroll_by(rows)
+            });
+        }
+        el
+    }
+
+    /// The handler a screen puts on its ROOT (`Phase::Bubble`): the wheel
+    /// anywhere on the screen — over the list, its title, its hints —
+    /// scrolls this list, three rows a notch (operator 2026-11-08: a
+    /// modal's content scrolls with the mouse).
+    pub fn on_wheel(
+        &self,
+    ) -> impl FnMut(&mut abstracttui::ui::EventCtx, &abstracttui::ui::UiEvent) + 'static {
+        let scroll = self.clone();
+        move |ectx, ev| {
+            let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+                return;
+            };
+            match m.kind {
+                abstracttui::ui::MouseKind::ScrollUp => scroll.wheel(true),
+                abstracttui::ui::MouseKind::ScrollDown => scroll.wheel(false),
+                _ => return,
+            }
+            ectx.stop_propagation();
+        }
     }
 }
 

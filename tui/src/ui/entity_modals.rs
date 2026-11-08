@@ -80,6 +80,9 @@ pub fn open_entities(cx: Scope, store: Store, ctx: &UiCtx, deep_link: Option<Str
             })
             .unwrap_or(0);
         let cursor = mcx.signal(start);
+        // The selected entity's card: its first shown line (the wheel over
+        // the card scrolls it; a new selection starts at its top).
+        let card_top = mcx.signal(0usize);
         // Card fetches already posted from THIS modal (dedup); the store's
         // card cache makes browsing back and forth instant.
         let requested: Rc<RefCell<HashSet<String>>> = Rc::new(RefCell::new(HashSet::new()));
@@ -116,6 +119,7 @@ pub fn open_entities(cx: Scope, store: Store, ctx: &UiCtx, deep_link: Option<Str
             if n == 0 {
                 return;
             }
+            card_top.set(0);
             cursor.update(|c| {
                 let cur = *c as i64 + delta;
                 *c = cur.clamp(0, n as i64 - 1) as usize;
@@ -167,6 +171,17 @@ pub fn open_entities(cx: Scope, store: Store, ctx: &UiCtx, deep_link: Option<Str
             .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            // The wheel over the roster (and the title, the footer) walks
+            // the roster, one entity a notch — its window follows the
+            // selection; over the card it scrolls the card (below).
+            .on(abstracttui::ui::Phase::Bubble, {
+                move |ectx, ev| {
+                    if let Some(delta) = crate::ui::automations_view::wheel_delta(ev) {
+                        move_cursor(delta.signum() as i64);
+                        ectx.stop_propagation();
+                    }
+                }
+            })
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| ctx.close_modal()
@@ -331,11 +346,29 @@ pub fn open_entities(cx: Scope, store: Store, ctx: &UiCtx, deep_link: Option<Str
                             }
                         }
                     }
+                    let top = card_top.get();
+                    let n_lines = lines.len();
                     Element::new()
                         .style(LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0)))
+                        // The wheel over the card scrolls it (three lines a
+                        // notch, clamped to its last page).
+                        .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+                            if let Some(delta) = crate::ui::automations_view::wheel_delta(ev) {
+                                let h = ectx.current_rect().h.max(1) as usize;
+                                let max = n_lines.saturating_sub(h) as i64;
+                                card_top.update(|t| {
+                                    *t = (*t as i64 + delta as i64).clamp(0, max) as usize
+                                });
+                                ectx.stop_propagation();
+                            }
+                        })
                         .draw(move |canvas, rect| {
-                            for (i, (text_body, ink)) in
-                                lines.iter().take(rect.h.max(0) as usize).enumerate()
+                            let top = top.min(n_lines.saturating_sub(rect.h.max(1) as usize));
+                            for (i, (text_body, ink)) in lines
+                                .iter()
+                                .skip(top)
+                                .take(rect.h.max(0) as usize)
+                                .enumerate()
                             {
                                 let fitted =
                                     text::truncate_ellipsis(text_body, (rect.w - 2).max(4));

@@ -351,6 +351,15 @@ fn open_modal(cx: Scope, store: Store, ctx: &UiCtx, seq: u64) {
             .style(LayoutStyle::column().gap(1))
             .focusable()
             .autofocus()
+            // The wheel anywhere on the preview scrolls it, three rows a
+            // notch (operator 2026-11-08: a modal's content scrolls with
+            // the mouse).
+            .on(abstracttui::ui::Phase::Bubble, move |ectx, ev| {
+                if let Some(delta) = crate::ui::automations_view::wheel_delta(ev) {
+                    scroll_by(delta as i64);
+                    ectx.stop_propagation();
+                }
+            })
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| close(&ctx)

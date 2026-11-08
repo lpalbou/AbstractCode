@@ -5,6 +5,7 @@ pub mod animation;
 pub mod approval_view;
 pub mod attachments;
 pub mod attention_chip;
+pub mod automation_detail;
 pub mod automations_view;
 pub mod cards;
 pub mod chrome;

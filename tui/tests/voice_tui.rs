@@ -1239,8 +1239,9 @@ fn ctrl_p_in_an_automation_reads_the_selected_runs_reply() {
         s.contains("select a run (↑↓) to read its reply aloud")
     });
     assert!(gw.requests("/voice/tts/stream").is_empty());
-    // The newest run (#7, still waiting) has no reply yet.
-    for _ in 0..30 {
+    // The newest run (#7, still waiting; first under the two waits — the
+    // runs read newest first) has no reply yet.
+    for _ in 0..2 {
         h.term.push_input(b"\x1b[B");
         h.turn();
     }
@@ -1249,8 +1250,9 @@ fn ctrl_p_in_an_automation_reads_the_selected_runs_reply() {
         s.contains("No reply to read aloud yet.")
     });
     assert!(gw.requests("/voice/tts/stream").is_empty());
-    // Run #6: its reply, through the AUTOMATION's run (the web's runId).
-    h.term.push_input(b"\x1b[A");
+    // Run #6 (the next one down): its reply, through the AUTOMATION's run
+    // (the web's runId).
+    h.term.push_input(b"\x1b[B");
     h.turn();
     h.term.push_input(&[0x10]);
     h.until("reading", |s| {

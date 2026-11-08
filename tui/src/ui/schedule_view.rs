@@ -51,7 +51,7 @@ use crate::runner::Cmd;
 use crate::schedule_input::{self as si, Conversation};
 use crate::store::Store;
 use crate::transcript::Item;
-use crate::ui::cards::{draw_cards, hint_bar, Card, CardLine, Ink};
+use crate::ui::cards::{hint_bar, Card, CardLine, Ink};
 use crate::ui::modals::{modal_size, open_picker, title_row, Picker};
 use crate::ui::UiCtx;
 use crate::workflow_picker as wp;
@@ -329,6 +329,9 @@ fn step_keyed<A: Clone + PartialEq + 'static>(
     ctx.open_modal(cx, size, move |mcx| {
         let t = abstracttui::app::current_theme().tokens;
         let cursor = mcx.signal(start);
+        // The step's window: keys keep the cursor in view, the wheel
+        // scrolls it (anywhere on the screen).
+        let scroll = crate::ui::cards::CardScroll::new(mcx);
         let activate = {
             let build = build.clone();
             let act = act.clone();
@@ -353,17 +356,21 @@ fn step_keyed<A: Clone + PartialEq + 'static>(
                 cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
             }
         };
+        let follow = scroll.clone();
         let mv = Rc::new(move |delta: i64| {
             if let Some(k) = &on_key {
                 k();
             }
+            follow.follow_cursor();
             move_cursor(delta)
         });
         let build_v = build.clone();
+        let cards_scroll = scroll.clone();
         Element::new()
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, scroll.on_wheel())
             // Esc = the previous step (step 1: close, asking first when
             // something was entered) — never the whole dialog at once.
             .shortcut(KeyChord::plain(Key::Escape), move |_| back())
@@ -404,7 +411,11 @@ fn step_keyed<A: Clone + PartialEq + 'static>(
                 LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
                 move || {
                     let (cards, acts) = build_v();
-                    draw_cards(cards, cursor.get().min(acts.len().saturating_sub(1)))
+                    crate::ui::cards::draw_cards_wheel(
+                        cards,
+                        cursor.get().min(acts.len().saturating_sub(1)),
+                        &cards_scroll,
+                    )
                 },
             ))
             .child(hint_bar(&t, STEP_HINTS, 8))

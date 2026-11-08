@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Reflect on my notes", "Consolidate my notes") leave the automations list and its counts.
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
+- **The mouse wheel scrolls one automation, and every screen that windows its content.** One
+  automation's screen painted its runs as a window that only followed the ↑↓ cursor, so the wheel
+  did nothing and a long reply could never be read past the window. The wheel now scrolls the runs
+  over the runs and the selected run's output anywhere else on the screen, three rows a notch. The
+  same gap is closed on the automations list, the New automation steps, the workspace screen, an
+  automation's or a run's folder, `/status`, `/mcp` and `/resources` (the rows of `/status` and
+  `/mcp` past their window were out of reach before: their arrow and page keys now scroll them
+  too), the file preview, and the entities roster and card.
+
+### Changed (terminal)
+
+- **One automation reads as panels.** The header panel (the Active switch, the schedule with the
+  last and next run, what runs now and what waits for you) sits beside the Details panel (runs and
+  revision, context, tools, workflow, folder as labelled rows). Below, the runs are a table, newest
+  first under the waits that need you (#, status in its colour, when, tick), and the selected row
+  has its own panel: the run's output as Markdown (paragraphs, headings, bullets), its artifacts
+  folded to "5 artifacts — l lists them" (`l` lists their names, again folds them), then its task.
+  PgUp/PgDn/Home/End scroll that panel; every other key works as before. The key hints are two rows:
+  the automation's keys, then the selected row's. Phone-width and short terminals stack the
+  panels without frames and put the details at the end of the output.
 
 ## [web 0.15.14] - 2026-11-08 (local build, not published)
 

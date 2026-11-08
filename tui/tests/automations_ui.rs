@@ -425,43 +425,69 @@ fn one_automation_shows_folder_waits_and_runs_as_chat_pairs() {
     let mut h = harness();
     let screen = open_inbox(&mut h);
     assert!(screen.contains("Automations / Inbox triage"), "{screen}");
-    assert!(screen.contains("Run #7 running"), "{screen}");
+    // The header panel: the switch, the schedule with last/next, what runs
+    // now and what waits for you, the unseen notices.
+    let head = panel_text(&screen, "Schedule");
+    assert!(head.contains("[x] Active — runs on its schedule"), "{head}");
     assert!(
-        screen.contains("Every 30 minutes (UTC) · waiting since"),
-        "{screen}"
+        head.contains("Every 30 minutes (UTC) · waiting since"),
+        "{head}"
     );
-    assert!(screen.contains("waiting for you"), "{screen}");
-    // The workspace as a short name (never the full path in the header).
+    assert!(head.contains("Run #7 running"), "{head}");
+    assert!(head.contains("waiting for you"), "{head}");
     assert!(
-        screen.contains("Workspace session-automation-53443dd0-25c4-5fa8-bdad-e1ac3-db8ae8ce21b3 (w browses it)"),
-        "{screen}"
+        head.contains("2 unseen: run #2 notified, run #5 failed"),
+        "{head}"
+    );
+    // The Details panel: labelled rows; the workspace as a short name
+    // (never the full path).
+    let details = panel_text(&screen, "Details");
+    assert!(details.contains("Runs 7 · revision 3"), "{details}");
+    assert!(
+        details.contains("Tools Ask me before each tool call"),
+        "{details}"
+    );
+    assert!(details.contains("Workflow inbox@1.0.0:triage"), "{details}");
+    // (A name longer than the column breaks inside the word: compare
+    // without the joining spaces.)
+    assert!(
+        details.replace(' ', "").contains(
+            "Workspacesession-automation-53443dd0-25c4-5fa8-bdad-e1ac3-db8ae8ce21b3(wbrowsesit)"
+        ),
+        "{details}"
     );
     assert!(!screen.contains("/srv/abstractgateway"), "{screen}");
+    // The runs table: the waits that need you on top, then the runs newest
+    // first, each with its status; the cursor rests on the first wait and
+    // its panel says what it asks.
+    let runs = panel_text(&screen, "Runs · 7");
+    assert!(runs.contains("# Status When (UTC) Tick"), "{runs}");
     assert!(
-        screen.contains("tools: ask me before each tool call"),
-        "{screen}"
+        runs.contains("⚠ Question for you · run #7 ⚠ Approval needed · run #7 7 ⚠ waiting 27 Sep 06:30 5 6 ✓ completed"),
+        "{runs}"
     );
-    assert!(screen.contains("⚠ Question for you · run #7"), "{screen}");
-    assert!(screen.contains("⚠ Approval needed"), "{screen}");
+    assert!(runs.contains("5 ✕ failed 27 Sep 05:30 3"), "{runs}");
+    let wait = panel_text(&screen, "Question for you · run #7");
+    assert!(wait.contains("⚠ Enter answers"), "{wait}");
     assert!(
-        screen.contains("• run #5 failed: Inbox triage failed"),
-        "{screen}"
+        wait.contains("The landlord asks whether Tuesday works for the boiler inspection."),
+        "{wait}"
     );
-    assert!(screen.contains("#2 · completed · Notified"), "{screen}");
-    assert!(screen.contains("task:   [Trigger schedule@1"), "{screen}");
-    // Walking down scrolls the runs into view (oldest first).
-    for _ in 0..7 {
-        h.keys(b"\x1b[B");
-    }
-    let screen = h.turn();
+    assert!(wait.contains("• Reply: Tuesday works"), "{wait}");
+    // Down to the failed run #5 (past the two waits, #7, #6): its panel
+    // has the failure in words.
+    let screen = h.down(4);
+    let run = panel_text(&screen, "Run #5");
+    assert!(run.contains("✕ failed"), "{run}");
+    assert!(run.contains("3 attempts"), "{run}");
     assert!(
-        screen.contains("#5 · failed · Failed after 3 attempts"),
-        "{screen}"
+        run.contains("Failed: occurrence_failed IMAP read timed out after 60 s"),
+        "{run}"
     );
-    assert!(
-        screen.contains("failed: occurrence_failed IMAP read timed out"),
-        "{screen}"
-    );
+    // Run #2 notified: the notice under its status.
+    let screen = h.down(3);
+    let run = panel_text(&screen, "Run #2");
+    assert!(run.contains("Notified: 2 urgent emails"), "{run}");
     // Showing the attention items acknowledged the LAST displayed cursor
     // once (`open_inbox` saw the Seen); nothing is re-sent while in flight.
     assert_eq!(
@@ -523,17 +549,16 @@ fn discuss_forks_a_finished_run_and_switches_this_terminal_to_it() {
     // At rest the cursor is on a wait: discuss asks for a run.
     let screen = h.keys(b"d");
     assert!(screen.contains("select a run (↑↓) to discuss"), "{screen}");
-    // The newest run (#7, at the bottom) is still waiting: discuss refuses it.
-    for _ in 0..12 {
-        h.keys(b"\x1b[B");
-    }
+    // The newest run (#7, under the two waits) is still waiting: discuss
+    // refuses it.
+    h.down(2);
     let screen = h.keys(b"d");
     assert!(
         screen.contains("discuss: run #7 has not finished yet"),
         "{screen}"
     );
-    // Up to #6 (finished), discuss, type the first message.
-    h.keys(b"\x1b[A");
+    // Down to #6 (finished), discuss, type the first message.
+    h.keys(b"\x1b[B");
     let screen = h.keys(b"d");
     assert!(screen.contains("discuss run #6"), "{screen}");
     assert!(screen.contains("mounted read-only"), "{screen}");
@@ -2314,6 +2339,43 @@ fn a_refused_rule_shows_the_gateways_sentence_and_does_not_continue() {
 }
 
 /// The screen as one line (wrapped text joined, box glyphs and runs of blanks collapsed).
+/// The text inside the panel titled `title` (`╭ title ──╮` … `╰──╯`):
+/// its rows between the side borders, trimmed and joined with spaces, so
+/// a wrapped line reads whole.
+fn panel_text(screen: &str, title: &str) -> String {
+    let rows: Vec<Vec<char>> = screen.lines().map(|l| l.chars().collect()).collect();
+    let needle: Vec<char> = format!("╭ {title} ").chars().collect();
+    let (top, left) = rows
+        .iter()
+        .enumerate()
+        .find_map(|(y, r)| {
+            r.windows(needle.len())
+                .position(|w| w == needle.as_slice())
+                .map(|x| (y, x))
+        })
+        .unwrap_or_else(|| panic!("no panel {title:?}:\n{screen}"));
+    let right = (left + 1..rows[top].len())
+        .find(|&x| rows[top][x] == '╮')
+        .expect("the panel's top-right corner");
+    let mut parts = Vec::new();
+    for r in &rows[top + 1..] {
+        if r.get(left) == Some(&'╰') {
+            break;
+        }
+        let inner: String = r[left + 1..right.min(r.len())].iter().collect();
+        parts.push(
+            inner
+                .trim_matches(|c: char| c.is_whitespace() || c == '█' || c == '▏')
+                .to_string(),
+        );
+    }
+    parts
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn flat(screen: &str) -> String {
     screen
         .lines()
@@ -2858,7 +2920,7 @@ fn esc_from_an_automations_edit_goes_back_to_the_automation() {
         "back on the automation:\n{screen}"
     );
     assert!(
-        screen.contains("o Open as chat"),
+        screen.contains("o Chat") && screen.contains("╭ Details "),
         "the automation's own screen:\n{screen}"
     );
     assert!(!screen.contains("Sections (1–5)"), "{screen}");
@@ -3466,6 +3528,406 @@ fn a_failed_email_result_is_a_third_card_line_and_a_header_line() {
         .update(|v| v.apply_detail(INBOX, definition, inbox, occ));
     h.turn();
     let screen = h.turn();
-    eprintln!("--- /automations <Inbox triage> ---\n{screen}");
-    assert!(screen.contains(&text), "the header line:\n{screen}");
+    let head = panel_text(&screen, "Schedule");
+    assert!(head.contains(&text), "the header line:\n{screen}");
+}
+
+// ---------------------------------------------------------------------------
+// One automation, readable (2026-11-08): panels, the runs table, the
+// selected run's output, the wheel
+// ---------------------------------------------------------------------------
+
+const MARKET: &str = "d18e1757-58ae-5e22-a61e-7b84fdee19cf";
+
+/// A Markdown-ish answer with real paragraphs, a heading and bullets — the
+/// shape the gateway serves for a research automation.
+fn market_answer(i: u64) -> String {
+    format!(
+        "Prices checked for run {i}.\n\n## Summary\n\nNew drives are steady this week; used \
+         enterprise drives keep falling as data-centre refreshes reach the resellers.\n\n\
+         - Seagate Exos 18TB: 289 EUR new, 179 EUR used (in stock)\n\
+         - Seagate Exos 24TB: 459 EUR new, no used offer\n\
+         - WD Ultrastar 20TB: 339 EUR new, 219 EUR used (2 left)\n\n\
+         ## Details\n\n{}\n\nLast line of run {i}: nothing else changed.",
+        (1..=12)
+            .map(|p| format!(
+                "Paragraph {p}: the reseller listings were read one by one and compared with \
+                 the previous run; prices are in euros including VAT, shipping excluded."
+            ))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    )
+}
+
+/// `runs` runs of "Market watch" (the newest `running` when asked), the
+/// first page of 50 loaded newest-first like the gateway serves them,
+/// every finished run with 5 artifacts named by their hash.
+fn market_detail(
+    running: bool,
+    runs: u64,
+) -> (
+    auto::Definition,
+    auto::Summary,
+    auto::Page<auto::Occurrence>,
+) {
+    let list = auto::parse_list_page(&fixture("list.json")).unwrap();
+    let mut summary = list.items.into_iter().find(|s| s.id == INBOX).unwrap();
+    summary.id = MARKET.into();
+    summary.title = "Market watch".into();
+    summary.occurrence_count = runs;
+    summary.attention = auto::Attention {
+        pending_waits: 0,
+        unseen_count: 0,
+        items: Vec::new(),
+        waits: Vec::new(),
+    };
+    summary.current = None;
+    if running {
+        summary.current = Some(auto::CurrentOccurrence {
+            index: runs,
+            run_id: format!("run-{runs}"),
+            attempt: 1,
+            status: "running".into(),
+        });
+    }
+    let items: Vec<Value> = (runs.saturating_sub(49).max(1)..=runs)
+        .rev()
+        .map(|i| {
+            let live = running && i == runs;
+            let failed = !live && i % 17 == 0;
+            json!({
+                "run_id": format!("run-{i}"),
+                "index": i,
+                "attempts": if failed { 3 } else { 1 },
+                "fired_at": format!("2026-11-{:02}T06:30:00+00:00", 1 + (i % 7)),
+                "status": if live { "running" } else if failed { "failed" } else { "completed" },
+                "trigger": {"source_id": "schedule", "summary": format!("schedule: Every 24 hours (UTC), tick {}", i - 1)},
+                "user_turn": "[Trigger schedule@1 · occurrence]\nCheck the prices and the stock of the drives on the list.\n\n- Seagate Exos 18TB\n- Seagate Exos 24TB\n- WD Ultrastar 20TB",
+                "answer": if live || failed { String::new() } else { market_answer(i) },
+                "notify": null,
+                "artifacts": if live { vec![] } else {
+                    (0..5).map(|k| json!({"name": format!("{:032x}", (i * 7919 + k) * 104_729)})).collect::<Vec<_>>()
+                },
+                "failure": if failed { json!({"reason_code": "occurrence_failed", "message": "the reseller site timed out after 60 s", "attempts": 3}) } else { Value::Null },
+                "waits": [],
+            })
+        })
+        .collect();
+    let page = auto::parse_occurrence_page(&json!({
+        "items": items,
+        "next_cursor": if runs > 50 { json!("c50") } else { Value::Null },
+    }))
+    .unwrap();
+    let definition = auto::Definition {
+        revision: 4,
+        workflow_id: "market@1.2.0:watch".into(),
+        tool_approval: "auto".into(),
+        growing: Default::default(),
+        max_attempts: Some(3),
+        workspace_root: summary.workspace_root.clone().unwrap(),
+        target: Value::Null,
+        notify: Value::Null,
+    };
+    (definition, summary, page)
+}
+
+impl Harness {
+    /// `/automations <id>` answered with [`market_detail`].
+    fn open_market(&mut self, running: bool, runs: u64) -> String {
+        let (definition, summary, page) = market_detail(running, runs);
+        self.command(&format!("/automations {MARKET}"));
+        self.store
+            .automations
+            .update(|v| v.apply_detail(MARKET, definition, summary, page));
+        self.turn();
+        self.turn()
+    }
+
+    /// Text + SVG of the screen under `AUTOMATION_VIEW_CAPTURE_DIR`.
+    fn capture(&mut self, name: &str) -> String {
+        let screen = self.turn();
+        if let Ok(dir) = std::env::var("AUTOMATION_VIEW_CAPTURE_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(format!("{dir}/{name}.txt"), &screen).unwrap();
+            let svg = self.term.screen().screenshot().to_svg();
+            std::fs::write(format!("{dir}/{name}.svg"), svg).unwrap();
+        }
+        screen
+    }
+}
+
+/// Real renders of one automation at 120x40 and 200x50: a running run, a
+/// completed one among 141 runs, and (when `LIVE_AUTOMATION_DIR` names a
+/// folder of GET answers saved from a gateway) that automation as served.
+#[test]
+fn automation_detail_screens() {
+    for size in [
+        Size::new(120, 40),
+        Size::new(200, 50),
+        Size::new(104, 36),
+        Size::new(80, 24),
+        Size::new(48, 30),
+    ] {
+        let tag = format!("{}x{}", size.w, size.h);
+        let mut h = harness_sized(size);
+        h.open_market(true, 38);
+        h.capture(&format!("{tag}-running"));
+        let mut h = harness_sized(size);
+        h.open_market(false, 141);
+        h.capture(&format!("{tag}-completed-141"));
+        let mut h = harness_sized(size);
+        open_inbox(&mut h);
+        h.capture(&format!("{tag}-inbox-waits"));
+        if let Ok(dir) = std::env::var("LIVE_AUTOMATION_DIR") {
+            for name in ["running", "completed"] {
+                let read = |f: &str| -> Value {
+                    serde_json::from_slice(&std::fs::read(format!("{dir}/{f}")).unwrap()).unwrap()
+                };
+                let (definition, summary) =
+                    auto::parse_detail(&read(&format!("live_detail_{name}.json"))).unwrap();
+                let page =
+                    auto::parse_occurrence_page(&read(&format!("live_occ_{name}.json"))).unwrap();
+                let id = summary.id.clone();
+                let mut h = harness_sized(size);
+                h.command(&format!("/automations {id}"));
+                h.store
+                    .automations
+                    .update(|v| v.apply_detail(&id, definition, summary, page));
+                h.turn();
+                h.capture(&format!("{tag}-live-{name}"));
+            }
+        }
+    }
+}
+
+/// The operator (2026-11-08): "I should be able to scroll a modal content
+/// with the mouse if scrollable". Every part of one automation answers the
+/// wheel, three rows a notch: over the runs the runs scroll (their header
+/// row and border included); over the output, the header panels, the hints
+/// or the title, the output scrolls — the screen's main scroll region.
+#[test]
+fn the_wheel_scrolls_the_runs_and_the_output_from_anywhere_on_the_screen() {
+    let mut h = harness_sized(Size::new(120, 40));
+    let screen = h.open_market(false, 141);
+    let runs_title = "Runs · 50 of 141 shown";
+    let first_run = |screen: &str| -> String {
+        panel_text(screen, runs_title)
+            .split(" Tick ")
+            .nth(1)
+            .unwrap_or_default()
+            .split(' ')
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    };
+    let output = |screen: &str| panel_text(screen, "Run #141");
+    assert_eq!(first_run(&screen), "141", "{screen}");
+    assert!(
+        output(&screen).contains("Prices checked for run 141."),
+        "{screen}"
+    );
+
+    // 1. Over the output's text: the output scrolls, the runs stay.
+    let (row, col) = locate(&screen, "Prices checked for run 141.");
+    let mut screen = screen;
+    for _ in 0..4 {
+        screen = h.wheel(row, col, false);
+    }
+    assert!(
+        !output(&screen).contains("Prices checked for run 141."),
+        "{screen}"
+    );
+    assert!(output(&screen).contains("Paragraph"), "{screen}");
+    assert_eq!(first_run(&screen), "141", "{screen}");
+    for _ in 0..4 {
+        screen = h.wheel(row, col, true);
+    }
+    assert!(
+        output(&screen).contains("Prices checked for run 141."),
+        "{screen}"
+    );
+
+    // 2. Over the runs' rows: the runs scroll (3 a notch), the selection
+    //    and its output stay.
+    let (row, col) = locate(&screen, "140  ✓ completed");
+    let screen = h.wheel(row, col, false);
+    assert_eq!(first_run(&screen), "138", "{screen}");
+    assert!(
+        output(&screen).contains("Prices checked for run 141."),
+        "{screen}"
+    );
+    let screen = h.wheel(row, col, true);
+    assert_eq!(first_run(&screen), "141", "{screen}");
+
+    // 3. Over the runs table's header row: still the runs.
+    let (row, col) = locate(&screen, "When (UTC)");
+    let screen = h.wheel(row, col, false);
+    assert_eq!(first_run(&screen), "138", "{screen}");
+    let screen = h.wheel(row, col, true);
+    assert_eq!(first_run(&screen), "141", "{screen}");
+
+    // 4. Over what does not scroll — the header panel, the hints, the
+    //    title: the output scrolls.
+    for needle in ["[x] Active", "g Run now", "Automations / Market watch"] {
+        let (row, col) = locate(&screen, needle);
+        let mut moved = screen.clone();
+        for _ in 0..4 {
+            moved = h.wheel(row, col, false);
+        }
+        assert!(
+            !output(&moved).contains("Prices checked for run 141."),
+            "the wheel over {needle:?} scrolls the output:\n{moved}"
+        );
+        assert_eq!(first_run(&moved), "141", "{moved}");
+        for _ in 0..4 {
+            h.wheel(row, col, true);
+        }
+    }
+}
+
+/// The keys of one automation after the redesign: ↑↓ walk the runs (also
+/// once a click has focused the runs list or the output), PgUp/PgDn/Home/End
+/// scroll the output, `l` lists the folded artifacts, a click selects a run.
+#[test]
+fn keys_and_clicks_on_one_automation() {
+    let mut h = harness_sized(Size::new(120, 40));
+    h.open_market(false, 141);
+    // PgDn scrolls the output a page, Home brings it back, End reaches the task.
+    let screen = h.keys(b"\x1b[6~");
+    assert!(
+        !panel_text(&screen, "Run #141").contains("Prices checked"),
+        "{screen}"
+    );
+    let screen = h.keys(b"\x1b[H");
+    assert!(
+        panel_text(&screen, "Run #141").contains("Prices checked"),
+        "{screen}"
+    );
+    let screen = h.keys(b"\x1b[F");
+    let end = panel_text(&screen, "Run #141");
+    assert!(
+        end.contains("WD Ultrastar 20TB"),
+        "the task at the end:\n{screen}"
+    );
+    assert!(end.contains("5 artifacts — l lists them"), "{screen}");
+    assert!(
+        !screen.contains("0000000000"),
+        "no wall of hashes:\n{screen}"
+    );
+    // `l` lists the artifacts by name; again folds them.
+    h.keys(b"l");
+    let screen = h.keys(b"\x1b[F");
+    let listed = panel_text(&screen, "Run #141");
+    assert!(listed.contains("5 artifacts — l folds them"), "{screen}");
+    assert!(screen.matches("00000000").count() >= 5, "{screen}");
+    let screen = h.keys(b"l");
+    assert!(
+        panel_text(&screen, "Run #141").contains("l lists them"),
+        "{screen}"
+    );
+    // ↓ selects the next (older) run; its output starts at the top.
+    let screen = h.keys(b"\x1b[B");
+    assert!(
+        panel_text(&screen, "Run #140").contains("Prices checked for run 140."),
+        "{screen}"
+    );
+    // A click on a row selects it; ↑↓ still walk the runs afterwards (the
+    // click focused the list, whose own keys do not take these over).
+    let screen = h.click_on("137  ✓ completed");
+    assert!(screen.contains("╭ Run #137 "), "{screen}");
+    let screen = h.keys(b"\x1b[A");
+    assert!(screen.contains("╭ Run #138 "), "{screen}");
+    // A click in the output, then ↓: the runs move, not the output.
+    let screen = h.click_on("Prices checked for run 138.");
+    let screen2 = h.keys(b"\x1b[B");
+    assert!(screen2.contains("╭ Run #137 "), "{screen}\n{screen2}");
+}
+
+// ---------------------------------------------------------------------------
+// The wheel on the other screens that window their content (audit
+// 2026-11-08): a notch scrolls the content wherever the pointer is on the
+// screen, and the notch back restores it.
+// ---------------------------------------------------------------------------
+
+impl Harness {
+    /// One notch (down, or up when `up_first` — a list shown at its end)
+    /// then one back, with the pointer on `needle` (a line that does not
+    /// scroll — the screen's title): the content moves, then comes back
+    /// exactly.
+    fn wheel_scrolls(&mut self, needle: &str, up_first: bool) {
+        let before = self.turn();
+        let (row, col) = locate(&before, needle);
+        let moved = self.wheel(row, col, up_first);
+        assert_ne!(
+            moved, before,
+            "one notch over {needle:?} scrolls the content:\n{before}"
+        );
+        let back = self.wheel(row, col, !up_first);
+        assert_eq!(back, before, "the notch back restores it:\n{back}");
+    }
+}
+
+#[test]
+fn the_wheel_scrolls_the_automations_list() {
+    let mut h = harness_sized(Size::new(120, 18));
+    h.command("/automations");
+    h.answer_list();
+    let screen = h.turn();
+    assert!(screen.contains("↓ "), "the list overflows here:\n{screen}");
+    h.wheel_scrolls("Automations", false);
+}
+
+#[test]
+fn the_wheel_scrolls_a_new_automation_step() {
+    let mut h = harness_sized(Size::new(120, 20));
+    h.store.workflow.update(|w| w.gateway_default = true);
+    h.command("/schedule morning briefing");
+    let screen = h.keys(b"\r"); // What: Continue → When
+    assert!(
+        screen.contains("↑ "),
+        "the step shows its end here:\n{screen}"
+    );
+    h.wheel_scrolls("2/7 When", true);
+}
+
+#[test]
+fn the_wheel_scrolls_the_status_panel() {
+    let mut h = harness_sized(Size::new(100, 16));
+    let screen = h.command("/status");
+    assert!(
+        screen.contains("more"),
+        "the panel overflows here:\n{screen}"
+    );
+    h.wheel_scrolls("status · Esc closes", false);
+    // No cursor here: the arrow keys scroll it too.
+    let before = h.turn();
+    let down = h.keys(b"\x1b[B");
+    assert_ne!(down, before, "↓ scrolls the panel:\n{before}");
+}
+
+#[test]
+fn the_wheel_scrolls_an_automation_folder() {
+    let mut h = harness_sized(Size::new(120, 24));
+    open_inbox(&mut h);
+    h.keys(b"w");
+    let entries = (0..60)
+        .map(|i| abstractcode::workspace_files::WorkspaceEntry {
+            name: format!("report-{i:02}.md"),
+            path: format!("report-{i:02}.md"),
+            is_dir: false,
+            size_bytes: Some(1024),
+        })
+        .collect();
+    h.store.files.update(|f| {
+        f.listing =
+            abstractcode::store::Fetch::Ready(abstractcode::workspace_files::WorkspaceListing {
+                path: String::new(),
+                entries,
+                truncated: false,
+            })
+    });
+    let screen = h.turn();
+    assert!(screen.contains("report-00.md"), "{screen}");
+    assert!(!screen.contains("report-59.md"), "{screen}");
+    h.wheel_scrolls("automation folder", false);
 }

@@ -26,7 +26,7 @@ use abstracttui::prelude::*;
 use crate::gateway::workspaces::{self as lane, RunCommit, WsCmd};
 use crate::runner::Cmd;
 use crate::store::Store;
-use crate::ui::cards::{draw_cards, hint_bar, Card, CardLine, Ink};
+use crate::ui::cards::{hint_bar, Card, CardLine, Ink};
 use crate::ui::modals::{modal_size, open_picker, title_row, Picker};
 use crate::ui::UiCtx;
 use crate::workspaces::{self as ws, Level, Mode, Posture, RunValue, State, WsData};
@@ -732,6 +732,9 @@ pub fn open_screen(
         // With a "Continue" card the cursor starts on it (Enter accepts the
         // shown workspaces); `usize::MAX` = the last card, clamped on use.
         let cursor = mcx.signal(if next.is_some() { usize::MAX } else { 0usize });
+        // The screen's window: keys keep the cursor in view, the wheel
+        // scrolls it (anywhere on the screen).
+        let scroll = crate::ui::cards::CardScroll::new(mcx);
         // Load what the chooser needs (and re-load after a change elsewhere).
         {
             let ctx = ctx2.clone();
@@ -820,7 +823,9 @@ pub fn open_screen(
         };
         let move_cursor = {
             let cards_of = cards_of.clone();
+            let follow = scroll.clone();
             move |delta: i64| {
+                follow.follow_cursor();
                 let n = cards_of(false).1.len();
                 if n > 0 {
                     cursor.update(|c| {
@@ -831,10 +836,12 @@ pub fn open_screen(
             }
         };
         let title2 = title_for(&host);
+        let cards_scroll = scroll.clone();
         Element::new()
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, scroll.on_wheel())
             .shortcut(KeyChord::plain(Key::Escape), {
                 let back = back.clone();
                 move |_| back()
@@ -861,7 +868,7 @@ pub fn open_screen(
                 move || {
                     let (cards, acts) = cards_of(true);
                     let cur = cursor.get().min(acts.len().saturating_sub(1));
-                    draw_cards(cards, cur)
+                    crate::ui::cards::draw_cards_wheel(cards, cur, &cards_scroll)
                 },
             ))
             .child(hint_bar(&t, SCREEN_HINTS, 8))

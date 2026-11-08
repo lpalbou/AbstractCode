@@ -33,8 +33,8 @@ use crate::automations::{self as auto, Control, Summary};
 use crate::gateway::automations::AutoCmd;
 use crate::runner::Cmd;
 use crate::store::Store;
-use crate::ui::cards::{draw_cards, hint_bar, note_lines, Card, CardLine, Ink};
-use crate::ui::modals::{draw_rows, hint_row, modal_size, title_row, wrap_lines, Mark, RowSpec};
+use crate::ui::cards::{hint_bar, note_lines, Card, CardLine, Ink};
+use crate::ui::modals::{hint_row, modal_size, title_row, wrap_lines, Mark, RowSpec};
 use crate::ui::UiCtx;
 
 /// Re-read cadence while an automations screen is open (nothing polls once
@@ -327,6 +327,9 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
         let t = abstracttui::app::current_theme().tokens;
         let cursor = mcx.signal(0usize);
         let confirm_archive = mcx.signal(Option::<String>::None);
+        // The list's window: keys keep the cursor in view, the wheel
+        // scrolls it (anywhere on the screen).
+        let scroll = crate::ui::cards::CardScroll::new(mcx);
         arm_poll(mcx, store, ctx2.clone());
         let targets = move || {
             let now = auto::now_unix();
@@ -350,8 +353,10 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
             Some(ListTarget::Automation(id)) => summary_of(&id),
             _ => None,
         };
+        let follow = scroll.clone();
         let move_cursor = move |delta: i64| {
             confirm_archive.set(None);
+            follow.follow_cursor();
             let n = targets().len();
             if n > 0 {
                 cursor.update(|c| *c = (*c as i64 + delta).clamp(0, n as i64 - 1) as usize);
@@ -441,10 +446,12 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
             move || open_schedule(cx, store, &ctx, None)
         };
         let key = |c: char| KeyChord::plain(Key::Char(c));
+        let cards_scroll = scroll.clone();
         Element::new()
             .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Bubble, scroll.on_wheel())
             .shortcut(KeyChord::plain(Key::Escape), {
                 let ctx = ctx2.clone();
                 move |_| {
@@ -455,7 +462,10 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
                     }
                 }
             })
-            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
+            .shortcut(KeyChord::plain(Key::Up), {
+                let move_cursor = move_cursor.clone();
+                move |_| move_cursor(-1)
+            })
             .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
             .shortcut(KeyChord::plain(Key::Enter), move |_| enter())
             .shortcut(key('y'), move |_| {
@@ -503,7 +513,7 @@ pub fn open_automations(cx: Scope, store: Store, ctx: &UiCtx) {
                         .automations
                         .with(|v| list_cards(v, now, confirm.as_deref()));
                     let cur = cursor.get().min(targets.len().saturating_sub(1));
-                    draw_cards(cards, cur)
+                    crate::ui::cards::draw_cards_wheel(cards, cur, &cards_scroll)
                 },
             ))
             .child(hint_bar(&t, LIST_HINTS, 8))
@@ -522,203 +532,6 @@ pub enum Target {
     Earlier,
     Wait(auto::Wait),
     Run(u64),
-}
-
-/// The header lines of one automation (pure, test-pinned): the Code web
-/// header — `[x] Active · every 24 h · last 3 h ago · next in 14 h` (+ the
-/// "waiting for you" badge), the served "Email result failed — …" line while
-/// the last one failed, the workspace as a short name — then the
-/// facts the terminal keeps (runs, revision, context, tools, workflow).
-pub fn header_lines(s: &Summary, def: Option<&auto::Definition>, now: i64) -> Vec<String> {
-    let mut first = auto::timing_line(s, now);
-    if let Some(badge) = auto::waiting_badge(s) {
-        first.push_str(&format!(" · {badge}"));
-    }
-    let mut out = vec![first];
-    if let Some(failed) = auto::email_failed_line(s, now) {
-        out.push(failed);
-    }
-    if let Some(cur) = auto::current_label(s) {
-        out.push(cur);
-    }
-    if let Some(root) = &s.workspace_root {
-        out.push(format!(
-            "Workspace {} (w browses it)",
-            crate::ui::rail_view::short_name(root)
-        ));
-    }
-    let mut facts = vec![format!(
-        "{} {}",
-        s.occurrence_count,
-        if s.occurrence_count == 1 {
-            "run"
-        } else {
-            "runs"
-        }
-    )];
-    if let Some(rev) = def.map(|d| d.revision).or(s.revision) {
-        facts.push(format!("Revision {rev}"));
-    }
-    facts.push(auto::context_label(&s.context_mode).to_string());
-    if let Some(d) = def {
-        facts.push(if d.tool_approval == "ask" {
-            "tools: ask me before each tool call".into()
-        } else {
-            format!("tools: {}", auto::TOOL_APPROVAL_CONSENT.to_lowercase())
-        });
-        if !d.workflow_id.is_empty() {
-            facts.push(format!("workflow {}", d.workflow_id));
-        }
-        if s.context_mode == "growing" && !d.growing.is_empty() {
-            facts.push(format!(
-                "growing context {}",
-                serde_json::Value::Object(d.growing.clone())
-            ));
-        }
-    }
-    out.push(facts.join(" · "));
-    if s.attention.unseen_count > 0 || s.attention.pending_waits > 0 {
-        out.push(format!("attention: {}", auto::attention_label(s)));
-    }
-    if s.status == "archived" {
-        out.push(
-            "Archived: it will not run again; its history stays readable (Discuss still works)."
-                .into(),
-        );
-    }
-    if s.legacy {
-        out.push("Legacy schedule: managed with its existing controls (Observer run view).".into());
-    }
-    out
-}
-
-/// The automation screen's key hints (the header's buttons first).
-pub const DETAIL_HINTS: &[(&str, &str)] = &[
-    ("g", "Run now"),
-    ("x", "Stop"),
-    ("e", "Edit"),
-    ("a", "Archive"),
-    ("u", "Unarchive"),
-    ("space", "Active"),
-    ("↑↓", ""),
-    ("y/n", "approve/deny"),
-    ("Enter", "answers · opens a run as chat"),
-    ("o", "Open as chat"),
-    ("d", "Discuss run"),
-    ("Ctrl+P", "read aloud"),
-    ("w", "folder"),
-    ("r", "Refresh"),
-    ("Esc", "back"),
-];
-
-/// The body rows and their targets: waits that need you, the unseen
-/// attention items, then every loaded run as a chat pair, oldest first.
-pub(crate) fn detail_rows(d: &auto::Detail, width: i32) -> (Vec<RowSpec>, Vec<(usize, Target)>) {
-    let mut rows = Vec::new();
-    let mut targets = Vec::new();
-    let push = |rows: &mut Vec<RowSpec>, text: String, dim: bool| {
-        rows.push(RowSpec {
-            text,
-            header: false,
-            checked: None,
-            dim,
-        })
-    };
-    let wrap_into = |rows: &mut Vec<RowSpec>, prefix: &str, text: &str, dim: bool| {
-        let pad = " ".repeat(prefix.chars().count());
-        for (i, line) in wrap_lines(text, (width - prefix.chars().count() as i32).max(8), None)
-            .into_iter()
-            .enumerate()
-        {
-            let lead = if i == 0 { prefix } else { pad.as_str() };
-            rows.push(RowSpec {
-                text: format!("{lead}{line}"),
-                header: false,
-                checked: None,
-                dim,
-            });
-        }
-    };
-    if let Some(s) = &d.summary {
-        let waits = &s.attention.waits;
-        if !waits.is_empty() || !s.attention.items.is_empty() {
-            push(&mut rows, "needs attention".into(), true);
-        }
-        for w in waits {
-            targets.push((rows.len(), Target::Wait(w.clone())));
-            let run = w.index.map(|i| format!(" · run #{i}")).unwrap_or_default();
-            let keys = match w.kind.as_str() {
-                "tool_approval" => " — y approves · n denies",
-                "ask_user" | "event" => " — Enter answers",
-                _ => " — not answered here (open its run)",
-            };
-            push(
-                &mut rows,
-                format!("⚠ {}{run}{keys}", auto::wait_kind_label(&w.kind)),
-                false,
-            );
-            if !w.prompt.is_empty() {
-                wrap_into(&mut rows, "    ", &w.prompt, false);
-            }
-            if !w.choices.is_empty() {
-                wrap_into(&mut rows, "    choices: ", &w.choices.join(" | "), true);
-            }
-            for call in auto::wait_tool_calls(w) {
-                wrap_into(&mut rows, "    ", &call, false);
-            }
-        }
-        for item in &s.attention.items {
-            let kind = if item.kind == "failure" {
-                "failed"
-            } else {
-                "notified"
-            };
-            push(
-                &mut rows,
-                format!("• run #{} {kind}: {}", item.index, item.title),
-                false,
-            );
-            if !item.body.is_empty() {
-                wrap_into(&mut rows, "    ", &item.body, true);
-            }
-        }
-    }
-    if d.next_cursor.is_some() {
-        targets.push((rows.len(), Target::Earlier));
-        push(&mut rows, "↑ load earlier occurrences (Enter)".into(), true);
-    }
-    if d.occurrences.is_empty() {
-        push(&mut rows, "no runs yet — g runs it now".into(), true);
-    }
-    for o in &d.occurrences {
-        targets.push((rows.len(), Target::Run(o.index)));
-        let quiet = auto::occurrence_tone(o) == "quiet";
-        push(&mut rows, auto::occurrence_header(o), quiet);
-        if !o.user_turn.is_empty() {
-            wrap_into(&mut rows, "  task:   ", &o.user_turn, true);
-        }
-        if !o.answer.is_empty() {
-            wrap_into(&mut rows, "  answer: ", &o.answer, quiet);
-        }
-        if let Some((title, body)) = &o.notify {
-            wrap_into(&mut rows, "  notify: ", &format!("{title} — {body}"), false);
-        }
-        if let Some(f) = &o.failure {
-            wrap_into(
-                &mut rows,
-                "  failed: ",
-                &format!(
-                    "{} {} (after {} attempts)",
-                    f.reason_code, f.message, f.attempts
-                ),
-                false,
-            );
-        }
-        if !o.artifacts.is_empty() {
-            wrap_into(&mut rows, "  artifacts: ", &o.artifacts.join(", "), true);
-        }
-    }
-    (rows, targets)
 }
 
 /// The automation's runs as a conversation, oldest first: per run a
@@ -840,8 +653,6 @@ pub fn open_as_chat(cx: Scope, store: Store, ctx: &UiCtx, at: Option<u64>) {
     });
 }
 
-/// Where the cursor rests before the user moves it (`usize::MAX`): on the
-/// first wait that needs you, else on the newest run.
 /// What Ctrl+P reads in one automation (R17.1): the SELECTED run's reply,
 /// spoken through the automation's run (the web's `runId: automationId`).
 /// `Err` = the sentence to show instead.
@@ -864,31 +675,45 @@ pub fn read_aloud_target(
     Ok((d.id.clone(), reply))
 }
 
-pub(crate) fn resolve_cursor(cursor: usize, targets: &[Target]) -> usize {
-    if cursor != usize::MAX {
-        return cursor.min(targets.len().saturating_sub(1));
-    }
-    targets
-        .iter()
-        .position(|t| matches!(t, Target::Wait(_)))
-        .unwrap_or(targets.len().saturating_sub(1))
-}
-
-/// One automation: header, waits, runs, controls.
+/// One automation (operator 2026-11-08, "make it readable"): panels built
+/// by [`crate::ui::automation_detail`] — the header and its Details, the
+/// runs table and the selected row's output — and the wheel over every
+/// part of the screen: over the runs it scrolls the runs, anywhere else
+/// it scrolls the output (the screen's main scroll region).
 pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
+    use crate::ui::automation_detail as panels;
     let id = id.to_string();
     store.automations.update(|v| v.open(&id));
     send(ctx, AutoCmd::Open { id: id.clone() });
     let ctx2 = ctx.clone();
-    let size = modal_size(160, 40);
-    // Rows are drawn indented inside the panel padding: wrap narrower than
-    // the panel so no line is cut by the row ellipsis.
-    let width = size.w - 12;
+    let size = modal_size(170, 60);
+    // Side by side from this width; narrower terminals stack the panels
+    // and move the Details under the output.
+    let wide = size.w >= 100;
+    // The content box: the modal's frame and this column's padding.
+    let inner_w = size.w - 4;
+    let inner_h = size.h - 4;
+    // Narrow: the runs panel's tallest (its border, header row and rows);
+    // a short terminal keeps two rows of runs so the output keeps rows too.
+    // (Narrow panels are frameless: a title line, the table's header row.)
+    let runs_max_h = if inner_h >= 24 { 7 } else { 4 };
+    // ...and the output's least: its title and five lines, two when short
+    // (the hints give up their rows first).
+    let out_min_h = if inner_h >= 20 { 6 } else { 3 };
     ctx.open_modal(cx, size, move |mcx| {
-        let t = abstracttui::app::current_theme().tokens;
-        // Cursor over the targets; `usize::MAX` = the newest run (at rest).
+        // Cursor over the targets; `usize::MAX` = at rest (the first wait
+        // that needs you, else the newest run).
         let cursor = mcx.signal(usize::MAX);
         let confirm_archive = mcx.signal(false);
+        // The output panel's scroll: offset, measured extent, viewport.
+        let out_off = mcx.signal(0i32);
+        let out_ext = mcx.signal((0i32, 0i32));
+        let out_vp = mcx.signal((0i32, 0i32));
+        // The runs list's scroll and its "bring this row into view".
+        let list_off = mcx.signal(0i32);
+        let list_to = mcx.signal(Option::<usize>::None);
+        // `l`: the selected run's artifacts listed instead of counted.
+        let artifacts_open = mcx.signal(false);
         arm_poll(mcx, store, ctx2.clone());
         // Attention items shown here are acknowledged (the LAST displayed
         // item's cursor, once per cursor, only after the gateway accepts).
@@ -903,28 +728,32 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
         }
         let targets = move || -> Vec<Target> {
             store.automations.with_untracked(|v| {
-                v.detail
-                    .as_ref()
-                    .map(|d| detail_rows(d, width).1.into_iter().map(|(_, t)| t).collect())
-                    .unwrap_or_default()
+                v.detail.as_ref().map(panels::targets).unwrap_or_default()
             })
         };
         let at = move || -> Option<Target> {
             let ts = targets();
-            ts.get(resolve_cursor(cursor.get_untracked(), &ts)).cloned()
+            ts.get(panels::resolve_cursor(cursor.get_untracked(), &ts)).cloned()
         };
         let summary = move || store.automations.with_untracked(|v| v.detail.as_ref().and_then(|d| d.summary.clone()));
+        // The output scrolls by `delta` rows, clamped to what it measured.
+        let scroll_output = move |delta: i32| {
+            let max = (out_ext.get_untracked().1 - out_vp.get_untracked().1).max(0);
+            out_off.update(|o| *o = o.saturating_add(delta).clamp(0, max));
+        };
+        let page = move || (out_vp.get_untracked().1 - 2).max(1);
         let move_cursor = move |delta: i64| {
             confirm_archive.set(false);
-            let n = targets().len();
+            let ts = targets();
+            let n = ts.len();
             if n == 0 {
                 return;
             }
-            let ts = targets();
-            cursor.update(|c| {
-                let base = resolve_cursor(*c, &ts) as i64;
-                *c = (base + delta).clamp(0, n as i64 - 1) as usize;
-            });
+            let next = (panels::resolve_cursor(cursor.get_untracked(), &ts) as i64 + delta)
+                .clamp(0, n as i64 - 1) as usize;
+            cursor.set(next);
+            out_off.set(0);
+            list_to.set(Some(next));
         };
         let act = {
             let ctx = ctx2.clone();
@@ -1181,10 +1010,147 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
             }
         };
         let key = |c: char| KeyChord::plain(Key::Char(c));
+        // The selection and the output's scroll keys go FIRST (capture): a
+        // click focuses the runs list or the output, and their own arrow
+        // and page keys must not take these over.
+        let nav = move |ectx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+            // A press keeps the keyboard HERE (the press still reaches the
+            // row or the scrollbar under it): the runs list is rebuilt when
+            // its selection moves, and a focused list that is rebuilt would
+            // leave the keys with nobody — Esc and every key dead.
+            if let abstracttui::ui::UiEvent::Mouse(m) = ev {
+                if matches!(m.kind, abstracttui::ui::MouseKind::Down(_)) {
+                    if let Some(me) = ectx.current() {
+                        ectx.request_focus(me);
+                    }
+                }
+                return;
+            }
+            let abstracttui::ui::UiEvent::Key(k) = ev else {
+                return;
+            };
+            if k.mods != Mods::NONE {
+                return;
+            }
+            match k.key {
+                Key::Up => move_cursor(-1),
+                Key::Down => move_cursor(1),
+                Key::PageUp => scroll_output(-page()),
+                Key::PageDown => scroll_output(page()),
+                Key::Home => out_off.set(0),
+                Key::End => scroll_output(i32::MAX / 2),
+                _ => return,
+            }
+            ectx.stop_propagation();
+        };
+        // The wheel anywhere the runs list or the output did not take it
+        // (the title, the header panels, the hints, the borders): the
+        // output scrolls — the screen's main scroll region (the AbstractTUI
+        // modal rule, which the published engine does not apply yet).
+        let wheel = move |ectx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+            if let Some(delta) = wheel_delta(ev) {
+                scroll_output(delta);
+                ectx.stop_propagation();
+            }
+        };
+        // Over the runs panel's border and header, and at the list's ends:
+        // the runs scroll (clamped), never the output.
+        let runs_wheel = move |ectx: &mut abstracttui::ui::EventCtx, ev: &abstracttui::ui::UiEvent| {
+            let Some(delta) = wheel_delta(ev) else {
+                return;
+            };
+            let rows = targets().len() as i32;
+            // The panel's border (2; narrow: its title line, 1) and the
+            // table's header row (1).
+            let view_h = (ectx.current_rect().h - if wide { 3 } else { 2 }).max(1);
+            list_off.update(|o| *o = (*o + delta).clamp(0, (rows - view_h).max(0)));
+            ectx.stop_propagation();
+        };
+        let toggle_artifacts = move || artifacts_open.update(|o| *o = !*o);
+        // The panel beside (or under) the runs: the selected row's title,
+        // its inked lines, then its document in a Scroll.
+        let output_panel = move |scx: Scope, grow: bool| -> View {
+            let open = artifacts_open.get();
+            let out = store.automations.with(|v| {
+                let Some(d) = v.detail.as_ref() else {
+                    return panels::output(&auto::Detail::default(), None, open, None);
+                };
+                let ts = panels::targets(d);
+                let cur = panels::resolve_cursor(cursor.get(), &ts);
+                let details = (!wide)
+                    .then(|| d.summary.as_ref().map(|s| panels::facts(s, d.definition.as_ref())))
+                    .flatten();
+                panels::output(d, ts.get(cur), open, details.as_deref())
+            });
+            let t = abstracttui::app::current_theme().tokens;
+            // The inked lines ride the document (they scroll with it), so
+            // a short terminal still shows the text under them.
+            let text_w = if wide { inner_w - panels::RUNS_PANEL_W - 1 } else { inner_w }
+                - panels::PANEL_CHROME
+                - 1; // the Scroll's bar column
+            let mut content = Element::new().style(LayoutStyle::column().gap(1));
+            if !out.meta.is_empty() {
+                content = content.child(panels::lines_view(&out.meta, text_w).0);
+            }
+            content = content.child(panels::markdown(out.doc));
+            let body = Scroll::new(content.build())
+                .offset_y(out_off)
+                .extent_signal(out_ext)
+                .viewport_size_signal(out_vp)
+                .scrollbar_auto_hide(true)
+                .layout(LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)))
+                .element(scx, &t)
+                .build();
+            let layout = LayoutStyle::column().grow(1.0).basis(Dimension::Cells(0));
+            let layout = if grow { layout } else { layout.min_h(out_min_h) };
+            if wide {
+                panels::panel(out.title, layout, vec![body]).build()
+            } else {
+                panels::section(out.title, layout, vec![body]).build()
+            }
+        };
+        // The runs table: its header row, then the engine List of rows.
+        let runs_panel = move |scx: Scope, layout: LayoutStyle| -> View {
+            let (title, items, cur) = store.automations.with(|v| {
+                let d = v.detail.clone().unwrap_or_default();
+                let ts = panels::targets(&d);
+                let cur = panels::resolve_cursor(cursor.get(), &ts);
+                (panels::runs_title(&d), panels::run_items(&d, &ts, cur), cur)
+            });
+            let labels: Vec<String> = items
+                .iter()
+                .map(|r| r.lines.iter().map(|l| l.plain()).collect::<Vec<_>>().join(" "))
+                .collect();
+            let t = abstracttui::app::current_theme().tokens;
+            let selection = scx.signal(cur);
+            let list = List::new(labels)
+                .rich_items(items)
+                .selection(selection)
+                .offset_y(list_off)
+                .scroll_to(list_to)
+                .on_select(move |i| {
+                    confirm_archive.set(false);
+                    cursor.set(i);
+                    out_off.set(0);
+                })
+                .layout(LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)))
+                .element(scx, &t)
+                .build();
+            let children = vec![panels::runs_header_view(), list];
+            if wide {
+                panels::table_panel(title, layout, children)
+            } else {
+                panels::section(title, layout, children)
+            }
+                .on(abstracttui::ui::Phase::Bubble, runs_wheel)
+                .build()
+        };
         Element::new()
-            .style(LayoutStyle::column().gap(1).padding(Edges::all(1)))
+            .style(LayoutStyle::column().padding(Edges::all(1)))
             .focusable()
             .autofocus()
+            .on(abstracttui::ui::Phase::Capture, nav)
+            .on(abstracttui::ui::Phase::Bubble, wheel)
             .shortcut(KeyChord::plain(Key::Escape), move |_| {
                 if confirm_archive.get_untracked() {
                     confirm_archive.set(false);
@@ -1192,8 +1158,7 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                     back()
                 }
             })
-            .shortcut(KeyChord::plain(Key::Up), move |_| move_cursor(-1))
-            .shortcut(KeyChord::plain(Key::Down), move |_| move_cursor(1))
+            .shortcut(key('l'), move |_| toggle_artifacts())
             .shortcut(KeyChord::plain(Key::Enter), move |_| enter())
             // While the Archive question shows, y/n answer IT (inline
             // confirmation); otherwise they approve/deny a tool call.
@@ -1261,8 +1226,8 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                 let ctx = ctx2.clone();
                 move |_| refresh(store, &ctx)
             })
-            .child(dyn_view(LayoutStyle::line(1).shrink(0.0), move || {
-                let t2 = abstracttui::app::current_theme().tokens;
+            // The title: the automation's name, wrapped (never cut).
+            .child(dyn_view(LayoutStyle::default().shrink(0.0), move || {
                 let title = store.automations.with(|v| {
                     v.detail
                         .as_ref()
@@ -1270,70 +1235,131 @@ pub fn open_automation(cx: Scope, store: Store, ctx: &UiCtx, id: &str) {
                         .map(|s| format!("Automations / {}", s.title))
                         .unwrap_or_else(|| "Automations / Loading automation…".into())
                 });
-                title_row(&t2, title)
+                panels::lines_view(&[vec![(title, panels::Ink::Title)]], inner_w).0
             }))
-            .child(dyn_view(LayoutStyle::line(1).shrink(0.0), move || {
-                let row = store.automations.with(|v| {
-                    v.detail
-                        .as_ref()
-                        .and_then(|d| d.summary.as_ref())
-                        .map(|s| active_row(s, v.busy, v.pending_on(&s.id)))
-                });
-                draw_rows(row.into_iter().collect(), 0, Vec::new())
-            }))
-            .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
-                let t2 = abstracttui::app::current_theme().tokens;
+            // The header panel (and, wide, the Details beside it).
+            .child(dyn_view(LayoutStyle::default().shrink(0.0), move || {
                 let now = auto::now_unix();
-                let mut lines = store.automations.with(|v| {
-                    let mut lines = match v.detail.as_ref() {
-                        Some(d) => match &d.summary {
-                            Some(s) => header_lines(s, d.definition.as_ref(), now),
-                            None => vec!["Loading automation…".into()],
-                        },
-                        None => Vec::new(),
-                    };
+                let (header, facts) = store.automations.with(|v| {
+                    match v.detail.as_ref().and_then(|d| d.summary.as_ref().map(|s| (d, s))) {
+                        Some((d, s)) => (
+                            panels::header_lines(s, v.busy, v.pending_on(&s.id), now),
+                            panels::facts(s, d.definition.as_ref()),
+                        ),
+                        None => (vec![vec![("Loading automation…".to_string(), panels::Ink::Muted)]], Vec::new()),
+                    }
+                });
+                if !wide {
+                    // A phone-width terminal: the lines without a frame (two
+                    // rows back for the runs and the output).
+                    return panels::lines_view(&header, inner_w).0;
+                }
+                // Each panel's rows wrap at the width they are drawn at; both
+                // panels take the taller one's height (aligned borders).
+                let (head_w, details_w) = panels::top_widths(inner_w);
+                let (lines, head_rows) = panels::lines_view(&header, head_w - panels::PANEL_CHROME);
+                let (rows_view, fact_rows) = panels::facts_view(&facts, details_w - panels::PANEL_CHROME);
+                let h = head_rows.max(fact_rows) + 2;
+                let head = panels::panel(
+                    "Schedule".into(),
+                    LayoutStyle::column().w(head_w).h(h).shrink(0.0),
+                    vec![lines],
+                )
+                .build();
+                let details = panels::panel(
+                    "Details".into(),
+                    LayoutStyle::column().w(details_w).h(h).shrink(0.0),
+                    vec![rows_view],
+                )
+                .build();
+                Element::new()
+                    .style(LayoutStyle::row().gap(1))
+                    .child(head)
+                    .child(details)
+                    .build()
+            }))
+            // The Archive question, errors, notices.
+            .child(dyn_view(LayoutStyle::default().shrink(0.0), move || {
+                let mut lines: Vec<panels::Line> = Vec::new();
+                store.automations.with(|v| {
                     if confirm_archive.get() {
                         if let Some(s) = v.detail.as_ref().and_then(|d| d.summary.as_ref()) {
-                            lines.push(format!("{}  y Archive · n Keep it", archive_question(&s.title)));
+                            lines.push(vec![(
+                                format!("{}  y Archive · n Keep it", archive_question(&s.title)),
+                                panels::Ink::Tone(abstracttui::widgets::Tone::Accent),
+                            )]);
                         }
                     }
                     if let Some(e) = v.detail.as_ref().map(|d| d.error.clone()).filter(|e| !e.is_empty()) {
-                        lines.push(format!("could not read it: {e}"));
+                        lines.push(vec![(format!("could not read it: {e}"), panels::Ink::Tone(abstracttui::widgets::Tone::Error))]);
                     }
-                    lines
+                    for l in status_lines(v) {
+                        lines.push(vec![(l, panels::Ink::Muted)]);
+                    }
                 });
-                lines.extend(store.automations.with(status_lines));
-                note_lines(&t2, &lines, 8)
+                panels::lines_view(&lines, inner_w).0
             }))
-            .child(dyn_view(
-                LayoutStyle::default().grow(1.0).basis(Dimension::Cells(0)),
-                move || {
-                    let (rows, targets) = store.automations.with(|v| {
-                        v.detail.as_ref().map(|d| detail_rows(d, width)).unwrap_or_default()
-                    });
-                    let ts: Vec<Target> = targets.iter().map(|(_, t)| t.clone()).collect();
-                    let cur = resolve_cursor(cursor.get(), &ts);
-                    let selectable = targets.into_iter().map(|(row, _)| row).collect();
-                    draw_rows(rows, cur, selectable)
+            // The runs and the selected row's panel.
+            // At least: the runs panel's rows and four for the output.
+            .child(dyn_view_scoped(
+                LayoutStyle::default()
+                    .grow(1.0)
+                    .basis(Dimension::Cells(0))
+                    .min_h(if wide { 10 } else { runs_max_h + out_min_h }),
+                move |scx| {
+                    if wide {
+                        Element::new()
+                            .style(LayoutStyle::row().gap(1).grow(1.0))
+                            .child(runs_panel(scx, LayoutStyle::column().w(panels::RUNS_PANEL_W).shrink(0.0)))
+                            .child(output_panel(scx, true))
+                            .build()
+                    } else {
+                        let rows = store.automations.with(|v| {
+                            v.detail.as_ref().map(|d| panels::targets(d).len()).unwrap_or(0)
+                        }) as i32;
+                        Element::new()
+                            .style(LayoutStyle::column().grow(1.0))
+                            .child(runs_panel(scx, LayoutStyle::column().h((rows + 2).clamp(3, runs_max_h)).shrink(0.0)))
+                            .child(output_panel(scx, false))
+                            .build()
+                    }
                 },
             ))
-            .child(hint_bar(&t, DETAIL_HINTS, 8))
-            .child(dyn_view(LayoutStyle::column().shrink(0.0), move || {
-                // The kit's Run now line + "Next scheduled run: <served next run>."
-                let t2 = abstracttui::app::current_theme().tokens;
-                let mut lines = vec![auto::run_now_key_line()];
-                if let Some(next) = store.automations.with(|v| {
-                    v.detail
-                        .as_ref()
-                        .and_then(|d| d.summary.as_ref())
-                        .and_then(auto::run_now_next_line)
-                }) {
-                    lines.push(next);
-                }
-                note_lines(&t2, &lines, 8)
-            }))
+            // The key hints, then the kit's Run now line: on a short
+            // terminal they give up their rows first (the runs and the
+            // output keep theirs).
+            .child(shrinkable(panels::hints_view(&[panels::AUTOMATION_HINTS, panels::SELECTION_HINTS], inner_w), 1))
+            .child(shrinkable(panels::lines_view(&[vec![(auto::run_now_key_line(), panels::Ink::Faint)]], inner_w), 0))
             .build()
     });
+}
+
+/// A fixed block of `rows` lines that may give up rows down to `keep`
+/// (clipped at its bottom) when the screen is too short for everything.
+fn shrinkable((view, rows): (View, i32), keep: i32) -> View {
+    Element::new()
+        .style(
+            LayoutStyle::column()
+                .basis(Dimension::Cells(rows))
+                .shrink(1.0)
+                .min_h(keep.min(rows))
+                .clip(),
+        )
+        .child(view)
+        .build()
+}
+
+/// Rows a wheel notch moves (3, the engine's step), signed; `None` for any
+/// other event.
+pub(crate) fn wheel_delta(ev: &abstracttui::ui::UiEvent) -> Option<i32> {
+    let abstracttui::ui::UiEvent::Mouse(m) = ev else {
+        return None;
+    };
+    match m.kind {
+        abstracttui::ui::MouseKind::ScrollUp => Some(-3),
+        abstracttui::ui::MouseKind::ScrollDown => Some(3),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -562,6 +562,25 @@ pub fn format_utc(ts: &str) -> String {
     }
 }
 
+/// "07 Nov 23:34" — a served UTC timestamp as a short day and time, for a
+/// column that says "(UTC)" (the runs table); the timestamp verbatim when
+/// it does not parse.
+pub fn format_utc_day(ts: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let Some(secs) = unix_secs(ts) else {
+        return ts.to_string();
+    };
+    let (_, m, d) = crate::config::civil_from_days(secs.div_euclid(86_400));
+    let rem = secs.rem_euclid(86_400);
+    let month = MONTHS
+        .get((m as usize).wrapping_sub(1))
+        .copied()
+        .unwrap_or("?");
+    format!("{d:02} {month} {:02}:{:02}", rem / 3600, (rem % 3600) / 60)
+}
+
 /// "in 25 min", "in 3 h 5 min", "in 2 d 4 h", "due now" — from the served `next_run_at` only.
 pub fn relative_in(ts: &str, now: i64) -> String {
     let Some(t) = unix_secs(ts) else {
