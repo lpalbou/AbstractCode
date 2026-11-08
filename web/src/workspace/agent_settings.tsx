@@ -36,9 +36,9 @@ export function AgentSettings(props: {
       </details>
       <details className="code-agent-section code-settings-advanced">
         <summary>
-          Instructions &amp; limits
+          Instructions
           <SettingsHelp label="About agent instructions">
-            Optional guidance and run limits for this selection. Leave blank to use the workflow defaults.
+            Optional guidance for this selection. The iteration limit is under Model, in Limits.
           </SettingsHelp>
         </summary>
         {props.behavior}

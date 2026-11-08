@@ -1,7 +1,10 @@
 import React from "react";
 import {
+  IterationLimitField,
   ProviderModelPicker,
   ToolModeEditor,
+  type IterationLimitApplied,
+  type IterationLimitDefault,
   TOOL_LAYER_STORE_WHERE,
   type ToolCatalogItem,
   type ToolModeLayer,
@@ -84,6 +87,10 @@ export type SettingsContentProps = {
   defaultModel?: { provider: string; model: string };
   workflowDefault?: boolean;
   streaming?: StreamingCapability;
+  /** The gateway's iteration default (`capabilities.agent_limits.max_iterations`, kit iterationLimitDefaultFrom); null = not served. */
+  iterationDefault?: IterationLimitDefault | null;
+  /** The last start's `limits` receipt ({max_iterations, source}) for "Last run: …". */
+  lastRunLimits?: IterationLimitApplied | null;
   /** An automation's folder: shown read-only instead of the root field (its runs always work there). */
   workspaceRootFixed?: string;
   /** Hide "Stream replies" (a conversation display choice; automations have no live view). */
@@ -106,7 +113,7 @@ export type SettingsContentProps = {
 
 export function SettingsContent({
   tab, value, onChange, toolCatalog, toolWarnings, toolsNotice, automationTools, disabled, defaultModel,
-  workflowDefault, streaming = STREAMING_LOADING,
+  workflowDefault, streaming = STREAMING_LOADING, iterationDefault, lastRunLimits,
   lockedReasonId = SETTINGS_LOCKED_ID,
   workspaceRootFixed, hideStreamReplies, lockedText,
   connected = false, automationFolders = false, workspaceRequest,
@@ -146,7 +153,7 @@ export function SettingsContent({
               />
             </section>
             <details className="code-settings-advanced">
-              <summary>{hideStreamReplies ? "Limits" : "Limits & streaming"} <SettingsHelp label="About model limits">Leave these unchanged to use the workflow and Gateway defaults. Context limits control how much conversation the model can use.</SettingsHelp></summary>
+              <summary>{hideStreamReplies ? "Limits" : "Limits & streaming"} <SettingsHelp label="About model limits">Leave these unchanged to use the workflow and Gateway defaults. Context limits control how much conversation the model can use; the iteration limit, how many steps the agent may take before it stops.</SettingsHelp></summary>
               <section className="code-settings-section">
                 <label className="code-field">
                   Context token limit
@@ -168,6 +175,14 @@ export function SettingsContent({
                     streaming={streaming}
                   />
                 )}
+                <IterationLimitField
+                  className="code-field"
+                  value={value.maxIterations}
+                  onChange={(maxIterations) => update({ maxIterations })}
+                  disabled={disabled}
+                  gatewayDefault={iterationDefault}
+                  applied={lastRunLimits}
+                />
               </section>
             </details>
           </>
@@ -183,21 +198,6 @@ export function SettingsContent({
                 onChange={(e) => update({ system: e.target.value })}
               />
             </label>
-            <details className="code-settings-advanced">
-              <summary>Run limits <SettingsHelp label="About iteration limits">Maximum agent iterations for this selection. Leave blank to use the workflow default.</SettingsHelp></summary>
-              <label className="code-field">
-                Iteration limit
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  placeholder="Workflow default"
-                  value={value.maxIterations}
-                  disabled={disabled}
-                  onChange={(e) => update({ maxIterations: e.target.value })}
-                />
-              </label>
-            </details>
           </section>
         ) : tab === "workspace" ? (
           <section className="code-settings-section">

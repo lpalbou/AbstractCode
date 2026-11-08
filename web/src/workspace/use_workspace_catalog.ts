@@ -1,5 +1,5 @@
 import { sessionActivityFromRuns, type SessionActivity } from "../vendor/abstractsessions/session_cards.js";
-import { sessionToolPolicyCapability, normalizeToolCatalog as kitToolCatalog, toolCatalogWarnings, type SessionToolPolicyCapability, type ToolCatalogItem } from "@abstractframework/ui-kit";
+import { iterationLimitDefaultFrom, type IterationLimitDefault, sessionToolPolicyCapability, normalizeToolCatalog as kitToolCatalog, toolCatalogWarnings, type SessionToolPolicyCapability, type ToolCatalogItem } from "@abstractframework/ui-kit";
 import {
   executableWorkflowsPath,
   gatewayApiPath,
@@ -68,6 +68,8 @@ type CatalogState = {
   toolWarnings: string[];
   /** Live-reply support (`capabilities.streaming`) for "Stream replies". */
   streaming: StreamingCapability;
+  /** The gateway iteration default (`capabilities.agent_limits.max_iterations`); null = not served. */
+  iterationLimit: IterationLimitDefault | null;
   loading: boolean;
   sessionsLoaded: boolean;
   errors: string[];
@@ -97,6 +99,7 @@ const empty: CatalogState = {
   toolCatalog: [],
   toolWarnings: [],
   streaming: STREAMING_LOADING,
+  iterationLimit: null,
   loading: false,
   sessionsLoaded: false,
   errors: [],
@@ -293,6 +296,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
           ? formatError((result[4] as PromiseRejectedResult).reason)
           : undefined,
       ),
+      iterationLimit: iterationLimitDefaultFrom(value(4)),
       defaultModel: defaultTextRoute(value(6)),
       gatewayDefault: gatewayDefaultFromEnvelope(value(0)),
       loading: false,

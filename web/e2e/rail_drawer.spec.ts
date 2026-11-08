@@ -309,20 +309,21 @@ test("automation selected: every settings panel edits its definition and saves a
   await expect(settings.getByLabel("Stream replies")).toHaveCount(0);
   // Gateway default until overridden.
   await expect(settings.getByLabel("Context token limit")).toHaveValue("");
-  const agent = await openWorkspaceSection(page, "Agent");
-  await agent.locator('.code-agent-section > summary').filter({hasText:"Instructions & limits"}).click();
-  await agent.locator('.code-settings-advanced > summary').filter({hasText:/^Run limits/}).click();
-  const limit = agent.getByLabel("Iteration limit", {exact:true});
+  // The iteration limit is the kit's IterationLimitField, third row of Limits (an automation's
+  // placeholder is the workflow's: the gateway default never applies to scheduled runs).
+  await settings.locator(".code-settings-advanced > summary").click();
+  const limit = settings.getByLabel("Iteration limit", {exact:true});
+  await expect(limit).toHaveAttribute("placeholder", "Workflow default");
   await limit.fill("5");
-  await expect(agent.locator(".code-settings-save")).toHaveText(`Saved as revision ${rev0 + 1}; applies from the next run.`, { timeout: 15_000 });
-  await expect(agent.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 1}`);
+  await expect(settings.locator(".code-settings-save")).toHaveText(`Saved as revision ${rev0 + 1}; applies from the next run.`, { timeout: 15_000 });
+  await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 1}`);
   const after = await api(`automations/${encodeURIComponent(id)}`);
   expect(after.definition.revision).toBe(rev0 + 1);
   expect(after.definition.target.input_data._limits.max_iterations).toBe(5);
   expect(after.definition.target.input_data.prompt).toBe("Say hi");
   // Back to the default removes the override (a new revision without it).
   await limit.fill("");
-  await expect(agent.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 2}`, { timeout: 15_000 });
+  await expect(settings.getByTestId("automation-revision")).toHaveText(`Revision ${rev0 + 2}`, { timeout: 15_000 });
   const reset = await api(`automations/${encodeURIComponent(id)}`);
   expect(reset.definition.target.input_data._limits?.max_iterations).toBeUndefined();
   const workspace = await openWorkspaceSection(page, "Workspace");

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (web)
+
+- **"Iteration limit" moved to Model → Limits & streaming, as the shared kit control** (AbstractUIC ui-kit 0.9.26
+  `IterationLimitField`, operator 2026-11-08). It is the third row after "Context token limit" and "Stream replies"
+  (automations: "Limits"), and was the only row of Agent → "Instructions & limits" → "Run limits", now just
+  "Instructions". Empty, it names what applies: "Gateway default (12)" when the gateway stores
+  `agents.max_iterations` (read from `capabilities.agent_limits.max_iterations`), "Workflow default" otherwise and
+  always for an automation (the gateway default never applies to scheduled runs). A value that is not a whole number
+  of 1 or more says so; past 200 a warning line; "Use default" clears it. A set value is still sent as
+  `input_data._limits.max_iterations`; after a start the field says which limit that run got, from the gateway's
+  `limits` receipt ("Last run: 12 iterations (gateway default)."). Needs the local ui-kit 0.9.26 pack, installed
+  `--no-save` (the lockfile follows the kit publish).
+
 ### Fixed (terminal, ships with the next terminal release)
 
 - **`/sessions` and `--resume` leave AbstractNote's own work out.** A session whose first turn runs
