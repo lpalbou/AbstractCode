@@ -114,18 +114,28 @@ async function startDelayedApproval(page: Page): Promise<void> {
   await expect(page.locator(".code-run-strip")).toBeVisible({ timeout: 15_000 });
 }
 
-type Sample = { t: number; strip: string; send: string; composer: string; card: boolean };
+type Sample = { t: number; status: string; stale: string; banner: string; actions: string[]; notices: number; send: string; composer: string; card: boolean };
 
 async function sample(page: Page, t0: number): Promise<Sample> {
-  const strip = (await page.locator(".code-run-strip").first().innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-  const sendButton = page.getByRole("button", { name: /^(Send|Stop)$/ }).first();
-  const send = await sendButton.evaluate((el) => `${el.getAttribute("aria-label") || el.textContent}${(el as HTMLButtonElement).disabled ? " (disabled)" : ""}`).catch(() => "");
-  const composer = (await page.locator(".code-conversation .pc-composer").first().evaluate((el) => {
-    const notes = Array.from(el.closest(".code-conversation")?.querySelectorAll("[role=status], .code-composer-note, .pc-composer__notice") || []);
-    return notes.map((n) => (n as HTMLElement).innerText).join(" | ");
-  }).catch(() => "")).replace(/\s+/g, " ").trim();
-  const card = await page.getByRole("heading", { name: "1 action needs permission" }).isVisible().catch(() => false);
-  return { t: Math.round((Date.now() - t0) / 100) / 10, strip, send, composer, card };
+  // One read of the whole page (a drop between two reads would mix two moments).
+  const seen = await page.evaluate(() => {
+    const text = (sel: string) => ((document.querySelector(sel) as HTMLElement | null)?.innerText || "").replace(/\s+/g, " ").trim();
+    const visible = (el: Element) => { const r = (el as HTMLElement).getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden"; };
+    const send = Array.from(document.querySelectorAll("button")).find((b) => /^(Send|Stop)$/.test(b.getAttribute("aria-label") || b.textContent || ""));
+    return {
+      // The run status as the view gave it: the label and its detail (not the running clock).
+      status: `${text(".code-run-strip__activity strong")} | ${text(".code-run-strip__detail")}`,
+      stale: text(".code-run-strip__stale"),
+      banner: text(".code-alert--unreachable > span"),
+      actions: Array.from(document.querySelectorAll(".code-alert--unreachable button")).map((b) => (b as HTMLElement).innerText.trim()),
+      // Notices about a failure on the page (banner and inline), not counting the composer's note.
+      notices: Array.from(document.querySelectorAll(".code-alert, .code-inline-error")).filter(visible).length,
+      send: send ? `${send.getAttribute("aria-label") || send.textContent}${send.disabled ? " (disabled)" : ""}` : "",
+      composer: text(".code-conversation .pc-workflow-chat__blocked"),
+      card: Array.from(document.querySelectorAll("h1,h2,h3,h4,[role=heading]")).some((h) => (h as HTMLElement).innerText.trim() === "1 action needs permission" && visible(h)),
+    };
+  }).catch(() => ({ status: "", stale: "", banner: "", actions: [] as string[], notices: 0, send: "", composer: "", card: false }));
+  return { t: Math.round((Date.now() - t0) / 100) / 10, ...seen };
 }
 
 /** Restarts one process under the open page and records, each second, what the page shows. */
@@ -148,12 +158,11 @@ async function restartUnderPage(page: Page, name: string, restart: () => Promise
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  // Healed: the status bar leaves "Reconnecting" and the composer is back.
+  // Healed: the notice is gone and the composer is back.
   let healedAt: number | null = null;
   const healBy = Date.now() + 45_000;
   while (cardAt !== null && Date.now() < healBy) {
-    const strip = await page.locator(".code-run-strip").first().innerText().catch(() => "");
-    if (!/Reconnecting|Disconnected/.test(strip)) {
+    if (!(await page.locator(".code-alert--unreachable").count())) {
       healedAt = Math.round((Date.now() - t0) / 100) / 10;
       break;
     }
@@ -187,20 +196,31 @@ async function gapShot(page: Page, name: string): Promise<void> {
   if (viewport) await page.setViewportSize(viewport);
 }
 
-/** The approval shows within seconds of the server's return; meanwhile the status bar says
- * "Reconnecting" (never a final "Disconnected") and the composer says why it waits. */
+const BANNER = /^Can't reach the gateway: .+\. Retrying…$/;
+const COMPOSER_NOTE = "Can't reach the gateway; your message can be sent when it is back.";
+
+/** Operator ruling 2026-11-08: the run status bar keeps the view's last state during the gap
+ * (with a muted "as of" time), the page's one notice is the banner with Retry now / Stop
+ * retrying, the composer says the same; the approval shows within seconds of the return. */
 function expectRecovered(record: { up: number; down: number; cardAt: number | null; healedAt: number | null; samples: Sample[] }): void {
   const tail = JSON.stringify(record.samples.slice(-4));
   expect(record.cardAt, tail).not.toBeNull();
   // Within seconds of the server's return (and of the 12 s timer); the backoff tops out at 30 s.
   expect(record.cardAt! - Math.max(record.up, 12), tail).toBeLessThan(10);
-  const gap = record.samples.filter((s) => s.t > record.down && s.t < record.up);
-  expect(gap.some((s) => /Reconnecting/.test(s.strip)), JSON.stringify(gap)).toBe(true);
-  expect(record.samples.filter((s) => /Disconnected/.test(s.strip)), "never a final Disconnected").toEqual([]);
-  // Connected again (status bar, composer, card enabled) within moments of the card.
+  const first = record.samples.findIndex((s) => s.banner);
+  expect(first, "the banner appears during the gap").toBeGreaterThan(0);
+  const lastView = record.samples[first - 1].status;
+  const gap = record.samples.filter((s) => s.banner);
+  const all = JSON.stringify(gap);
+  expect(gap.every((s) => s.status === lastView), `status bar unchanged from the last view (${lastView}): ${all}`).toBe(true);
+  expect(record.samples.filter((s) => /Reconnecting|Disconnected/.test(s.status)), "never connection words in the status bar").toEqual([]);
+  expect(gap.every((s) => /^as of \d\d:\d\d:\d\d$/.test(s.stale)), all).toBe(true);
+  expect(gap.every((s) => BANNER.test(s.banner) && JSON.stringify(s.actions) === JSON.stringify(["Retry now", "Stop retrying"])), all).toBe(true);
+  expect(gap.every((s) => s.notices === 1), `one notice per page: ${all}`).toBe(true);
+  expect(gap.some((s) => s.composer === COMPOSER_NOTE), all).toBe(true);
+  // Connected again (notice gone, composer and card enabled) within moments of the card.
   expect(record.healedAt, tail).not.toBeNull();
   expect(record.healedAt! - record.cardAt!, tail).toBeLessThan(3);
-  expect(gap.some((s) => /Reconnecting to this conversation\. You can send again as soon as it is back\./.test(s.composer)), JSON.stringify(gap)).toBe(true);
 }
 
 test("the app server restarts under the page: the approval raised after it appears, no reload", async ({ page }) => {
@@ -235,4 +255,34 @@ test("the gateway restarts under the page: the approval appears, no reload", asy
     return { down, up: Date.now() };
   }, t0);
   expectRecovered(record);
+});
+
+test("Stop retrying stops the attempts; Retry now reconnects at once and re-reads the view", async ({ page }) => {
+  test.setTimeout(180_000);
+  await signIn(page);
+  await startDelayedApproval(page);
+  await stop(appProcess);
+  const banner = page.locator(".code-alert--unreachable");
+  await expect(banner.locator("> span")).toHaveText(BANNER, { timeout: 30_000 });
+  await banner.getByRole("button", { name: "Stop retrying", exact: true }).click();
+  await expect(banner.locator("> span")).toHaveText(/^Can't reach the gateway: .+\. Not retrying\. Retry now to reconnect\.$/);
+  await expect(banner.getByRole("button")).toHaveText(["Retry now"]);
+  if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, "stopped-retrying.png") }); }
+  const viewReads: number[] = [];
+  const streams: number[] = [];
+  page.on("request", (r) => {
+    const path = new URL(r.url()).pathname;
+    if (/\/runs\/[^/]+\/view$/.test(path)) viewReads.push(Date.now());
+    if (/\/runs\/[^/]+\/(view|ledger)\/stream$/.test(path)) streams.push(Date.now()); // the conversation's own streams
+  });
+  await startApp();
+  // The server is back, the 12 s timer has raised the approval, and the page does not try.
+  await page.waitForTimeout(16_000);
+  expect(viewReads.length + streams.length, "Stop retrying: no attempt at all").toBe(0);
+  await expect(page.getByRole("heading", { name: "1 action needs permission" })).toHaveCount(0);
+  const clicked = Date.now();
+  await banner.getByRole("button", { name: "Retry now", exact: true }).click();
+  await expect.poll(() => viewReads.filter((t) => t >= clicked).length, { timeout: 2_000 }).toBeGreaterThan(0);
+  await expect(page.getByRole("heading", { name: "1 action needs permission" })).toBeVisible({ timeout: 5_000 });
+  await expect(banner).toHaveCount(0);
 });

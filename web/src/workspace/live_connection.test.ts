@@ -1,18 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { liveConnectionNotice } from "./live_connection";
+import { liveConnectionNotice, staleSince, unreachableBannerText } from "./live_connection";
 
-describe("liveConnectionNotice", () => {
-  it("says why Send waits while a live run reconnects or is not connected", () => {
-    expect(liveConnectionNotice({ runId: "r", status: "running", connection: "reconnecting" })).toMatch(/^Reconnecting to this conversation\./);
-    expect(liveConnectionNotice({ runId: "r", status: "waiting", connection: "reconnecting" })).toMatch(/^Reconnecting/);
-    expect(liveConnectionNotice({ runId: "r", status: "running", connection: "disconnected" })).toMatch(/not connected/);
+const gap = { reason: "Failed to fetch", retrying: true, since: "2026-11-08T12:21:34" };
+
+describe("the page's own notice when it cannot reach the gateway", () => {
+  it("banner: the reason, then Retrying… or Not retrying", () => {
+    expect(unreachableBannerText(gap)).toBe("Can't reach the gateway: Failed to fetch. Retrying…");
+    expect(unreachableBannerText({ ...gap, retrying: false })).toBe("Can't reach the gateway: Failed to fetch. Not retrying. Retry now to reconnect.");
+    expect(unreachableBannerText({ ...gap, reason: "Backend not reachable at http://127.0.0.1:8080." })).toBe("Can't reach the gateway: Backend not reachable at http://127.0.0.1:8080. Retrying…");
   });
 
-  it("says nothing when connected, connecting, ended, or with no run", () => {
-    for (const connection of ["connected", "connecting", "idle", undefined]) expect(liveConnectionNotice({ runId: "r", status: "running", connection })).toBe("");
-    // A finished run's streams close by design ("disconnected"): nothing to wait for.
-    for (const status of ["completed", "failed", "cancelled"]) expect(liveConnectionNotice({ runId: "r", status, connection: "disconnected" })).toBe("");
-    expect(liveConnectionNotice({ runId: "", status: "", connection: "reconnecting" })).toBe("");
+  it("composer: the same thing, only for a live run that cannot reach the gateway", () => {
+    expect(liveConnectionNotice({ runId: "r", status: "waiting", unreachable: gap })).toBe("Can't reach the gateway; your message can be sent when it is back.");
+    expect(liveConnectionNotice({ runId: "r", status: "running", unreachable: null })).toBe("");
+    for (const status of ["completed", "failed", "cancelled"]) expect(liveConnectionNotice({ runId: "r", status, unreachable: gap })).toBe("");
+    expect(liveConnectionNotice({ runId: "", status: "", unreachable: gap })).toBe("");
+  });
+
+  it("status bar cue: the local time the page last had the gateway's word", () => {
+    expect(staleSince(gap)).toBe("as of 12:21:34");
+    expect(staleSince(null)).toBe("");
+    expect(staleSince({ ...gap, since: "nonsense" })).toBe("");
   });
 });

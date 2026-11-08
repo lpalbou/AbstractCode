@@ -1,13 +1,30 @@
-// Why the composer is off while a live conversation has lost its streams (backlog 1163). The
-// panel-chat controller keeps reconnecting while the run is live ("reconnecting", backing off to
-// every 30 s); a message or a decision sent meanwhile could not reach the gateway, so the
-// composer says why it waits instead of failing on Send.
+// This client's trouble reaching the gateway (operator 2026-11-08: "the one thing that is
+// permitted on the client side is if it has issues connecting to the gateway; and then it
+// should notify the user and propose retry or cancel. but that has nothing to do with if the
+// gateway is connected"). The run's state and every wait come from the ledger view only; this
+// is one page notice (the banner, with Retry now / Stop retrying) and the composer's note.
+
+import type { WorkflowUnreachable } from "@abstractframework/panel-chat";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "canceled"]);
 
-export function liveConnectionNotice(input: { runId: string; status: string; connection: string | undefined }): string {
-  if (!input.runId || TERMINAL.has(input.status)) return "";
-  if (input.connection === "reconnecting") return "Reconnecting to this conversation. You can send again as soon as it is back.";
-  if (input.connection === "disconnected") return "This conversation is not connected. Sign in again to continue.";
-  return "";
+/** The banner's sentence while the page cannot reach the gateway. */
+export function unreachableBannerText(unreachable: WorkflowUnreachable): string {
+  const reason = unreachable.reason.trim().replace(/[.\s]+$/, "") || "no answer";
+  return unreachable.retrying
+    ? `Can't reach the gateway: ${reason}. Retrying…`
+    : `Can't reach the gateway: ${reason}. Not retrying. Retry now to reconnect.`;
+}
+
+/** The composer's note while a live run's page cannot reach the gateway; "" otherwise. */
+export function liveConnectionNotice(input: { runId: string; status: string; unreachable: WorkflowUnreachable | null | undefined }): string {
+  if (!input.runId || TERMINAL.has(input.status) || !input.unreachable) return "";
+  return "Can't reach the gateway; your message can be sent when it is back.";
+}
+
+/** "as of 12:21:34": when the page last had the gateway's word (local time). */
+export function staleSince(unreachable: WorkflowUnreachable | null | undefined): string {
+  const at = unreachable ? new Date(unreachable.since) : null;
+  if (!at || Number.isNaN(at.getTime())) return "";
+  return `as of ${at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })}`;
 }

@@ -153,7 +153,7 @@ import {
   workspacePrincipalIdentity,
   type QueueIntent,
 } from "./app_state";
-import { liveConnectionNotice } from "./live_connection";
+import { liveConnectionNotice, unreachableBannerText } from "./live_connection";
 
 const APP_IDENTITY = appIdentity("abstractcode", __APP_VERSION__);
 
@@ -1871,7 +1871,9 @@ export function CodeWorkspace() {
                 : "Your conversations will live here. Pick up where you left off, on any device."}
             </p>
           ) : null}
-          {sessionReads.error && <p className="code-inline-error" role="status">{sessionReads.error}</p>}
+          {/* One notice per page: while the banner says the gateway cannot be reached, a read marker
+              that could not be saved is part of it; otherwise it reads like the banner. */}
+          {sessionReads.error && !snapshot.unreachable ? <p className="code-alert code-alert--inline" role="status"><Icon name="warning" size={14} /><span>{sessionReads.error}</span></p> : null}
           {catalog.loading && !catalog.sessionsLoaded ? (
             <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}
@@ -1979,7 +1981,18 @@ export function CodeWorkspace() {
             id="code-conversation"
             tabIndex={-1}
           >
-            {error ||
+            {/* This client's trouble reaching the gateway: the page's one notice (operator 2026-11-08),
+                with Retry now / Stop retrying. The run's own state stays the view's (status bar). */}
+            {snapshot.unreachable ? (
+              <div className="code-alert code-alert--unreachable" role="alert">
+                <Icon name="warning" size={16} />
+                <span>{unreachableBannerText(snapshot.unreachable)}</span>
+                <button onClick={() => controller.retryNow()}>Retry now</button>
+                {snapshot.unreachable.retrying ? (
+                  <button onClick={() => controller.stopRetrying()}>Stop retrying</button>
+                ) : null}
+              </div>
+            ) : error ||
             snapshot.error ||
             restoreError ? (
               <div className="code-alert" role="alert">
@@ -2182,7 +2195,7 @@ export function CodeWorkspace() {
               onCancel={cancelCurrentRun}
               stopState={snapshot.stop ?? null}
               disabled={!connection.connected}
-              blockedNotice={restore.readOnlyNotice || liveConnectionNotice({ runId: session.runId, status: snapshot.status, connection: snapshot.connection }) || undefined}
+              blockedNotice={restore.readOnlyNotice || liveConnectionNotice({ runId: session.runId, status: snapshot.status, unreachable: snapshot.unreachable }) || undefined}
               interaction={interaction}
               onAttach={() => fileInput.current?.click()}
               onFiles={(files) => { attachUploads(files); }}

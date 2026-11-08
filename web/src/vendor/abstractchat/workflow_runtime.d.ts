@@ -203,6 +203,12 @@ export type WorkflowToolApprovalPolicy = {
     autoApproveTools: readonly string[];
 };
 export type WorkflowConnection = "idle" | "connecting" | "connected" | "reconnecting" | "disconnected";
+/** See `WorkflowSessionSnapshot.unreachable`. */
+export type WorkflowUnreachable = {
+    reason: string;
+    retrying: boolean;
+    since: string;
+};
 export type WorkflowSessionSnapshot = {
     messages: ChatMessage[];
     records: WorkflowRecord[];
@@ -219,6 +225,13 @@ export type WorkflowSessionSnapshot = {
     historyLoading?: boolean;
     error: string | null;
     connection: WorkflowConnection;
+    /**
+     * This client cannot reach the gateway right now (a live stream or the view re-read failed):
+     * the reason, whether it is retrying on its own, and when it last had the gateway's word
+     * (ISO). A client-side notice only (operator 2026-11-08): the run's state and its waits stay
+     * what the ledger view last said. Null while the gateway answers.
+     */
+    unreachable?: WorkflowUnreachable | null;
     /** Browser/controller-local consent only; never persisted or a policy bypass. */
     autoApproveTools?: boolean;
     /**
@@ -362,6 +375,10 @@ export declare class WorkflowSessionController {
     private viewTerminalRuns;
     /** The view stream ended (done, or gave up): the live-reply stream stops with it. */
     private viewStreamEnded;
+    /** "Stop retrying" (operator 2026-11-08): no automatic reconnection until "Retry now". */
+    private retryPaused;
+    /** The waits of the reconnection loops, woken by "Retry now". */
+    private readonly retryWakers;
     /** Replay view mode: the conversation's EARLIER turns (one view read each, oldest first),
      * shown before the loaded run's own messages. */
     private viewEarlier;
@@ -597,6 +614,12 @@ export declare class WorkflowSessionController {
      */
     private pollRootLifecycle;
     private waitForRetry;
+    /** The gateway did not answer a live stream or the view re-read: a client-side notice. */
+    private unreach;
+    /** "Retry now": the waiting reconnection runs at once (it re-reads the view first). */
+    retryNow(): void;
+    /** "Stop retrying": no automatic attempt until `retryNow()`. */
+    stopRetrying(): void;
 }
 export {};
 //# sourceMappingURL=workflow_runtime.d.ts.map

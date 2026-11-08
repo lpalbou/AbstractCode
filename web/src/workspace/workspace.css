@@ -1161,6 +1161,10 @@ select option {
   flex: 1;
   overflow-wrap: anywhere;
 }
+/* The banner's two actions sit together at the end. */
+.code-alert--unreachable button + button { margin-left: 4px; }
+/* The same notice inside the sidebar list (a read marker that could not be saved). */
+.code-alert--inline { margin: 6px 8px; padding: 8px 10px; border: 1px solid var(--error-border); border-radius: 8px; }
 .code-notice,
 .code-discovery-errors {
   background: var(--info-subtle);
@@ -1227,6 +1231,10 @@ select option {
 .code-run-strip__icon { display: inline-flex; color: var(--run-tone); }
 .code-run-strip--working .code-run-strip__icon { animation: code-progress-spin 1.5s linear infinite; }
 .code-run-strip__detail { flex: 1; min-width: 0; max-width: 420px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
+/* The page cannot reach the gateway: the status above is the view's last word, muted "as of" time. */
+.code-run-strip__stale { flex: 1 0 auto; white-space: nowrap; font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; color: var(--text-muted); }
+/* Right after the status it qualifies (the detail stops taking the free space). */
+.code-run-strip__detail:has(+ .code-run-strip__stale) { flex: 0 1 auto; }
 .code-run-strip__metrics { display: flex; align-items: center; gap: 9px; color: var(--text-secondary); font: 10px var(--font-mono); font-variant-numeric: tabular-nums; }
 .code-run-strip button.code-run-strip__attention { padding: 0; color: var(--run-tone); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 4px; }
 @keyframes code-progress-spin { to { transform: rotate(360deg); } }

@@ -4626,6 +4626,7 @@ var EMPTY = {
   historyLoading: false,
   error: null,
   connection: "idle",
+  unreachable: null,
   toolApprovalGranted: false,
   stop: null
 };
@@ -4839,6 +4840,8 @@ var WorkflowSessionController = class {
     this.viewAssistantIds = /* @__PURE__ */ new Set();
     this.viewTerminalRuns = /* @__PURE__ */ new Set();
     this.viewStreamEnded = false;
+    this.retryPaused = false;
+    this.retryWakers = /* @__PURE__ */ new Set();
     this.viewEarlier = { messages: [], tools: [] };
     this.viewTurnCache = emptyTurnCache();
     const interval = options.liveRenderIntervalMs ?? 60;
@@ -5104,6 +5107,8 @@ var WorkflowSessionController = class {
     this.viewAssistantIds.clear();
     this.viewTerminalRuns.clear();
     this.viewStreamEnded = false;
+    this.retryPaused = false;
+    this.retryWakers.clear();
     this.viewEarlier = { messages: [], tools: [] };
     this.set({ ...EMPTY });
   }
@@ -5626,7 +5631,7 @@ var WorkflowSessionController = class {
           await this.refreshView(generation);
           if (!this.live(generation) || this.viewFold !== fold)
             return;
-          this.set({ ...this.snapshot, connection: "connected", error: null });
+          this.set({ ...this.snapshot, connection: "connected", unreachable: null });
         }
         await rv.streamView(runId, {
           lastEventId: fold.lastEventId,
@@ -5634,7 +5639,7 @@ var WorkflowSessionController = class {
           onOpen: () => {
             if (!this.live(generation))
               return;
-            this.set({ ...this.snapshot, connection: "connected", error: null });
+            this.set({ ...this.snapshot, connection: "connected", error: null, unreachable: null });
           },
           onFrame: (frame) => {
             if (!this.live(generation) || this.viewFold !== fold)
@@ -5654,11 +5659,12 @@ var WorkflowSessionController = class {
         if (!this.live(generation))
           return;
         failures += 1;
-        this.fail(error, false);
         if (authError(error)) {
+          this.fail(error, false);
           this.set({ ...this.snapshot, connection: "disconnected" });
           return;
         }
+        this.unreach(error);
       }
       if (!this.live(generation))
         break;
@@ -5812,7 +5818,7 @@ var WorkflowSessionController = class {
           if (!this.live(generation) || streamConnected)
             return;
           streamConnected = true;
-          this.set({ ...this.snapshot, connection: "connected", error: null });
+          this.set({ ...this.snapshot, connection: "connected", error: null, unreachable: null });
         };
         this.dropLiveRepliesVia(runId);
         await this.transport.streamLedger(runId, after, (item) => {
@@ -5841,7 +5847,10 @@ var WorkflowSessionController = class {
         if (!this.live(generation))
           return;
         attempt += 1;
-        this.fail(error, false);
+        if (authError(error))
+          this.fail(error, false);
+        else
+          this.unreach(error);
         if (authError(error)) {
           this.set({ ...this.snapshot, connection: "disconnected" });
           return;
@@ -6490,33 +6499,71 @@ var WorkflowSessionController = class {
     if (!signal || signal.aborted)
       return;
     const activeSignal = signal;
-    await new Promise((resolve) => {
-      const timer = setTimeout(done, delayMs);
-      const onAbort = () => {
-        clearTimeout(timer);
-        done();
-      };
-      function done() {
-        activeSignal.removeEventListener("abort", onAbort);
-        resolve();
-      }
-      activeSignal.addEventListener("abort", onAbort, { once: true });
-    });
-    if (typeof document === "undefined" || typeof document.addEventListener !== "function" || document.visibilityState !== "hidden" || activeSignal.aborted)
-      return;
-    await new Promise((resolve) => {
+    const wakers = this.retryWakers;
+    const pause = (ms, extra) => new Promise((resolve) => {
+      let timer = null;
+      let stopExtra;
       const done = () => {
-        document.removeEventListener("visibilitychange", onVisibility);
+        if (timer !== null)
+          clearTimeout(timer);
+        stopExtra?.();
+        wakers.delete(done);
         activeSignal.removeEventListener("abort", done);
         resolve();
       };
-      const onVisibility = () => {
-        if (document.visibilityState !== "hidden")
-          done();
-      };
-      document.addEventListener("visibilitychange", onVisibility);
+      if (ms !== null)
+        timer = setTimeout(done, ms);
+      stopExtra = extra?.(done);
+      wakers.add(done);
       activeSignal.addEventListener("abort", done, { once: true });
     });
+    let woken = false;
+    const markWoken = () => {
+      woken = true;
+    };
+    this.retryWakers.add(markWoken);
+    try {
+      await pause(delayMs);
+      while (this.retryPaused && !activeSignal.aborted)
+        await pause(null);
+      if (woken)
+        return;
+      if (typeof document === "undefined" || typeof document.addEventListener !== "function" || document.visibilityState !== "hidden" || activeSignal.aborted)
+        return;
+      await pause(null, (wake) => {
+        const onVisibility = () => {
+          if (document.visibilityState !== "hidden")
+            wake();
+        };
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => document.removeEventListener("visibilitychange", onVisibility);
+      });
+    } finally {
+      this.retryWakers.delete(markWoken);
+    }
+  }
+  /** The gateway did not answer a live stream or the view re-read: a client-side notice. */
+  unreach(error) {
+    const reason = error instanceof Error ? error.message : text2(object(error)?.detail) || String(error);
+    this.set({
+      ...this.snapshot,
+      connection: "reconnecting",
+      unreachable: { reason, retrying: !this.retryPaused, since: this.snapshot.unreachable?.since || (/* @__PURE__ */ new Date()).toISOString() }
+    });
+  }
+  /** "Retry now": the waiting reconnection runs at once (it re-reads the view first). */
+  retryNow() {
+    this.retryPaused = false;
+    if (this.snapshot.unreachable && !this.snapshot.unreachable.retrying)
+      this.set({ ...this.snapshot, unreachable: { ...this.snapshot.unreachable, retrying: true } });
+    for (const wake of [...this.retryWakers])
+      wake();
+  }
+  /** "Stop retrying": no automatic attempt until `retryNow()`. */
+  stopRetrying() {
+    this.retryPaused = true;
+    if (this.snapshot.unreachable?.retrying)
+      this.set({ ...this.snapshot, unreachable: { ...this.snapshot.unreachable, retrying: false } });
   }
 };
 

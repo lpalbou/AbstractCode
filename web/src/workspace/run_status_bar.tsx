@@ -7,6 +7,7 @@ import {
 
 import { llm_phase_text } from "../lib/llm_phase";
 import { view_progress_records } from "../lib/activity_rows";
+import { staleSince } from "./live_connection";
 
 export function RunStatusBar({
   active,
@@ -103,6 +104,8 @@ export function RunStatusBar({
         <span className={`code-run-strip__detail${phase ? " code-run-strip__detail--live" : ""}`} title={detail}>
           {detail}
         </span>
+        {/* The page cannot reach the gateway: the state above is the view's last word, as of then. */}
+        {snapshot.unreachable ? <span className="code-run-strip__stale">{staleSince(snapshot.unreachable)}</span> : null}
       </div>
       <span
         className="code-run-strip__metrics"

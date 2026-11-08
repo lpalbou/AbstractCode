@@ -26,7 +26,7 @@ export { LLM_DELTA_EVENT, LLM_DELTA_END_EVENT, isLlmDeltaEnd, llmDeltaFromSse, d
 export type { ChatAttachment, ChatLiveReply, ChatMedia, ChatMessage, ChatMessageLevel, ChatStat, SpeakState } from "./chat_message_card.js";
 export type { WorkflowChatProps, } from "./workflow_chat.js";
 export type { WorkflowInteraction, WorkflowInteractionChoice, WorkflowAskUserInteraction, WorkflowToolApprovalInteraction, WorkflowEventWaitInteraction, WorkflowInteractionPanelProps, } from "./workflow_interaction.js";
-export type { GatewayCommand, ServerRecord, WorkflowConnection, WorkflowRecord, WorkflowSessionSnapshot, WorkflowSessionControllerOptions, WorkflowTransport, WorkflowWaitInteraction, WorkflowApprovalTarget, WorkflowToolApprovalPolicy, WorkflowStopPhase, WorkflowStopState, } from "./workflow_runtime.js";
+export type { GatewayCommand, ServerRecord, WorkflowConnection, WorkflowUnreachable, WorkflowRecord, WorkflowSessionSnapshot, WorkflowSessionControllerOptions, WorkflowTransport, WorkflowWaitInteraction, WorkflowApprovalTarget, WorkflowToolApprovalPolicy, WorkflowStopPhase, WorkflowStopState, } from "./workflow_runtime.js";
 export type { UseWorkflowSessionOptions, WorkflowSessionHook } from "./use_workflow_session.js";
 export type { WorkflowEventScope, WorkflowEventTarget, WorkflowEventTargetResolution } from "./event_target.js";
 export { chatToMarkdown, copyText, downloadTextFile, tryParseJson } from "./utils.js";
