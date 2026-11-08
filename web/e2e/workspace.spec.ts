@@ -613,7 +613,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     const began = new Date(Date.now() - 21000).toISOString();
     // Explicit visual fixture: only browser read responses are substituted.
     // The real isolated run remains safely parked on its event; no LLM or web
-    // tools execute. Ledger shapes match controller regressions.
+    // tools execute.
     await page.route(
       (url) => url.pathname === runPath,
       async (route) => {
@@ -630,90 +630,53 @@ test.describe("AbstractCode isolated gateway workspace", () => {
         });
       },
     );
+    // Since Code renders from the gateway's replay view (web 0.13.0, 2026-10-28) the fixture is a
+    // view: the parked run as a delegation, three finished tool calls (one refused by its site), a
+    // model call still open, and a helper's status event that says "completed" (display_status).
+    const viewOf = (real: any) => {
+      const at = (ms: number) => new Date(Date.parse(began) + ms).toISOString();
+      const order = (ms: number, n: number) => [at(ms), runId, n];
+      const calls = [
+        { name: "web_search", arguments: { query: "Latest world and technology news", count: 5 } },
+        { name: "web_search", arguments: { query: "News from official company announcements", count: 5 } },
+        { name: "fetch_url", arguments: { url: "https://example.com/news/industry-report" } },
+      ];
+      const tools = calls.map((call, index) => ({
+        id: `${runId}:tool-${index}`, run_id: runId, execution_id: `tool-${index}`, node_id: "act", kind: "tool",
+        effect_type: "tool_calls", name: call.name, status: "completed", started_at: at(index * 10),
+        ended_at: at(1600), seqs: [index * 2 + 10, index * 2 + 11], step_ids: [`tool-${index}`], order: order(index * 10, index * 2 + 10),
+        tool_calls: [{ id: `tool-${index}`, name: call.name, arguments: call.arguments,
+          status: index === 2 ? "failed" : "completed",
+          ...(index === 2 ? { error: "HTTP Error 403: Forbidden" } : { output: "Sources collected for review" }) }],
+      }));
+      const llm = { id: `${runId}:llm-current`, run_id: runId, execution_id: "llm-current", node_id: "reason", kind: "llm",
+        effect_type: "llm_call", name: "llm_call", status: "running", started_at: at(2000), seqs: [20], step_ids: ["llm-current"], order: order(2000, 20) };
+      return {
+        ...real,
+        status: "waiting",
+        display_status: "completed",
+        interaction: null,
+        open_waits: [{ run_id: runId, kind: "delegation", wait_key: "foreground-working", step_id: "delegate", seq: 9, until: null, child_run_id: null, person_facing: false }],
+        runs: (real.runs || []).map((r: any) => (r.run_id === runId ? { ...r, status: "waiting", waiting: { kind: "delegation", wait_key: "foreground-working", child_run_id: null } } : r)),
+        activities: [...(real.activities || []), ...tools, llm],
+      };
+    };
     await page.route(
-      (url) => url.pathname === `${runPath}/history_bundle`,
+      (url) => url.pathname === `${runPath}/view`,
       async (route) => {
         const response = await route.fetch();
-        const bundle = await response.json();
-        const calls = [
-          {
-            name: "web_search",
-            arguments: { query: "Latest world and technology news", count: 5 },
-          },
-          {
-            name: "web_search",
-            arguments: {
-              query: "News from official company announcements",
-              count: 5,
-            },
-          },
-          {
-            name: "fetch_url",
-            arguments: { url: "https://example.com/news/industry-report" },
-          },
-        ];
-        const items = calls.map((call, index) => ({
-          cursor: 1000 + index,
-          record: {
-            run_id: runId,
-            step_id: `tool-${index}`,
-            status: "completed",
-            started_at: began,
-            ended_at: new Date(Date.parse(began) + 1600).toISOString(),
-            effect: {
-              type: "tool_calls",
-              payload: {
-                tool_calls: [{ ...call, runtime_call_id: `tool-${index}` }],
-              },
-            },
-            result: {
-              results: [
-                {
-                  runtime_call_id: `tool-${index}`,
-                  success: index !== 2,
-                  output: index === 2 ? null : "Sources collected for review",
-                  ...(index === 2
-                    ? { error: "HTTP Error 403: Forbidden" }
-                    : {}),
-                },
-              ],
-            },
-          },
-        }));
-        items.push({
-          cursor: 1003,
-          record: {
-            run_id: runId,
-            step_id: "llm-current",
-            status: "started",
-            started_at: new Date(Date.parse(began) + 2000).toISOString(),
-            effect: { type: "llm_call", payload: {} },
-          },
-        } as any);
-        items.push({
-          cursor: 1004,
-          record: {
-            run_id: runId,
-            step_id: "helper",
-            status: "completed",
-            effect: {
-              type: "emit_event",
-              payload: {
-                name: "abstract.status",
-                payload: { value: "completed" },
-              },
-            },
-          },
-        } as any);
+        await route.fulfill({ response, json: viewOf(await response.json()) });
+      },
+    );
+    await page.route(
+      (url) => url.pathname === `${runPath}/view/stream`,
+      async (route) => {
+        const real = await (await route.fetch({ url: new URL(`${runPath}/view`, route.request().url()).toString(), method: "GET" })).json();
+        const view = viewOf(real);
         await route.fulfill({
-          response,
-          json: {
-            ...bundle,
-            input_data: {
-              prompt: "Summarize the latest news with verified sources.",
-            },
-            ledgers: { [runId]: { items } },
-          },
+          status: 200,
+          contentType: "text/event-stream",
+          body: `id: ${view.cursor?.token || "fixture"}\nevent: view\ndata: ${JSON.stringify(view)}\n\n`,
         });
       },
     );
@@ -727,6 +690,7 @@ test.describe("AbstractCode isolated gateway workspace", () => {
     );
     await expect(page.locator(".pc-tool-activity")).toHaveCount(3);
     await capture(page, "compact-live-thinking");
+    await page.unrouteAll({ behavior: "ignoreErrors" });
   });
 
   test("reuses real Assistant defaults on successive chat turns without fabricated required fields", async ({
