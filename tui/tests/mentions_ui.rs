@@ -19,7 +19,7 @@ use abstracttui::widgets::{AuthorAvatar, AuthorKind, ChatAuthor};
 use abstractcode::config::Prefs;
 use abstractcode::convo::Focus;
 use abstractcode::entities::EntityInfo;
-use abstractcode::gateway::mentions::{apply, Outcome};
+use abstractcode::gateway::mentions::{apply, MentionMessage, Outcome};
 use abstractcode::mention::{MentionCall, Refusal};
 use abstractcode::runner::Cmd;
 use abstractcode::store::{Phase, Store, Workflow};
@@ -301,7 +301,7 @@ fn entity_replies_name_their_author_and_a_plain_answer_stays_assistant() {
             reply: "It holds, if the gateway restarts before the clients ship.".into(),
             author: Some(entity_author("Castor", "#39a5d0")),
         },
-        "",
+        None,
     );
     apply(
         h.store,
@@ -311,7 +311,7 @@ fn entity_replies_name_their_author_and_a_plain_answer_stays_assistant() {
             reply: "Agreed with Castor; I would add a rollback note.".into(),
             author: Some(entity_author("Pollux", "#d0396b")),
         },
-        "",
+        None,
     );
     h.turn();
     let screen = h.capture("120x40-two-chips-two-replies");
@@ -359,7 +359,7 @@ fn a_409_is_a_notice_row_and_the_next_mention_still_answers() {
         SESSION,
         &call("castor", "Castor", 0),
         Outcome::Refused(Refusal::Elsewhere),
-        "",
+        None,
     );
     apply(
         h.store,
@@ -369,7 +369,7 @@ fn a_409_is_a_notice_row_and_the_next_mention_still_answers() {
             reply: "Castor is busy elsewhere; the plan holds.".into(),
             author: Some(entity_author("Pollux", "#d0396b")),
         },
-        "",
+        None,
     );
     h.turn();
     let screen = h.capture("120x40-409-notice");
@@ -384,29 +384,49 @@ fn a_409_is_a_notice_row_and_the_next_mention_still_answers() {
     );
 }
 
+/// The `Cmd::Mentions` a send produced, as the lane receives it (the
+/// runner resolves `repeat_turn` to the started run: `run-a1` here).
+fn lane_message(cmds: Vec<Cmd>) -> MentionMessage {
+    cmds.into_iter()
+        .find_map(|c| match c {
+            Cmd::Mentions {
+                session_id,
+                text,
+                draft,
+                chips,
+                repeat_of,
+                calls,
+                ..
+            } => Some(MentionMessage {
+                session_id,
+                text,
+                draft,
+                chips,
+                repeat_of: repeat_of.or(Some("run-a1".into())),
+                calls,
+            }),
+            _ => None,
+        })
+        .expect("mention sent")
+}
+
 #[test]
 fn a_503_says_why_and_puts_the_message_back_in_the_composer() {
     let mut h = harness();
     h.pick("cas");
     h.keys(b"is it ready?");
     h.keys(b"\r");
-    let raw = h
-        .cmds()
-        .into_iter()
-        .find_map(|c| match c {
-            Cmd::Mentions { draft, .. } => Some(draft),
-            _ => None,
-        })
-        .expect("mention sent");
+    let msg = lane_message(h.cmds());
     agent_answered(&mut h);
+    let castor = call("castor", "Castor", 0);
     apply(
         h.store,
         SESSION,
-        &call("castor", "Castor", 0),
+        &castor,
         Outcome::Refused(Refusal::CannotAnswer(
             "Castor cannot answer: no model chosen".into(),
         )),
-        &raw,
+        Some(msg.unsent_from(&castor)),
     );
     h.turn();
     let screen = h.turn();
@@ -420,6 +440,118 @@ fn a_503_says_why_and_puts_the_message_back_in_the_composer() {
     );
 }
 
+/// Client review 2026-11-09 B2: Castor answered, Pollux 503. The composer
+/// gets the words back with ONLY @Pollux a chip; Enter asks only Pollux,
+/// with the same words and repeat_of and its first index — no Start, no
+/// steer, and Castor is never asked again.
+#[test]
+fn a_503_after_an_answer_puts_back_only_the_unsent_chip_and_a_resend_asks_only_it() {
+    let mut h = harness();
+    let msg = lane_message(h.send_two_chips());
+    agent_answered(&mut h);
+    let (castor, pollux) = (call("castor", "Castor", 0), call("pollux", "Pollux", 1));
+    apply(
+        h.store,
+        SESSION,
+        &castor,
+        Outcome::Answered {
+            reply: "The plan holds.".into(),
+            author: Some(entity_author("Castor", "#336699")),
+        },
+        None,
+    );
+    apply(
+        h.store,
+        SESSION,
+        &pollux,
+        Outcome::Refused(Refusal::CannotAnswer(
+            "Pollux cannot answer right now.".into(),
+        )),
+        Some(msg.unsent_from(&pollux)),
+    );
+    h.turn();
+    let screen = h.capture("b2-after-503");
+    assert!(
+        screen.contains("❯ ▐ Castor and @Pollux does the plan hold?"),
+        "Castor (answered) is plain text, @Pollux is the only chip:\n{screen}"
+    );
+    // Enter on the unchanged draft: only Pollux, nothing else.
+    h.keys(b"\r");
+    let cmds = h.cmds();
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Cmd::Start { .. } | Cmd::Steer { .. })),
+        "a resend starts no turn and steers nothing"
+    );
+    let resent: Vec<_> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            Cmd::Mentions {
+                text,
+                calls,
+                repeat_of,
+                repeat_turn,
+                ..
+            } => Some((text.clone(), calls.clone(), repeat_of.clone(), *repeat_turn)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        resent,
+        vec![(
+            TEXT.to_string(),
+            vec![pollux.clone()],
+            Some("run-a1".to_string()),
+            false
+        )],
+        "only Pollux, the words as first sent, the same repeat_of, its first index"
+    );
+    assert!(h.store.mention_retry.get_untracked().is_none(), "used once");
+}
+
+#[test]
+fn an_edited_draft_after_a_503_is_a_new_message() {
+    let mut h = harness();
+    let msg = lane_message(h.send_two_chips());
+    agent_answered(&mut h);
+    let castor = call("castor", "Castor", 0);
+    apply(
+        h.store,
+        SESSION,
+        &castor,
+        Outcome::Refused(Refusal::CannotAnswer(
+            "Castor cannot answer right now.".into(),
+        )),
+        Some(msg.unsent_from(&castor)),
+    );
+    h.turn();
+    h.turn();
+    h.keys(b" now");
+    h.keys(b"\r");
+    let cmds = h.cmds();
+    assert!(
+        cmds.iter().any(|c| matches!(c, Cmd::Start { prompt, .. } if prompt == "@Castor and @Pollux does the plan hold? now")),
+        "other words start a turn as any message does: {:?}",
+        cmds.iter().map(|c| format!("{c:?}").chars().take(60).collect::<String>()).collect::<Vec<_>>()
+    );
+    assert!(h.store.mention_retry.get_untracked().is_none());
+}
+
+/// Client review 2026-11-09 S3: the same entity picked twice is asked once.
+#[test]
+fn the_same_entity_picked_twice_is_asked_once() {
+    let mut h = harness();
+    h.pick("cas");
+    h.keys(b"and again ");
+    h.pick("cas");
+    h.keys(b"is the plan sound?");
+    h.keys(b"\r");
+    let msg = lane_message(h.cmds());
+    assert_eq!(msg.calls, vec![call("castor", "Castor", 0)]);
+    assert_eq!(msg.chips.len(), 2, "both chips are still the draft's");
+}
+
 #[test]
 fn a_gateway_without_the_route_says_so_once_and_turns_chips_off() {
     let mut h = harness();
@@ -430,7 +562,7 @@ fn a_gateway_without_the_route_says_so_once_and_turns_chips_off() {
         SESSION,
         &call("castor", "Castor", 0),
         Outcome::Refused(Refusal::NotOffered),
-        "",
+        None,
     );
     h.turn();
     let screen = h.turn();
@@ -490,7 +622,7 @@ fn an_answer_for_a_conversation_left_meanwhile_is_not_written_here() {
             reply: "late".into(),
             author: Some(entity_author("Castor", "#39a5d0")),
         },
-        "",
+        None,
     );
     assert_eq!(h.store.fold.with_untracked(|f| f.items.len()), before);
     assert!(h
@@ -534,7 +666,7 @@ fn an_entity_this_account_cannot_mention_is_a_notice_row() {
         SESSION,
         &call("castor", "Castor", 0),
         Outcome::Refused(Refusal::NotFound),
-        "",
+        None,
     );
     h.turn();
     let screen = h.turn();

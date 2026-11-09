@@ -83,6 +83,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (terminal, ships with the next terminal release)
 
+- **Mentions, client review 2026-11-09.** "Castor cannot answer: …" (503) or a failed call now stops the asking
+  (the next entity was asked anyway), and the message comes back with only the entities not answered left as chips
+  (an answered one reads as its plain name). Enter on it unchanged asks only those, with the words as first sent,
+  the same `repeat_of` and their first `mention_index`: no new turn, and an entity that answered is never asked
+  again. An entity picked twice is asked once. One conversation runs one message's mentions at a time: the next
+  message's wait for them, in order. An uncoded 405 means "This gateway does not offer mentions yet." like an
+  uncoded 404.
+
 - **`/sessions` and `--resume` leave AbstractNote's own work out.** A session whose first turn runs
   an AbstractNote workflow (a note captured from the watch or the web) is not a conversation: it is
   no longer listed, and `--resume` never reopens it. AbstractNote's automations ("Process my notes",

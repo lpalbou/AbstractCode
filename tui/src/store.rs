@@ -1324,6 +1324,10 @@ pub struct Store {
     /// this conversation's history." — the composer's hint shows once per
     /// session per entity, before the first message that names it.
     pub mention_told: Signal<Vec<(String, String)>>,
+    /// A message whose mention chain stopped (503, failure): the draft put
+    /// back with only the unsent chips, and what a resend of that exact
+    /// draft asks (client review 2026-11-09 B2). Any other send drops it.
+    pub mention_retry: Signal<Option<crate::gateway::mentions::Unsent>>,
 }
 
 impl Store {
@@ -1454,6 +1458,7 @@ impl Store {
             mcp_info: cx.signal(Default::default()),
             mentions_off: cx.signal(false),
             mention_told: cx.signal(Vec::new()),
+            mention_retry: cx.signal(None),
         }
     }
 

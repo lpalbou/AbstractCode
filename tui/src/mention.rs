@@ -76,9 +76,10 @@ pub enum Route {
     Mentions(Vec<MentionCall>),
 }
 
-/// Route a submission by its chips (never by its text).
-pub fn route(value: &ComposerSubmission) -> Route {
-    let calls: Vec<MentionCall> = value
+/// Every entity chip of a submission, in text order (an entity picked
+/// twice is listed twice): the chips its raw draft holds, one marker each.
+pub fn chips(value: &ComposerSubmission) -> Vec<MentionCall> {
+    value
         .mentions
         .iter()
         .filter(|m| m.kind == MentionKind::Entity)
@@ -87,7 +88,18 @@ pub fn route(value: &ComposerSubmission) -> Route {
             name: m.name.clone(),
             index: m.index,
         })
-        .collect();
+        .collect()
+}
+
+/// Route a submission by its chips (never by its text). An entity picked
+/// twice is asked once: its first chip keeps its index.
+pub fn route(value: &ComposerSubmission) -> Route {
+    let mut calls: Vec<MentionCall> = Vec::new();
+    for call in chips(value) {
+        if !calls.iter().any(|c| c.entity == call.entity) {
+            calls.push(call);
+        }
+    }
     match calls.as_slice() {
         [] => Route::Plain,
         [only] if value.text.trim() == format!("@{}", only.name) => Route::Open {
@@ -118,6 +130,36 @@ pub fn history_hint(
         }
     }
     abstracttui::widgets::history_notice(&names)
+}
+
+/// First code point of the composer's chip markers (AbstractTUI
+/// `widgets/textarea_chips.rs`: one Supplementary Private Use Area-A scalar
+/// per chip, U+F0000 + registry slot, in text order).
+const CHIP_FIRST: u32 = 0xF_0000;
+/// Last chip marker code point (U+FFFFE/U+FFFFF are noncharacters).
+const CHIP_LAST: u32 = 0xF_FFFD;
+
+/// The draft a stopped chain puts back into the composer: `raw` (the
+/// buffer the message was sent from, one marker per chip, `chips` in the
+/// same order) with the chips of the entities in `keep` left as chips and
+/// every other chip spelled as its plain name (no `@`: it asks no one, the
+/// words still read). The marker scalars are AbstractTUI's: the
+/// `mentions_ui` test round-trips this through the real composer.
+pub fn restore_draft(raw: &str, chips: &[MentionCall], keep: &[MentionCall]) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut ordinal = 0usize;
+    for ch in raw.chars() {
+        if !(CHIP_FIRST..=CHIP_LAST).contains(&(ch as u32)) {
+            out.push(ch);
+            continue;
+        }
+        match chips.get(ordinal) {
+            Some(chip) if !keep.iter().any(|k| k.entity == chip.entity) => out.push_str(&chip.name),
+            _ => out.push(ch),
+        }
+        ordinal += 1;
+    }
+    out
 }
 
 /// The mention call's body: the message as typed, chips spelled `@name`,
@@ -194,13 +236,15 @@ pub enum Refusal {
     /// not see — the same answer): "<name> cannot be mentioned here.",
     /// then the next mention.
     NotFound,
-    /// 503 `entity_cannot_answer`: the gateway's sentence, and the message
-    /// goes back into the composer.
+    /// 503 `entity_cannot_answer`: the gateway's sentence; the chain stops,
+    /// and the message goes back into the composer with only the chips not
+    /// answered (a resend asks only those).
     CannotAnswer(String),
     /// The route does not exist on this gateway: one sentence, mentions
     /// off for the rest of the session, the remaining calls dropped.
     NotOffered,
-    /// No answer, or an unexplained error: an error row, then the next.
+    /// No answer, or an unexplained error: an error row; the chain stops
+    /// and the message goes back, as for [`Refusal::CannotAnswer`].
     Failed(String),
 }
 
@@ -212,7 +256,9 @@ pub fn classify(f: &MentionFailure) -> Refusal {
         (Some(409), "in_another_conversation") => Refusal::Elsewhere,
         (Some(503), "entity_cannot_answer") => Refusal::CannotAnswer(f.detail.clone()),
         (Some(404), "entity_not_found") => Refusal::NotFound,
-        (Some(404), "") => Refusal::NotOffered,
+        // Every refusal of the door is coded: an uncoded 404 or 405 is the
+        // route itself missing (an older gateway).
+        (Some(404 | 405), "") => Refusal::NotOffered,
         (Some(404 | 409 | 422), _) if !f.detail.is_empty() => Refusal::Refused(f.detail.clone()),
         (Some(code), _) => Refusal::Failed(if f.detail.is_empty() {
             format!("gateway HTTP {code}")
@@ -385,6 +431,73 @@ mod tests {
     }
 
     #[test]
+    fn an_entity_picked_twice_is_asked_once_at_its_first_index() {
+        let twice = ComposerSubmission {
+            text: "@Castor and again @Castor, @Pollux?".into(),
+            mentions: vec![
+                chip("castor", "Castor", 0),
+                chip("castor", "Castor", 1),
+                chip("pollux", "Pollux", 2),
+            ],
+        };
+        assert_eq!(
+            route(&twice),
+            Route::Mentions(vec![
+                MentionCall {
+                    entity: "castor".into(),
+                    name: "Castor".into(),
+                    index: 0
+                },
+                MentionCall {
+                    entity: "pollux".into(),
+                    name: "Pollux".into(),
+                    index: 2
+                },
+            ])
+        );
+        assert_eq!(chips(&twice).len(), 3, "the draft still holds three chips");
+    }
+
+    #[test]
+    fn a_restored_draft_keeps_only_the_unsent_chips() {
+        let m = |k: u32| char::from_u32(CHIP_FIRST + k).unwrap();
+        let raw = format!("{} and {} does the plan hold?", m(0), m(1));
+        let all = vec![
+            MentionCall {
+                entity: "castor".into(),
+                name: "Castor".into(),
+                index: 0,
+            },
+            MentionCall {
+                entity: "pollux".into(),
+                name: "Pollux".into(),
+                index: 1,
+            },
+        ];
+        assert_eq!(
+            restore_draft(&raw, &all, &all[1..]),
+            format!("Castor and {} does the plan hold?", m(1)),
+            "Castor answered: plain text; Pollux stays a chip"
+        );
+        assert_eq!(
+            restore_draft(&raw, &all, &all),
+            raw,
+            "nothing answered: unchanged"
+        );
+        assert_eq!(
+            restore_draft(&raw, &all, &[]),
+            "Castor and Pollux does the plan hold?"
+        );
+        // A chip picked twice follows its entity.
+        let dup = format!("{} {} {}", m(0), m(1), m(0));
+        let chips3 = vec![all[0].clone(), all[1].clone(), all[0].clone()];
+        assert_eq!(
+            restore_draft(&dup, &chips3, &all[..1]),
+            format!("{} Pollux {}", m(0), m(0))
+        );
+    }
+
+    #[test]
     fn the_history_hint_names_each_new_entity_once_per_session() {
         let value = ComposerSubmission {
             text: "@Castor @Pollux @Castor hi".into(),
@@ -495,6 +608,11 @@ mod tests {
             classify(&f(Some(404), "", "entity 'ghost' not found")),
             Refusal::NotOffered,
             "the code decides, never the sentence"
+        );
+        assert_eq!(
+            classify(&f(Some(405), "", "Method Not Allowed")),
+            Refusal::NotOffered,
+            "an uncoded 405 is the route missing too"
         );
         assert_eq!(
             classify(&f(

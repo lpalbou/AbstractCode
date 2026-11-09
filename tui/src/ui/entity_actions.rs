@@ -424,6 +424,7 @@ pub fn send_mentions(
     ctx: &UiCtx,
     text: &str,
     draft: &str,
+    chips: Vec<crate::mention::MentionCall>,
     repeat_turn: bool,
     calls: Vec<crate::mention::MentionCall>,
 ) {
@@ -448,8 +449,46 @@ pub fn send_mentions(
         session_id,
         text: text.to_string(),
         draft: draft.to_string(),
+        chips,
         repeat_turn,
+        repeat_of: None,
         calls,
+    });
+}
+
+/// The remembered message of a stopped mention chain (`store.mention_retry`)
+/// when `draft` is exactly the draft it put back, in this session; taken
+/// either way (any other send is a new message and drops it).
+pub fn take_mention_retry(store: Store, draft: &str) -> Option<crate::gateway::mentions::Unsent> {
+    let held = store.mention_retry.get_untracked()?;
+    store.mention_retry.set(None);
+    let here = store.session_id.with_untracked(|s| *s == held.session_id);
+    (here && held.draft == draft && !held.calls.is_empty()).then_some(held)
+}
+
+/// Resend a stopped chain (client review 2026-11-09 B2): ONLY the calls not
+/// answered, with the words as first sent and the same `repeat_of`; no
+/// turn starts and no steer goes out, and an entity that answered is never
+/// asked again.
+pub fn resend_mentions(
+    store: Store,
+    ctx: &UiCtx,
+    held: crate::gateway::mentions::Unsent,
+    chips: Vec<crate::mention::MentionCall>,
+) {
+    if store.mentions_off.get_untracked() {
+        store.notify(format!("{}.", crate::mention::NOT_OFFERED));
+        return;
+    }
+    store.notify(format!("asking {} again", names_of(&held.calls)));
+    ctx.send(Cmd::Mentions {
+        session_id: held.session_id,
+        text: held.text,
+        draft: held.draft,
+        chips,
+        repeat_turn: false,
+        repeat_of: held.repeat_of,
+        calls: held.calls,
     });
 }
 

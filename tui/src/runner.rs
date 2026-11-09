@@ -412,13 +412,18 @@ pub enum Cmd {
         /// The message as typed, chips spelled `@name`.
         text: String,
         /// The composer's raw draft (chips as markers): what a 503 puts
-        /// back into the composer.
+        /// back into the composer (with only the unsent chips left chips).
         draft: String,
+        /// Every chip of `draft` in text order (`mention::chips`).
+        chips: Vec<crate::mention::MentionCall>,
         /// The same words started an agent turn just before this command
         /// (`Cmd::Start`): each call names that turn as `repeat_of`, so
         /// clients show the words once. False for a steer or a refused
         /// start.
         repeat_turn: bool,
+        /// A resend of a stopped chain: the turn its words repeat, as
+        /// first sent (wins over `repeat_turn`; no Start went out).
+        repeat_of: Option<String>,
         calls: Vec<crate::mention::MentionCall>,
     },
     /// `/automations` lane: every action runs on its own thread
@@ -658,6 +663,8 @@ struct Runner {
     /// None while a start is in flight or after one failed. A message's
     /// `@entity` mentions name it as `repeat_of`.
     last_start: Option<(String, String)>,
+    /// One `@entity` mention chain at a time per session.
+    mention_lanes: crate::gateway::mentions::MentionLanes,
 }
 
 /// The `repeat_of` of a message's mention calls: the run its words just
@@ -705,6 +712,7 @@ pub fn spawn(
                     workspace_notice_posted: false,
                     same_machine_probed: false,
                     last_start: None,
+                    mention_lanes: Default::default(),
                 };
                 while let Ok(cmd) = rx.recv() {
                     if matches!(cmd, Cmd::Shutdown) {
@@ -1186,22 +1194,27 @@ impl Runner {
                 session_id,
                 text,
                 draft,
+                chips,
                 repeat_turn,
+                repeat_of,
                 calls,
             } => {
                 // The Start these words made ran just before on this
                 // thread (commands are handled in order): its run id, when
-                // it started in this session.
-                let repeat_of = repeat_of_turn(&self.last_start, &session_id, repeat_turn);
+                // it started in this session. A resend names its own.
+                let repeat_of = repeat_of
+                    .or_else(|| repeat_of_turn(&self.last_start, &session_id, repeat_turn));
                 let client = crate::gateway::entities::client_for(&self.client);
                 crate::gateway::mentions::spawn_mentions(
                     client,
                     self.wake.clone(),
                     self.store,
+                    &self.mention_lanes,
                     crate::gateway::mentions::MentionMessage {
                         session_id,
                         text,
                         draft,
+                        chips,
                         repeat_of,
                         calls,
                     },
@@ -5070,6 +5083,7 @@ mod tests {
             workspace_notice_posted: false,
             same_machine_probed: false,
             last_start: None,
+            mention_lanes: Default::default(),
         }
     }
 

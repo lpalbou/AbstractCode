@@ -1035,6 +1035,15 @@ fn submit(
             // entity's conversation; chips among words are mentions, sent
             // after the person's own turn; then the focused conversation
             // decides where that turn goes.
+            // The message a stopped mention chain put back, sent again
+            // unchanged: only its unsent mentions, no new turn (review
+            // 2026-11-09 B2). Any other message drops it.
+            let retry = entity_actions::take_mention_retry(store, draft);
+            let agent_focus = matches!(store.focus.get_untracked(), crate::convo::Focus::Agent);
+            if let Some(held) = retry.filter(|_| agent_focus) {
+                entity_actions::resend_mentions(store, ctx, held, crate::mention::chips(value));
+                return;
+            }
             let calls = match crate::mention::route(value) {
                 crate::mention::Route::Open { slug } => {
                     entity_actions::open_or_focus(store, ctx, &slug);
@@ -1077,7 +1086,15 @@ fn submit(
             }
             // Mentions go AFTER the turn on the runner channel, so the
             // start (or steer) reaches the gateway first.
-            entity_actions::send_mentions(store, ctx, &text, draft, started, calls);
+            entity_actions::send_mentions(
+                store,
+                ctx,
+                &text,
+                draft,
+                crate::mention::chips(value),
+                started,
+                calls,
+            );
         }
         Some(cmd) => {
             // A command's argument is text: chips in it ask no one, and
