@@ -33,7 +33,7 @@
     "dist/workflow_interaction.js": "41ac64f66141a84b8814fc9a6cb6898ca9a16c75e288fe92e1017089ab1ba086",
     "dist/conversation_model.js": "b420f06fd656e07225d7a9e588716bf3b42af348ec2f857668d8705d22d5d6a3",
     "dist/avatar_conversation.js": "14b82043161098ba954da8a486b762ad4e6c790f1e2349f298201bfb2fb33828",
-    "dist/workflow_chat.js": "440e24ef4b55f44a9688da7b4e371e3e7fa298aa87262c17494b197aefb70275",
+    "dist/workflow_chat.js": "196832deeb0674a16cc6f9bb41d0bd02ac9a100d261669d8defbb8b105247250",
     "dist/workflow_evidence.js": "105d7552003c32b14642abad277c42839de792610df58ae3eca03e54f2717dec",
     "dist/llm_delta.js": "ffaa8af4c15ba3a196ab8679678b6be0c54e8ebdb07a5367c8949ff8b1e27d3d",
     "dist/replay_view.js": "c7eae8369d076ad498b85ae93c8b7ec181f303ec76fbad51708254b2b0df19cd",
@@ -48,7 +48,7 @@
     "src/panel_chat.css": "70875b3300867019c4568ddaf40f152eacce24aff7cf17c8d9588d0a1283930d"
   },
   "artifacts": {
-    "conversation.js": "9abefef6209c3cb3bbb009a7ddc1f8e19d44ef7a48398a91e20826df92624ea3",
+    "conversation.js": "a77604f46ca5b348474d2e88f15a197ec0a23d2423437fd0d193fee6a05118e7",
     "artifact_preview.d.ts": "40c581cd1ef271dcb631c23f20898583822581c1c8e7ea0b0a68bbede8414432",
     "artifact_provenance.d.ts": "c4b4f810379ec2bfcde8f60db49fad72953cd07da16f4aff7e2bf22e0d3fe49a",
     "assistant_panel.d.ts": "46bde9b7f3a1e51074ba32c3f6b52cb0f63b0db439f010e0896498a22b1c5202",

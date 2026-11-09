@@ -3800,7 +3800,8 @@ function WorkflowChat(props) {
         duplicate: Boolean(result.duplicate)
       });
       settleMentions(held, result, false);
-      props.onDraftChange("");
+      if (!unsentMentionsOf(result)?.length)
+        props.onDraftChange("");
     } catch (reason) {
       if (mountedRef.current && sendSequenceRef.current === sequence) {
         setError({ action: "steer", message: messageFor(reason) });

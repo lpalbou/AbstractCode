@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once. The person's words fold under their own turn only while that turn is on screen (a mention turn shown alone
   keeps its question). An uncoded 405 means "This gateway does not offer mentions yet." like an uncoded 404. Stop
   during the mentions says who was not asked ("Stopped before asking Hypnos."). Kit fixes from AbstractUIC
-  9aad042 (vendored copy re-synced; `node_modules` panel-chat 0.9.9 + ui-kit 0.9.26 local packs, `--no-save`):
+  9aad042 + aca0b07 (vendored copy re-synced; `node_modules` panel-chat 0.9.9 + ui-kit 0.9.26 local packs, `--no-save`):
   a chip picked while a send is in flight stays, Enter waits while the `@` list loads, a picked name is not
   offered again, and the list spans the box on a phone.
 
