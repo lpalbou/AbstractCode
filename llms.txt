@@ -33,6 +33,8 @@ Ground rules for reading this repository:
 
 Open **Model** directly from the right-hand icon rail to change the selected conversation or automation’s model. **Agent** groups workflow, tools and skills; **Workspace** controls folders. **Voice** configures this app’s speech and devices. Automation Model panels show **Limits**; conversation panels show **Limits & streaming**. The Docs assistant’s speaker reads a reply aloud when speech is configured.
 
+Type `@` in the message box and pick an entity to mention it: your message goes to the agent as usual, then each picked entity answers in turn under its own name, and every reply says who wrote it. If an entity cannot answer, the message comes back with only the entities that did not answer; send it again unchanged to ask only those. See [mentioning an entity](docs/getting-started.md#mentioning-an-entity).
+
 The terminal client supports source-aware assistant text/table/code selection.
 Explain, Use as context and Change stage quoted content into an existing draft;
 sending remains explicit. See [terminal selection](tui/docs/api.md#selected-content).
@@ -40,9 +42,9 @@ sending remains explicit. See [terminal selection](tui/docs/api.md#selected-cont
 ## Project documentation
 
 - [README](README.md): what AbstractCode is, the two clients, and a quick start
-- [Getting started](docs/getting-started.md): running a gateway, installing a client, credentials, first run
+- [Getting started](docs/getting-started.md): running a gateway, installing a client, credentials, first run, mentioning an entity with `@` (in both clients)
 - [Architecture](docs/architecture.md): the clients, the browser app server, the gateway, the terminal's voice bridge, the run stream with live reply deltas, attention from your event stream (`/me/events` catch-up + SSE: the terminal chip and the browser badge, "N waiting for you · M new"), the thin-client contract, and repository layout
-- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, your event stream, discovery, workspace files, conversations and archiving, automations, voice, about)
+- [API and integration points](docs/api.md): the command-line surface, the library surface, and the gateway contract (runs, streams, your event stream, entities and `@` mentions with the turn `author`, discovery, workspace files, conversations and archiving, automations, voice, about)
 - [Workflows](docs/workflows.md): the gateway default agent workflow, selecting a workflow, and the `abstractcode.agent.v1` interface
 - [Automations](docs/automations.md): Repeat, Daily, Weekly, Monthly and Once schedules on the account's time zone (the gateway words each rule and computes each next run); configurable growing-context budgets and result email; creating, managing, answering and discussing gateway automations from the terminal (`/automations`, `/automation`, Edit in `/settings`) and the browser (the Automations sidebar section)
 - [Interface events](docs/ui_events.md): the workflow-driven event contract

@@ -75,6 +75,10 @@ for credentials, remote gateways, and first-run configuration.
 - **Approval-gated tools** — tools stop and wait for you by default; approve or
   reject from either client.
 - **Steering** — inject guidance into a run without restarting it.
+- **Mentions** — type `@` and pick an entity to bring it into the conversation: your
+  message goes to the agent as usual, then the entity answers under its own name, and
+  every reply says who wrote it
+  (see [mentioning an entity](docs/getting-started.md#mentioning-an-entity)).
 - **Workflows** — run the gateway's default agent workflow, or pick a named
   agent bundle; the gateway resolves its default at every new turn.
 - **Review mode** — before a tool-call-free answer is accepted as final, a

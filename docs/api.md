@@ -66,6 +66,8 @@ Both clients use the same endpoints. This is the integration contract:
 | Conversations | `GET` root runs per session (with per-turn tool totals and the `archived_sessions` count); `POST` a session's archive or unarchive |
 | Automations | `GET`, create, `PATCH` (a new revision, guarded by `expected_revision`) and the lifecycle commands — pause, resume, run now, stop, archive, unarchive; `GET` the archived list with its `archived_automations` count |
 | Your event stream | `GET /me/events?after=` (catch-up pages) and `GET /me/events/stream` (SSE, resumed with `Last-Event-ID`) for the attention chip and badge; HTTP 404 on a gateway without it |
+| Entities and mentions | `GET /entities` for the `@` list (the entities this account may see); `POST /sessions/{id}/mentions` with `{entity, text, mention_index, repeat_of, mention_id}`, one call per mentioned entity; the entity's answer comes back as a turn of the session |
+| Who answered | every turn the clients show carries `author` (`{kind: "entity" \| "agent" \| "person", name, entity_id, identity_ref, avatar}`, nulls kept): session turns, history, the replay view, a run, and each live reply frame |
 | Voice | `GET` the gateway's default voice routes; `POST` a reply's text for streamed speech, and recorded audio for transcription |
 | Discovery | `GET` the available workflows (with the gateway's default agent workflow), providers, models, tools, skills, and capabilities such as live replies |
 | Workspace files | `GET` a run's workspace location, a folder listing, and file content (with `Range`) |
@@ -85,6 +87,31 @@ The archive routes and the default voice routes need AbstractGateway 0.13.0 or
 later. See the gateway's own documentation for exact paths, payload schemas, and
 authentication modes; it owns those definitions, and pinning them here would
 guarantee drift.
+
+### Mentions
+
+Both clients follow the same rules when a message carries `@` mentions (what you see
+is in [getting started](getting-started.md#mentioning-an-entity)):
+
+- A mention is a chip picked from the `@` list; neither client reads `@` out of the
+  message text.
+- The message starts its turn as usual (or, in the terminal, a message that is only
+  one chip opens that entity's visit instead). Then the clients ask each entity once,
+  in pick order (`mention_index`), each call after the previous one returned, so a
+  later entity reads the earlier answers. A session asks one message's entities at a
+  time.
+- `repeat_of` names the person's own turn that carries the same words, so the words
+  are shown once; `mention_id` is `<message>:<entity>:<mention_index>`, so resending
+  a message after a lost answer gets each entity's first answer back, never a second
+  one. Answers are ordered by when they came (`updated_at`).
+- `409 in_another_conversation` (and the entity's other `409` refusals): the sentence
+  is shown and the next entity is asked. `404 entity_not_found`: "cannot be mentioned
+  here", the next entity is asked. `503 entity_cannot_answer` or any other failure:
+  the sentence is shown, the asking stops, and the message goes back to the composer
+  with only the entities not answered. Sending those same words again asks only them,
+  with the same `repeat_of` and their first `mention_index`, and starts no new turn.
+- A plain `404` or `405` without a code means the gateway has no mention route: the
+  clients say "This gateway does not offer mentions yet." and offer no names.
 
 ## Workflow contract
 

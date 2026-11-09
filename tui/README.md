@@ -64,9 +64,12 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
   shows status, `/goal stop` cancels durably. Requires a goal workflow
   (`abstractcode.goal.v1`) published on the gateway — without one, `/goal`
   says so and starts nothing.
-- **Summoned entities**: `@name` opens a durable visit with a gateway
-  entity (`/entities` lists the roster with identity cards); each
-  conversation gets its own transcript and header chip, and `Alt+E`
+- **Summoned entities**: type `@` and pick an entity (`/entities` lists
+  the roster with identity cards). A message that is only that chip opens
+  a durable visit with it; a chip among other words mentions it: your
+  message goes to the agent as usual, then the entity answers in the
+  conversation as `● Castor · entity`. Each visit gets its own transcript
+  and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
   non-interruptible and stream no mid-turn progress (a server-side
   boundary, rendered honestly) — typing during a turn holds one draft and
@@ -233,7 +236,8 @@ Inside the app:
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
   (server-side) until you answer — even across client restarts
-- `@name` talks with a summoned entity when the gateway hosts them
+- `@` + pick talks with a summoned entity when the gateway hosts them: a
+  chip alone opens its visit, a chip among other words mentions it
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
   top right of any message reads that one; bottom-meter and avatar ‖/▶ controls

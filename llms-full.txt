@@ -87,6 +87,10 @@ for credentials, remote gateways, and first-run configuration.
 - **Approval-gated tools** — tools stop and wait for you by default; approve or
   reject from either client.
 - **Steering** — inject guidance into a run without restarting it.
+- **Mentions** — type `@` and pick an entity to bring it into the conversation: your
+  message goes to the agent as usual, then the entity answers under its own name, and
+  every reply says who wrote it
+  (see [mentioning an entity](docs/getting-started.md#mentioning-an-entity)).
 - **Workflows** — run the gateway's default agent workflow, or pick a named
   agent bundle; the gateway resolves its default at every new turn.
 - **Review mode** — before a tool-call-free answer is accepted as final, a
@@ -300,6 +304,49 @@ In the browser, open the rail's **Workflow** panel. Its picker starts with
 **Stream replies** choices. These panels apply to the conversation (or the
 automation) selected in the sidebar; see [`web.md`](web.md#working-in-the-interface).
 In the terminal, `/settings` opens the same panels.
+
+## Mentioning an entity
+
+If your gateway hosts entities, you can bring one into a conversation by name, in
+either client. Type `@` in the message box: a list shows the entities your account
+can see. Type more of a name to narrow it, then pick one (arrow keys to move, Enter
+or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
+after `@` without picking it stays ordinary text. The first time you name an entity
+in a conversation, a line tells you "Castor will read this conversation's history."
+
+When you send, your message goes to the agent as usual. Then each entity you picked
+is asked in turn, in the order you picked them, each once the previous one has
+answered, so a later entity reads the earlier answers. An entity picked twice is
+asked once. Every reply says who wrote it: in the browser, the bubble shows the
+agent's workflow name with an "agent" tag, or the entity's name, its orb and an
+"entity" tag; in the terminal, the reply reads `✦ basic-agent · agent` or
+`● Castor · entity`, in the entity's colour. The answers belong to the conversation,
+so they show again when you reopen it, in either client.
+
+- **In the browser**, "Castor is answering…" shows above the message box while an
+  entity answers, and its answer appears once the current reply has ended. You can
+  send your next message once the entities have answered; Stop ends the asking and
+  says who was not asked ("Stopped before asking Hypnos.").
+- **In the terminal**, a message that is only one chip opens that entity's own
+  conversation instead (a visit; see
+  [working with entities](../tui/docs/getting-started.md#working-with-entities)). A
+  conversation asks one message's entities at a time: send another message with
+  chips meanwhile and its entities are asked next ("Pollux: asked when the mentions
+  before end").
+
+When a mention cannot be answered, the client says so:
+
+- "Castor is in another conversation." The entity is busy elsewhere: it is skipped
+  and the next one is asked.
+- "Castor cannot be mentioned here." Your account cannot mention that entity: it is
+  skipped and the next one is asked.
+- An entity that cannot answer right now says so, and the asking stops. Your message
+  goes back into the message box with only the entities that did not answer still as
+  chips. Send it again unchanged to ask only those: the agent is not asked again, and
+  an entity that already answered is never asked twice. Different words are a new
+  message.
+- "This gateway does not offer mentions yet." The gateway cannot take mentions: the
+  `@` list then offers no names.
 
 ## Where the files are
 
@@ -612,6 +659,8 @@ Both clients use the same endpoints. This is the integration contract:
 | Conversations | `GET` root runs per session (with per-turn tool totals and the `archived_sessions` count); `POST` a session's archive or unarchive |
 | Automations | `GET`, create, `PATCH` (a new revision, guarded by `expected_revision`) and the lifecycle commands — pause, resume, run now, stop, archive, unarchive; `GET` the archived list with its `archived_automations` count |
 | Your event stream | `GET /me/events?after=` (catch-up pages) and `GET /me/events/stream` (SSE, resumed with `Last-Event-ID`) for the attention chip and badge; HTTP 404 on a gateway without it |
+| Entities and mentions | `GET /entities` for the `@` list (the entities this account may see); `POST /sessions/{id}/mentions` with `{entity, text, mention_index, repeat_of, mention_id}`, one call per mentioned entity; the entity's answer comes back as a turn of the session |
+| Who answered | every turn the clients show carries `author` (`{kind: "entity" \| "agent" \| "person", name, entity_id, identity_ref, avatar}`, nulls kept): session turns, history, the replay view, a run, and each live reply frame |
 | Voice | `GET` the gateway's default voice routes; `POST` a reply's text for streamed speech, and recorded audio for transcription |
 | Discovery | `GET` the available workflows (with the gateway's default agent workflow), providers, models, tools, skills, and capabilities such as live replies |
 | Workspace files | `GET` a run's workspace location, a folder listing, and file content (with `Range`) |
@@ -631,6 +680,31 @@ The archive routes and the default voice routes need AbstractGateway 0.13.0 or
 later. See the gateway's own documentation for exact paths, payload schemas, and
 authentication modes; it owns those definitions, and pinning them here would
 guarantee drift.
+
+### Mentions
+
+Both clients follow the same rules when a message carries `@` mentions (what you see
+is in [getting started](getting-started.md#mentioning-an-entity)):
+
+- A mention is a chip picked from the `@` list; neither client reads `@` out of the
+  message text.
+- The message starts its turn as usual (or, in the terminal, a message that is only
+  one chip opens that entity's visit instead). Then the clients ask each entity once,
+  in pick order (`mention_index`), each call after the previous one returned, so a
+  later entity reads the earlier answers. A session asks one message's entities at a
+  time.
+- `repeat_of` names the person's own turn that carries the same words, so the words
+  are shown once; `mention_id` is `<message>:<entity>:<mention_index>`, so resending
+  a message after a lost answer gets each entity's first answer back, never a second
+  one. Answers are ordered by when they came (`updated_at`).
+- `409 in_another_conversation` (and the entity's other `409` refusals): the sentence
+  is shown and the next entity is asked. `404 entity_not_found`: "cannot be mentioned
+  here", the next entity is asked. `503 entity_cannot_answer` or any other failure:
+  the sentence is shown, the asking stops, and the message goes back to the composer
+  with only the entities not answered. Sending those same words again asks only them,
+  with the same `repeat_of` and their first `mention_index`, and starts no new turn.
+- A plain `404` or `405` without a code means the gateway has no mention route: the
+  clients say "This gateway does not offer mentions yet." and offer no names.
 
 ## Workflow contract
 
@@ -1641,6 +1715,8 @@ If the gateway sends a live update the app cannot read, the transcript shows one
 
 For an agent, type a task and press Enter; Shift+Enter inserts a newline. For a structured workflow, configure its required inputs and select **Run workflow**. Text, structured JSON results, and workflow messages appear in the transcript.
 
+To bring an entity into the conversation, type `@` and pick it from the list of entities your account can see; it becomes a chip. Your message starts its turn as usual, then each picked entity answers in turn, in the order you picked them ("Castor is answering…" above the message box), and its answer appears once the current reply has ended, under its name, its orb and an "entity" tag; the agent's replies carry its workflow name and an "agent" tag. If an entity cannot answer, the message goes back into the box with only the entities that did not answer: send it again unchanged to ask only those. See [Mentioning an entity](getting-started.md#mentioning-an-entity) for every case.
+
 Answer questions in their dedicated cards. A tool approval shows what the tool will do (the full arguments are under **Review full tool arguments (JSON)**) and offers three choices: **Deny** refuses the request; **Allow** allows that tool for the rest of this conversation; **Allow All** allows every tool for the rest of this conversation. Both allows are stored on the gateway for this session only (AbstractGateway 0.16.0 or later, `capabilities.session_tool_policy`), so later calls run without asking in every client of the conversation; they never change your tool settings in Agent → Tools. On a gateway without the session tool policy, Allow covers the request shown and the card says so. Gateway and workflow policy determine which operations need a decision. Saving the allow before it answers has no time limit: a pending permission is a durable wait, so the card shows "Allowing…" for as long as the gateway takes, and shows a failure line with the reason (and Try again) only when the gateway or the network really refuses.
 
 An event-driven workflow stays attached while waiting for its trigger. Its wait card can also submit an explicit JSON event through the gateway's durable command path. Messages and status updates emitted by workflow nodes are replayable. See the [UI event contract](ui_events.md).
@@ -1948,9 +2024,12 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
   shows status, `/goal stop` cancels durably. Requires a goal workflow
   (`abstractcode.goal.v1`) published on the gateway — without one, `/goal`
   says so and starts nothing.
-- **Summoned entities**: `@name` opens a durable visit with a gateway
-  entity (`/entities` lists the roster with identity cards); each
-  conversation gets its own transcript and header chip, and `Alt+E`
+- **Summoned entities**: type `@` and pick an entity (`/entities` lists
+  the roster with identity cards). A message that is only that chip opens
+  a durable visit with it; a chip among other words mentions it: your
+  message goes to the agent as usual, then the entity answers in the
+  conversation as `● Castor · entity`. Each visit gets its own transcript
+  and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
   non-interruptible and stream no mid-turn progress (a server-side
   boundary, rendered honestly) — typing during a turn holds one draft and
@@ -2117,7 +2196,8 @@ Inside the app:
   fresh session
 - tool approvals and agent questions open as modals; the run waits durably
   (server-side) until you answer — even across client restarts
-- `@name` talks with a summoned entity when the gateway hosts them
+- `@` + pick talks with a summoned entity when the gateway hosts them: a
+  chip alone opens its visit, a chip among other words mentions it
   (`/entities` lists the roster); `Alt+E` cycles conversation focus
 - `Ctrl+P` reads the latest reply aloud, pauses and resumes it (`▶` at the
   top right of any message reads that one; bottom-meter and avatar ‖/▶ controls
@@ -2412,11 +2492,14 @@ gateway until you answer.
 
 ## Working with entities
 
-If your gateway hosts summoned entities, `@name` opens a durable **visit**
-(`/entities` lists the roster with identity cards; `Enter` there does the
-same as `@name`). The visit gets its own transcript and a header chip;
-`Alt+E` cycles focus between the agent and open visits, and everything you
-submit under entity focus is that visit's next turn.
+If your gateway hosts summoned entities, type `@` and pick one: a message
+that is only that chip opens a durable **visit** (`/entities` lists the
+roster with identity cards; `Enter` there does the same). The visit gets its
+own transcript and a header chip; `Alt+E` cycles focus between the agent and
+open visits, and everything you submit under entity focus is that visit's
+next turn. A chip among other words is a **mention**: your message goes to
+the agent as usual, then each mentioned entity answers in the conversation,
+in order, under its own name (`● Castor · entity`).
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
 and stream **no mid-turn progress** (both server-side boundaries — the app
@@ -2691,9 +2774,9 @@ abstractcode --help | --version
 | `/gpu` | Toggle the gateway-host GPU meter in the footer |
 | `/stance [line\|figure\|off]` | How the turn is going, from mechanical facts (effort, calls, verify-shaped share of calls); floats bottom-right over the transcript, `Ctrl+G` folds it (`/conduct` too) |
 | `/redraw` | Force a full-screen repaint (`Ctrl+L`) — recovery from an external terminal clear (Cmd+K), which damage-tracked rendering cannot detect |
-| `@name [text]` | Talk with a summoned entity: bare `@name` opens (or focuses) a durable visit; `@name <text>` opens and sends the first turn. An unknown name never becomes an agent prompt — the draft is preserved with a roster hint. A partial `@na` opens a completion dropdown (cached roster); accepting inserts the name and the NEXT Enter submits |
+| `@` + pick | Mention an entity. `@` opens a list of the entities this account may see (the cached roster); a pick is one chip in the box (Backspace removes it whole), and a typed `@name` that was not picked is plain text. A message that is only one chip opens (or focuses) that entity's durable visit. Any other message is sent as usual, then each picked entity is asked in order through `POST /api/gateway/sessions/{id}/mentions`, the next once the previous answered; each answer appears as `● Castor · entity`. An entity picked twice is asked once, and a message's entities are asked after those of the previous message in the same conversation. "Castor is in another conversation." and the gateway's other refusals are shown and the next entity is asked; "Castor cannot answer: …" (or a failed call) stops the asking and puts the message back in the box, with only the entities not answered left as chips: Enter on it unchanged asks only those, starting no new turn; each mention carries its own id, so an entity whose answer was lost on the way is never asked twice (the gateway gives back its first answer). A gateway without the route says "This gateway does not offer mentions yet." once and `@` then offers nothing. Under an entity's focus the chips ask no one (a notice says so) |
 | `/entities [name]` | Entity roster + identity cards (opens instantly on the cached roster, refreshes async — the live fetch can be slow behind the gateway's drives fold). `[name]` deep-links to that card |
-| `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live `@name` visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
+| `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
 | `/task <name> <title>` | Leave a task on the entity's desk — durable, no visit needed, works while the entity sleeps. Pickup happens at the entity's own boundary (day end, wake check, or visit close), never "immediately" |
 | `/end [name] [reason]` | Close the visit (the entity's reflection runs server-side; a visit that woke a sleeping entity restores the sleep). Refused mid-turn — entity turns are non-interruptible |
 | `/focus <name\|agent>` | Switch conversation focus (`Alt+E` cycles) |
@@ -3160,7 +3243,7 @@ recovers it.
 | `Ctrl+J` | composer | Insert a newline — works in **every** terminal (it is the LF byte on the legacy wire); the composer grows to 4 rows |
 | `Alt+Enter` | composer | Insert a newline (Option+Enter on macOS with "Option as Meta/Esc+"); `Shift+Enter` also works wherever the kitty keyboard protocol is live (kitty/Ghostty/foot from startup; iTerm2 ≥ 3.5, VS Code/Cursor, Warp via the mid-session probe) |
 | `↑` / `↓` | composer at buffer edge | Recall sent messages (input history) |
-| `Tab` / `Enter` | `/` and `@` completion dropdowns | Accept the highlighted entry (Esc dismisses; a fully-typed command or `@name` submits directly on the first Enter) |
+| `Tab` / `Enter` | `/` and `@` completion dropdowns | Accept the highlighted entry (Esc dismisses; a fully-typed command submits directly on the first Enter; an `@` row becomes a chip, and the next Enter sends) |
 | `Esc` | composer with text | Clear the composer |
 | `Esc` | scrolled up | Jump back to the live tail — that press is consumed (it never arms cancel) |
 | `Esc Esc` | while running, at the tail | Cancel the run (within 900ms). Under entity focus it explains instead: entity turns are non-interruptible |
@@ -3218,7 +3301,7 @@ recovers it.
 | attachment preview | `↑↓` scroll · `PgUp`/`PgDn` page · `Home`/`End` ends · `Enter`/`Esc` close |
 | `/attach` picker | type to filter · `↑↓` move · `Enter` descend into a folder / attach the file (marked set when non-empty) · `Space` mark files for multi-attach · `Backspace`/`←` parent folder (filter empty) · `Esc` close |
 | `/resources` | `↑↓` move (model, cache and totals rows are all reachable; admin keys act on the selected MODEL row) · `u` unload → `y`/`Enter` confirms · `f` force-unload (confirm labeled FORCED) · `n`/`Esc` cancel an armed confirm · `k` lock/unlock residency · `e` context estimate (inline result) · `r` refresh (re-probes capabilities while the contract is unconfirmed) · `Enter`/`Esc` close |
-| `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (`@name`) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
+| `/entities` | `↑↓` browse (the identity card follows) · `Enter` talk (opens its visit, as a lone `@` chip does) · `t` leave a task (title prompt) · `e` end that entity's open visit · `Ctrl+D` show per-section provenance · `Esc` close |
 | `/workspace` | the Workspace panel: `↑↓` move · `Enter` changes the row (a mode picker, the posture, **Add a workspace path**) · `Space` flips **Use my default** · `d` back to **Use my default** · `Esc` close |
 | `/settings` | `←`/`→`/`Tab`/`1`–`8` panel (an automation's Edit: `1`–`5`, or a click on a section) · `↑↓` move · `PgUp`/`PgDn`/`Home`/`End` · wheel scrolls · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close (an automation's Edit: back to the automation) |
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
@@ -4558,7 +4641,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (web)
+
+- **`@` mentions an entity from Code's chat, and every reply says who wrote it** (operator 2026-11-08; needs
+  the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway main f32c8ca9 with
+  AbstractRuntime 6706188). Typing `@` lists the entities `GET /entities` offers this account; a pick is a chip
+  (the text is never searched for `@`), and the first pick in a conversation says "Castor will read this
+  conversation's history." On send, the message starts its turn as before, then each picked entity is asked in
+  order, the next once the previous answered ("Castor is answering…" above the box). Each answer is a turn of the
+  conversation the gateway records, so it reads the same after a reload; it appears once the current reply has
+  ended. "Castor is in another conversation." (409) and an entity this account cannot mention (404, then no
+  longer offered) are said and the next one is asked; "Castor cannot answer: …" (503) or any other failure is
+  said and the message stays in the box. A gateway without the route says "This gateway does not offer mentions
+  yet." once and `@` then shows that sentence instead of names. A guided message asks its names once the
+  guidance is in; a queued message carries them to its turn.
+- **The left bubble names its author**: the agent's workflow name with an "agent" tag, or the entity's name, its
+  orb and an "entity" tag, from the turn's `author`. Without one (an older gateway) the bubble is unchanged.
+- A conversation that opens on an entity's answer continues with its newest agent turn's workflow (an answer is
+  never taken for the conversation's workflow, which said "no longer available").
+- On the vendored panel-chat of AbstractUIC main aab7240 (local 0.9.9, not published; `npm run sync:conversation`).
+
+- **"Iteration limit" moved to Model → Limits & streaming, as the shared kit control** (AbstractUIC ui-kit 0.9.26
+  `IterationLimitField`, operator 2026-11-08). It is the third row after "Context token limit" and "Stream replies"
+  (automations: "Limits"), and was the only row of Agent → "Instructions & limits" → "Run limits", now just
+  "Instructions". Empty, it names what applies: "Gateway default (12)" when the gateway stores
+  `agents.max_iterations` (read from `capabilities.agent_limits.max_iterations`), "Workflow default" otherwise and
+  always for an automation (the gateway default never applies to scheduled runs). A value that is not a whole number
+  of 1 or more says so; past 200 a warning line; "Use default" clears it. A set value is still sent as
+  `input_data._limits.max_iterations`; after a start the field says which limit that run got, from the gateway's
+  `limits` receipt ("Last run: 12 iterations (gateway default)."). Needs the local ui-kit 0.9.26 pack, installed
+  `--no-save` (the lockfile follows the kit publish).
+- `web/package.json` declares the kit versions the web app needs: `@abstractframework/ui-kit` ^0.9.26 (was ^0.9.18,
+  which has no `IterationLimitField`) and `@abstractframework/panel-chat` ^0.9.9 (was ^0.9.1, which has no
+  `chatAuthorOf` / `ChatAuthor`, imported for the reply's author). Neither is published yet: `package-lock.json` is
+  relocked when they are, and `npm run check:lock` fails until then.
+
+### Fixed (web)
+
+- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
+  message's turn, the entity, its place in the message). If the answer was lost on the way back (a
+  timeout, a dropped connection) and you send the same words again, the gateway returns the answer
+  the entity already gave instead of asking it twice; a new message is asked as new. Needs an
+  AbstractGateway that keeps mention ids (main f0f23bb0 or later).
+- **Mentions, client review 2026-11-09.** Resending after an entity could not answer (503) no longer asks again
+  the entity that already answered, nor starts the person's turn again: the box keeps the words and only the chips
+  not answered, and sending the same words again asks only those, with the same `repeat_of` and their first
+  `mention_index` (a guided message the same way). Other words are a new message. An entity picked twice is asked
+  once. The person's words fold under their own turn only while that turn is on screen (a mention turn shown alone
+  keeps its question). An uncoded 405 means "This gateway does not offer mentions yet." like an uncoded 404. Stop
+  during the mentions says who was not asked ("Stopped before asking Hypnos."). Kit fixes from AbstractUIC
+  9aad042 + aca0b07 (vendored copy re-synced; `node_modules` panel-chat 0.9.9 + ui-kit 0.9.26 local packs, `--no-save`):
+  a chip picked while a send is in flight stays, Enter waits while the `@` list loads, a picked name is not
+  offered again, and the list spans the box on a phone.
+
+### Added (terminal, ships with the next terminal release)
+
+- **`@` mentions an entity from the conversation, and every answer says who wrote it** (operator
+  2026-11-08; needs the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway
+  main f32c8ca9 + 06e9968c/0997ce4a with AbstractRuntime 6706188 + 1abcc26/cd65610; built on
+  AbstractTUI main b06ba9a through a temporary `[patch.crates-io]` that goes when AbstractTUI 0.8.0
+  is published). Typing `@` lists the entities
+  this account may see; a pick is one chip, which Backspace removes whole. A typed `@name` that was
+  not picked is plain text, sent as typed (a leading `@name` used to be read out of the text and
+  route the message). Before the first message that names an entity in a conversation, the line
+  above the box says "Castor will read this conversation's history." A message that is only one chip
+  opens that entity's conversation, as `@name` did. Any other message is sent as before, then each
+  picked entity is asked in order, the next once the previous answered, and each answer appears as
+  "● Castor · entity" with the mark in the entity's own colour. Each call names the turn the same
+  words started (`repeat_of`), so a reopened conversation shows those words once, with each
+  mention's answer right after that turn, the answers in the order they came. "Castor is in another
+  conversation.", "Castor cannot be mentioned here." and the gateway's other refusals are shown and
+  the next entity is asked; "Castor cannot answer: …" is shown and the message goes back into the
+  box. A gateway without the route says "This gateway does not offer mentions yet." once, and `@`
+  then offers nothing. Under an entity's focus, or inside a slash command, the chips ask no one,
+  and a notice says so.
+- **The answer rule names its author** when the gateway gives one: "✦ basic-agent · agent" for the
+  agent's turn (on the streaming reply as it arrives, on the answer when the turn ends, and from the
+  history on reopen), "● Castor · entity" for an entity. Without one (an older gateway) the rule is the plain "assistant" as before. The Markdown
+  export uses the same name, and the SFT export never takes an entity's reply as the agent's answer.
+
 ### Fixed (terminal, ships with the next terminal release)
+
+- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
+  message's turn, the entity, its place in the message). If an answer was lost on the way back and
+  you press Enter on the message again, the gateway returns the answer the entity already gave
+  instead of asking it twice; a new message is asked as new. Needs an AbstractGateway that keeps
+  mention ids (main f0f23bb0 or later).
+- **Mentions, client review 2026-11-09.** "Castor cannot answer: …" (503) or a failed call now stops the asking
+  (the next entity was asked anyway), and the message comes back with only the entities not answered left as chips
+  (an answered one reads as its plain name). Enter on it unchanged asks only those, with the words as first sent,
+  the same `repeat_of` and their first `mention_index`: no new turn, and an entity that answered is never asked
+  again. An entity picked twice is asked once. One conversation runs one message's mentions at a time: the next
+  message's wait for them, in order. An uncoded 405 means "This gateway does not offer mentions yet." like an
+  uncoded 404.
 
 - **`/sessions` and `--resume` leave AbstractNote's own work out.** A session whose first turn runs
   an AbstractNote workflow (a note captured from the watch or the web) is not a conversation: it is
@@ -4566,6 +4741,270 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Reflect on my notes", "Consolidate my notes") leave the automations list and its counts.
 - **A conversation without a known first message is called "Untitled conversation"**, never
   "Conversation" followed by part of its session ID.
+- **The mouse wheel scrolls one automation, and every screen that windows its content.** One
+  automation's screen painted its runs as a window that only followed the ↑↓ cursor, so the wheel
+  did nothing and a long reply could never be read past the window. The wheel now scrolls the runs
+  over the runs and the selected run's output anywhere else on the screen, three rows a notch. The
+  same gap is closed on the automations list, the New automation steps, the workspace screen, an
+  automation's or a run's folder, `/status`, `/mcp` and `/resources` (the rows of `/status` and
+  `/mcp` past their window were out of reach before: their arrow and page keys now scroll them
+  too), the file preview, and the entities roster and card.
+
+### Changed (terminal)
+
+- **One automation reads as panels.** The header panel (the Active switch, the schedule with the
+  last and next run, what runs now and what waits for you) sits beside the Details panel (runs and
+  revision, context, tools, workflow, folder as labelled rows). Below, the runs are a table, newest
+  first under the waits that need you (#, status in its colour, when, tick), and the selected row
+  has its own panel: the run's output as Markdown (paragraphs, headings, bullets), its artifacts
+  folded to "5 artifacts — l lists them" (`l` lists their names, again folds them), then its task.
+  PgUp/PgDn/Home/End scroll that panel; every other key works as before. The key hints are two rows:
+  the automation's keys, then the selected row's. Phone-width and short terminals stack the
+  panels without frames and put the details at the end of the output.
+
+## [web 0.15.21] - 2026-11-08 (local build, not published)
+
+- Mentions: the person's words are folded by `repeat_of`; `entity_not_found` told apart from a missing route; the author rides live replies from the first frame; the 422 sentence shown (Entity session, 177ae6e).
+
+## [web 0.15.20] - 2026-11-08 (local build, not published)
+
+- `@entity` mentions from the composer: a structured chip summons the entity into this conversation through the gateway's session mention route; the answering entity, agent or person is named on every left bubble from the turn's `author` (Entity session, e95562c).
+- Model → Limits & streaming: "Iteration limit", the kit's shared `IterationLimitField`; the applied source ("Gateway default (N)") is shown from the run's `limits` (c6ed096 + the remainder carried in e95562c).
+- Kit: ui-kit 0.9.26 and panel-chat 0.9.9 vendored from the local packs (`--no-save`; the lockfile follows the publish).
+
+## [web 0.15.19] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.17 (`@abstractframework/panel-chat` 0.9.9, `@abstractframework/ui-kit` 0.9.25), vendored
+from local packs (installed with `--no-save`: the floors and the lockfile follow the kit publish).
+
+### Changed
+
+- **The run status always says what the gateway last said about the run.** While the page cannot reach the gateway it
+  keeps that status unchanged ("Working", "Approval needed", …) with a muted "as of 12:21:34" after it; it never reads
+  "Reconnecting" or "Disconnected".
+- **Not reaching the gateway is one notice, with Retry now and Stop retrying.** The banner says "Can't reach the
+  gateway: <reason>. Retrying…". Stop retrying pauses the attempts ("Not retrying. Retry now to reconnect."); Retry now
+  reconnects at once and reads the conversation again. The page still retries on its own until stopped, backing off to
+  every 30 seconds. The composer says "Can't reach the gateway; your message can be sent when it is back.", and the
+  sidebar no longer adds its own "Failed to fetch" line.
+
+## [web 0.15.18] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.16 (`@abstractframework/panel-chat` 0.9.8, `@abstractframework/ui-kit` 0.9.25), vendored
+from local packs (installed with `--no-save`: the floors and the lockfile follow the kit publish).
+
+### Fixed
+
+- **A conversation comes back by itself after the app server or the gateway restarts** (backlog 1163). The page gave
+  up after about three seconds and said "Disconnected": a restart under an open page left it stale, and an approval
+  raised afterwards appeared only in the tray. It now keeps reconnecting while the run is live (backing off to one
+  attempt every 30 seconds), reads the whole conversation again on each reconnection, and shows a question or an
+  approval raised meanwhile within seconds of the server's return, with no reload. On the test gateway: the approval
+  card appeared 2.4 s after the app server came back and 0.3 s after the gateway came back; before, never.
+- **The page says what is happening meanwhile.** The run status bar reads "Reconnecting" with the reason, and the
+  composer says "Reconnecting to this conversation. You can send again as soon as it is back." while sending is off.
+
+## [web 0.15.17] - 2026-11-08 (local build, not published)
+
+### Changed
+
+- **Sidebar row titles are regular weight**, conversations and automations alike, the selected row too; the selected
+  row keeps its tint and hairline.
+- **A conversation's turn count is the real one when the gateway knows it.** A gateway that sends `session_totals`
+  (`{<session_id>: {"turns": N}}`) with its run listing gets the exact count, with no "≥". A conversation only partly
+  on the listing page shows no tool count (a sum over some of its turns would be no value); one wholly on the page
+  keeps its exact tool count. An older gateway without `session_totals` still gets the "≥" lower bound.
+
+## [web 0.15.16] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.15 (`@abstractframework/panel-chat` 0.9.7, `@abstractframework/ui-kit` 0.9.25), vendored
+from local packs (installed with `--no-save`: the floors and the lockfile follow the kit publish).
+
+### Fixed
+
+- **A workflow waiting for an event says so again, and you can send the event by hand.** Since the conversation reads
+  the gateway's replay view (web 0.13.0), a run parked on an event with no question read "Working", and the
+  "Waiting for an event" card with "Event data (JSON)" and "Send event" was gone. Both are back.
+- **A turn that ends with its tools shows its figures again** ("1 tool · 1 file changed", tokens, time), under its
+  tool group: they used to ride only on a written reply.
+
+### Tests
+
+- The "live thinking" browser check feeds the replay view (what Code reads since 0.13.0) instead of the old ledger
+  bundle; its assertions are unchanged. The whole `workspace.spec.ts` (18 checks) passes on the test gateway.
+
+## [web 0.15.15] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.14 (0.10.13).
+
+### Changed
+
+- **The sidebar's section headers have a colour each** (operator 2026-11-08: "at least use some colors for the
+  headers"): Conversations in the theme's information blue, Automations in the amber "Needs you" already uses; the
+  count beside Automations wears the same amber. Light and dark themes.
+- **The symbols are back on every row** (operator: "put them back"): a conversation reads its chat icon and turn count,
+  its wrench and tool-call count (when there are any) and its clock and time, exactly as the shared card draws them
+  (a count the gateway gives as a lower bound keeps its "≥", "At least N turns" for screen readers); an automation
+  reads its runs, schedule and next-run symbols, "Needs you" and its new-results count. The words 0.15.13 and 0.15.14
+  had put in their place are gone. Only the automation's schedule keeps its compact form, beside the same clock
+  ("Daily 08:00", "Every 30 min", "Weekdays 09:00"). The line wraps rather than cutting anything.
+
+## [web 0.15.14] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.13 (0.10.13).
+
+### Changed
+
+- **An automation's schedule always fits its sidebar row.** The row shows a compact form built from the recorded
+  rule's fields ("Daily 08:00", "Every 8 h", "Weekly Mon, Thu 09:00", "Monthly 1st 07:00", "Every 2 min"); its time
+  zone and bounds stay in the details. Nothing inside a row's details line is ever cut with "…": a part that still
+  does not fit (the schedule first, then a conversation's tool count, then the next run time) leaves the line whole
+  and is named in the row's tooltip; everything stays in the conversation or automation details.
+- With a mouse, a row's archive button appears over the row's right edge on hover instead of reserving its width on
+  every row.
+
+### Tests
+
+- The Code browser tests that still looked for the cards of before (`.code-session`, the card "⋯" archive menu, the
+  2 px open-card frame, "Archived" without the "Paused" footer beside it, a 75 % wide message, the "Queue" button
+  without typed words) now follow today's rows and composer with the same intent.
+
+## [web 0.15.13] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.12 (0.10.13). The sidebar's own styles only; the shared cards are unchanged.
+
+### Changed
+
+- **Quieter Conversations and Automations lists** (operator 2026-11-08: "I am not a huge fan of the design"). The
+  cards become list rows: no frame or tinted background per card, one rhythm (8 px rows, 12 px sides, 2 px between
+  rows), one type scale (names 13 px medium, details 12 px muted), every row the same height. The open conversation
+  is a soft tone with a hairline. The section headers are a light label row instead of a raised band.
+- **Details in words, on one line:** "3 turns · just now"; for an automation "7 runs · next 21h · Every day at 08:00
+  (Europe/Paris)", where the schedule's words end in "…" in a narrow sidebar (hover shows the whole rule). While an
+  automation needs you, "Needs you" takes the place of the next run time. The state marker and the new-results count
+  share one column at the right edge.
+- **A long name is never cut silently:** it wraps to two lines; beyond that it ends in "…" and the whole name shows in
+  the tooltip on hover and on keyboard focus.
+
+## [web 0.15.12] - 2026-11-08 (local build, not published)
+
+Same AbstractUIC as web 0.15.11 (0.10.13: `@abstractframework/panel-chat` 0.9.6, `@abstractframework/ui-kit` 0.9.24).
+
+### Fixed
+
+- **Sending again drops an old stop at once.** A Stop remembered from before a reload is dropped the moment you send
+  again in that conversation, before the new message leaves, so your new reply can never be taken for the one you
+  stopped. (Before, it was dropped only when the gateway answered the new start, and could cancel the new reply.)
+- **The remembered stop looks from the moment you sent.** A reply the gateway created between your Send and your Stop
+  (more than 1 s before the Stop, on a slow start) is now found and stopped after a reload.
+- **An unmatched stop is never dropped silently.** When no reply is found for a remembered stop, the conversation says
+  "The stop you pressed before the reload could not be matched to a reply; if a reply appears here, stop it."
+- The choice shown when several replies match uses the kit's buttons, names each reply by its time and its number
+  ("1 of 2"), and no longer says "runs".
+
+### Corrected (web 0.15.11 overclaimed)
+
+- "A Stop remembered across a reload never cancels the wrong run" was too strong. The exact rule: after a reload, Code
+  cancels a reply only when exactly one unfinished reply of that conversation started between 1 s before your Send
+  and 60 s after your Stop; when several do, it asks you. Known limit: a reply started in ANOTHER browser tab of the
+  same conversation inside that window counts as a match too, so it can be the one stopped.
+
+## [web 0.15.11] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.13 (`@abstractframework/panel-chat` 0.9.6, `@abstractframework/ui-kit` 0.9.24), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.10.
+
+### Fixed
+
+- **Stop while the second message of a conversation is starting.** The message vanished and the top bar kept the
+  previous answer's "Completed". Now "Stopping…" stays until the run of THIS message is shown stopped, and the
+  message stays on screen meanwhile.
+- **A Stop remembered across a reload never cancels the wrong run.** The next page cancels a run only when exactly one
+  unfinished run of that conversation started at the moment you pressed Stop (from 1 s before to 60 s after). When
+  none is listed yet it waits (90 s at most); when several match, it cancels nothing and the conversation shows them,
+  with one Stop button each, so you choose. Starting a new message in that conversation drops the old stop. A start
+  that the network cut (no answer, page still open) is not guessed later: Code says it cannot tell whether a reply
+  began.
+- **No background requests from a hidden tab.** The tab's retry for a remembered stop pauses while the tab is hidden.
+- **Turning Read aloud off also closes the player of a paused reply.**
+
+### Corrected (web 0.15.10 overclaimed)
+
+- "The message box is cleared … and the run the gateway returns is stopped the moment it arrives" held only in a new
+  conversation; the second message of a conversation was broken (fixed above).
+- "A stopped start never keeps running unseen" was not true: a stop remembered across a reload could match another
+  run first and miss its own. Now it cancels only a single exact match, asks you when several match, and still cannot
+  act when the tab is closed before the gateway answers.
+- "Leaves no audio player running" was not true for a paused reply (fixed above); a reply that is already speaking
+  still finishes first.
+
+## [web 0.15.10] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.12 (`@abstractframework/panel-chat` 0.9.5, `@abstractframework/ui-kit` 0.9.23), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.9.
+
+### Fixed
+
+- **Stop answers at once, even while the run is starting.** On a slow gateway a Stop pressed right after Send looked
+  ignored for seconds. Now the top bar says "Stopping…" at once, the message box is cleared and back to the
+  microphone and Send, and the run the gateway returns is stopped the moment it arrives ("Stopped").
+- **A stopped start never keeps running unseen.** If you reload, or open another conversation, before the gateway has
+  answered, Code still stops that run: this tab remembers the stop until it is done.
+- **No "Stop" tooltip over the Send button after a stop.**
+- **Turning Read aloud off** no longer speaks a reply that was still loading, and leaves no audio player running.
+- **Read aloud on a phone or tablet:** a tap keeps the reply player ready, so the next reply is spoken.
+- **The speaker Test's failure message in Safari** suggests Re-open audio, not another output.
+
+### Known limits
+
+- Headphones connected while the model is thinking: Safari cannot start the reply by itself; Code says "Audio
+  playback is paused by the browser. Press Play to try again."
+- The macOS output switched less than 30 s after your last click or key press: the next reply may be silent with no
+  message. Press Play (after 30 s of silence) or pick Re-open audio in Voice settings.
+- A saved speaker that is no longer connected: replies play on the system default output without saying so.
+- A stop is remembered for this browser tab only: closing the tab before the gateway answers leaves that run going.
+- "Request cancelled." is still shown inside your own message after a stop.
+
+## [web 0.15.9] - 2026-11-08 (local build, not published)
+
+Built on AbstractUIC 0.10.11 (`@abstractframework/panel-chat` 0.9.4, `@abstractframework/ui-kit` 0.9.22), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.8.
+
+### Fixed
+
+- **Stop pressed right after sending the first message of a new conversation stops it.** It showed "Could not
+  stop the run: No workflow run is loaded" and the reply arrived anyway: the run did not exist yet. Now a Stop
+  before the gateway has started the run starts nothing; a Stop while it is starting stops the run as soon as the
+  gateway returns it ("Stopped" at the top, the message box back to the microphone and Send).
+- **Play and Re-open audio start the sound inside your click** (Safari only lets a page start sound there), and
+  Code keeps at most one audio player open, only while Read aloud is on; turning Read aloud off releases it.
+- **The speaker Test says so when the chime did not finish** instead of "Chime played", and never waits forever.
+
+### Known limits
+
+- Headphones connected while the model is thinking: Safari cannot start the reply by itself; after 1.5 s Code
+  says "Audio playback is paused by the browser. Press Play to try again."
+- The macOS output switched less than 30 s after your last click or key press: the next reply may be silent with
+  no message. Press Play (after 30 s of silence) or pick **Re-open audio** in Voice settings.
+
+## [web 0.15.8] - 2026-11-07 (local build, not published)
+
+Built on AbstractUIC 0.10.10 (`@abstractframework/panel-chat` 0.9.3, `@abstractframework/ui-kit` 0.9.21), vendored
+from local packs; the floors and the lockfile follow the kit publish. Same gateways as web 0.15.7.
+
+### Fixed
+
+- **After Stop the message box is back to normal**: the microphone and Send, nothing else. "Stopped" is shown
+  in the run status at the top of the conversation, not in the message box.
+- **Read aloud keeps working when the sound output changes** (Safari, Bluetooth headphones). Replies and the
+  speaker Test could stay silent until the macOS output was switched away and back: the page kept one audio
+  player for its whole life. Code now opens a new one after a device change, when Play is pressed on a reply
+  that did not start or after 30 seconds of silence, and when you pick **Re-open audio**. With Read aloud on,
+  your clicks and key presses keep the player ready so the next reply is spoken. When Safari holds a reply
+  back, Code says so instead of showing a Play button that does nothing.
+- **Settings → Output device can always be changed.** It offers "Follow the system output (default)", your
+  speakers where the browser can switch them (Chrome, Edge), and "Re-open audio". Safari says it follows the
+  output chosen in macOS Sound settings.
 
 ## [web 0.15.7] - 2026-11-07
 

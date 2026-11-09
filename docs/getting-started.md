@@ -145,6 +145,49 @@ In the browser, open the rail's **Workflow** panel. Its picker starts with
 automation) selected in the sidebar; see [`web.md`](web.md#working-in-the-interface).
 In the terminal, `/settings` opens the same panels.
 
+## Mentioning an entity
+
+If your gateway hosts entities, you can bring one into a conversation by name, in
+either client. Type `@` in the message box: a list shows the entities your account
+can see. Type more of a name to narrow it, then pick one (arrow keys to move, Enter
+or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
+after `@` without picking it stays ordinary text. The first time you name an entity
+in a conversation, a line tells you "Castor will read this conversation's history."
+
+When you send, your message goes to the agent as usual. Then each entity you picked
+is asked in turn, in the order you picked them, each once the previous one has
+answered, so a later entity reads the earlier answers. An entity picked twice is
+asked once. Every reply says who wrote it: in the browser, the bubble shows the
+agent's workflow name with an "agent" tag, or the entity's name, its orb and an
+"entity" tag; in the terminal, the reply reads `✦ basic-agent · agent` or
+`● Castor · entity`, in the entity's colour. The answers belong to the conversation,
+so they show again when you reopen it, in either client.
+
+- **In the browser**, "Castor is answering…" shows above the message box while an
+  entity answers, and its answer appears once the current reply has ended. You can
+  send your next message once the entities have answered; Stop ends the asking and
+  says who was not asked ("Stopped before asking Hypnos.").
+- **In the terminal**, a message that is only one chip opens that entity's own
+  conversation instead (a visit; see
+  [working with entities](../tui/docs/getting-started.md#working-with-entities)). A
+  conversation asks one message's entities at a time: send another message with
+  chips meanwhile and its entities are asked next ("Pollux: asked when the mentions
+  before end").
+
+When a mention cannot be answered, the client says so:
+
+- "Castor is in another conversation." The entity is busy elsewhere: it is skipped
+  and the next one is asked.
+- "Castor cannot be mentioned here." Your account cannot mention that entity: it is
+  skipped and the next one is asked.
+- An entity that cannot answer right now says so, and the asking stops. Your message
+  goes back into the message box with only the entities that did not answer still as
+  chips. Send it again unchanged to ask only those: the agent is not asked again, and
+  an entity that already answered is never asked twice. Different words are a new
+  message.
+- "This gateway does not offer mentions yet." The gateway cannot take mentions: the
+  `@` list then offers no names.
+
 ## Where the files are
 
 The agent reads and writes files on the gateway host, in the run's workspace.

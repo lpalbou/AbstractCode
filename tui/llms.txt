@@ -24,7 +24,8 @@
 > and dictates through the gateway's voice routes (`/voice`, Ctrl+P,
 > Ctrl+R; host audio via AbstractVoice), and keeps a durable
 > session whose history the gateway replays server-side. It also talks
-> with gateway-hosted summoned entities (`@name`). One crate, three
+> with gateway-hosted summoned entities (`@` + pick: a chip alone opens a
+> visit, a chip in a message mentions the entity). One crate, three
 > dependencies (abstracttui, ureq, serde_json). MIT licensed.
 
 Selected assistant prose, tables and code can be quoted into the coding draft
@@ -50,7 +51,7 @@ through Explain, Use as context or Change; review and send explicitly. See the
 - [Reference](docs/api.md): Every CLI option and env var (including
   `--workflow default`, `--stream`, `--mtp`), slash commands
   (including `/settings`, `/activity`, `/archive`, `/sessions`, `/voice`, `/speak`, `/dictate`, `/workflow`, `/files`, `/automations`, `/automation`, `/stream`, `/docs`, `/about`, `/model`, `/mtp`,
-  `/workspace send`, `@name`, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
+  `/workspace send`, `@` mentions, `/entities`, `/task`, `/end`, `/queue`, `/goal`,
   `/permissions`, `/workspace`, `/attach`, `/export`, `/context`, `/gpu`,
   `/resources`, `/redraw`), the Workspaces chooser (`/workspace`: this
   conversation, My default workspaces, an automation) and the command
