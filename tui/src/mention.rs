@@ -162,13 +162,50 @@ pub fn restore_draft(raw: &str, chips: &[MentionCall], keep: &[MentionCall]) -> 
     out
 }
 
+/// The message part of its calls' `mention_id` (AbstractGateway f0f23bb0:
+/// a resend with the same id gets the first answer back, the entity is
+/// never asked twice): the person's own turn (`repeat_of`) when the words
+/// started one, else an id minted now. Taken ONCE per message and held with
+/// it ([`crate::gateway::mentions::Unsent`]), so a resend names the same.
+pub fn message_key(repeat_of: Option<&str>) -> String {
+    match repeat_of.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(run_id) => run_id.to_string(),
+        None => mint_message_id(),
+    }
+}
+
+/// A fresh message id, `msg-<12 hex>-<n>`: the session-id mint (time, pid)
+/// plus a process counter, so two messages never share one, even within
+/// one clock tick.
+pub fn mint_message_id() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(
+        "msg-{}-{n}",
+        crate::config::mint_session_id().trim_start_matches("acode-")
+    )
+}
+
+/// One call's `mention_id`: `<message>:<entity>:<mention_index>` — the same
+/// on every resend of that mention, another for a new message.
+pub fn mention_id(message: &str, call: &MentionCall) -> String {
+    format!("{}:{}:{}", message.trim(), call.entity, call.index)
+}
+
 /// The mention call's body: the message as typed, chips spelled `@name`,
-/// and `repeat_of` — the run id of the person's own turn that carries the
+/// `repeat_of` — the run id of the person's own turn that carries the
 /// same words (the agent turn this message started), so every client shows
-/// those words once. Absent when the message started no turn (a steer, a
-/// refused start).
-pub fn request_body(text: &str, call: &MentionCall, repeat_of: Option<&str>) -> Value {
-    let mut body = json!({"entity": call.entity, "text": text, "mention_index": call.index});
+/// those words once; absent when the message started no turn (a steer, a
+/// refused start) — and its `mention_id` from the message's key
+/// ([`message_key`]).
+pub fn request_body(
+    text: &str,
+    call: &MentionCall,
+    repeat_of: Option<&str>,
+    message: &str,
+) -> Value {
+    let mut body = json!({"entity": call.entity, "text": text, "mention_index": call.index,
+        "mention_id": mention_id(message, call)});
     if let Some(run_id) = repeat_of.filter(|r| !r.is_empty()) {
         body["repeat_of"] = json!(run_id);
     }
@@ -537,14 +574,36 @@ mod tests {
             index: 1,
         };
         assert_eq!(
-            request_body("@Castor and @Pollux?", &call, None),
-            json!({"entity": "pollux", "text": "@Castor and @Pollux?", "mention_index": 1}),
+            request_body("@Castor and @Pollux?", &call, None, "msg-1"),
+            json!({"entity": "pollux", "text": "@Castor and @Pollux?", "mention_index": 1,
+                "mention_id": "msg-1:pollux:1"}),
             "no turn carried the words: no repeat_of"
         );
-        assert_eq!(
-            request_body("@Castor and @Pollux?", &call, Some("run-7"))["repeat_of"],
-            "run-7"
-        );
+        let body = request_body("@Castor and @Pollux?", &call, Some("run-7"), "run-7");
+        assert_eq!(body["repeat_of"], "run-7");
+        assert_eq!(body["mention_id"], "run-7:pollux:1");
+    }
+
+    /// One answer per mention (AbstractGateway f0f23bb0): the key's message
+    /// is the turn the words started, else an id minted for the message —
+    /// never empty, never shared by two messages.
+    #[test]
+    fn the_message_key_is_the_turn_else_a_fresh_id() {
+        assert_eq!(message_key(Some("run-7")), "run-7");
+        let (a, b) = (message_key(None), message_key(Some("  ")));
+        assert!(a.starts_with("msg-") && b.starts_with("msg-"), "{a} {b}");
+        assert_ne!(a, b, "two messages, two keys");
+        let call = MentionCall {
+            entity: "castor".into(),
+            name: "Castor".into(),
+            index: 0,
+        };
+        assert_ne!(mention_id("run-7", &call), mention_id("run-8", &call));
+        assert_eq!(mention_id(&a, &call), format!("{a}:castor:0"));
+        // Unique even within one clock tick.
+        let many: std::collections::HashSet<String> =
+            (0..20_000).map(|_| mint_message_id()).collect();
+        assert_eq!(many.len(), 20_000);
     }
 
     #[test]

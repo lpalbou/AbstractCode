@@ -385,7 +385,8 @@ fn a_409_is_a_notice_row_and_the_next_mention_still_answers() {
 }
 
 /// The `Cmd::Mentions` a send produced, as the lane receives it (the
-/// runner resolves `repeat_turn` to the started run: `run-a1` here).
+/// runner resolves `repeat_turn` to the started run: `run-a1` here, and
+/// the message's `mention_id` key from it).
 fn lane_message(cmds: Vec<Cmd>) -> MentionMessage {
     cmds.into_iter()
         .find_map(|c| match c {
@@ -395,16 +396,22 @@ fn lane_message(cmds: Vec<Cmd>) -> MentionMessage {
                 draft,
                 chips,
                 repeat_of,
+                message,
                 calls,
                 ..
-            } => Some(MentionMessage {
-                session_id,
-                text,
-                draft,
-                chips,
-                repeat_of: repeat_of.or(Some("run-a1".into())),
-                calls,
-            }),
+            } => {
+                assert!(message.is_none(), "a new message: the runner keys it");
+                let repeat_of = repeat_of.or(Some("run-a1".into()));
+                Some(MentionMessage {
+                    session_id,
+                    text,
+                    draft,
+                    chips,
+                    message: abstractcode::mention::message_key(repeat_of.as_deref()),
+                    repeat_of,
+                    calls,
+                })
+            }
             _ => None,
         })
         .expect("mention sent")
@@ -492,8 +499,15 @@ fn a_503_after_an_answer_puts_back_only_the_unsent_chip_and_a_resend_asks_only_i
                 calls,
                 repeat_of,
                 repeat_turn,
+                message,
                 ..
-            } => Some((text.clone(), calls.clone(), repeat_of.clone(), *repeat_turn)),
+            } => Some((
+                text.clone(),
+                calls.clone(),
+                repeat_of.clone(),
+                *repeat_turn,
+                message.clone(),
+            )),
             _ => None,
         })
         .collect();
@@ -503,9 +517,10 @@ fn a_503_after_an_answer_puts_back_only_the_unsent_chip_and_a_resend_asks_only_i
             TEXT.to_string(),
             vec![pollux.clone()],
             Some("run-a1".to_string()),
-            false
+            false,
+            Some(msg.message.clone()),
         )],
-        "only Pollux, the words as first sent, the same repeat_of, its first index"
+        "only Pollux, the words as first sent, the same repeat_of and mention_id key, its first index"
     );
     assert!(h.store.mention_retry.get_untracked().is_none(), "used once");
 }

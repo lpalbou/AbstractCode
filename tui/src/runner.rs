@@ -424,6 +424,11 @@ pub enum Cmd {
         /// A resend of a stopped chain: the turn its words repeat, as
         /// first sent (wins over `repeat_turn`; no Start went out).
         repeat_of: Option<String>,
+        /// A resend of a stopped chain: the key its calls were first sent
+        /// with (their `mention_id`s, so the gateway answers each once).
+        /// None for a new message: the runner takes
+        /// `mention::message_key(repeat_of)`.
+        message: Option<String>,
         calls: Vec<crate::mention::MentionCall>,
     },
     /// `/automations` lane: every action runs on its own thread
@@ -665,6 +670,14 @@ struct Runner {
     last_start: Option<(String, String)>,
     /// One `@entity` mention chain at a time per session.
     mention_lanes: crate::gateway::mentions::MentionLanes,
+}
+
+/// The key of a message's mention calls (each call's `mention_id`): a
+/// resend's own (as first sent), else `mention::message_key(repeat_of)`.
+fn mention_message(message: Option<String>, repeat_of: Option<&str>) -> String {
+    message
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| crate::mention::message_key(repeat_of))
 }
 
 /// The `repeat_of` of a message's mention calls: the run its words just
@@ -1197,6 +1210,7 @@ impl Runner {
                 chips,
                 repeat_turn,
                 repeat_of,
+                message,
                 calls,
             } => {
                 // The Start these words made ran just before on this
@@ -1204,6 +1218,7 @@ impl Runner {
                 // it started in this session. A resend names its own.
                 let repeat_of = repeat_of
                     .or_else(|| repeat_of_turn(&self.last_start, &session_id, repeat_turn));
+                let message = mention_message(message, repeat_of.as_deref());
                 let client = crate::gateway::entities::client_for(&self.client);
                 crate::gateway::mentions::spawn_mentions(
                     client,
@@ -1216,6 +1231,7 @@ impl Runner {
                         draft,
                         chips,
                         repeat_of,
+                        message,
                         calls,
                     },
                 );
@@ -6685,6 +6701,11 @@ mod tests {
         assert_eq!(repeat_of_turn(&last, "s1", false), None, "a steer");
         assert_eq!(repeat_of_turn(&last, "s2", true), None, "another session");
         assert_eq!(repeat_of_turn(&None, "s1", true), None, "the start failed");
+        // Their mention_id key: a resend's own wins; else the turn; else minted.
+        assert_eq!(mention_message(Some("msg-9".into()), Some("r1")), "msg-9");
+        assert_eq!(mention_message(None, Some("r1")), "r1");
+        assert!(mention_message(None, None).starts_with("msg-"));
+        assert_eq!(mention_message(Some(" ".into()), Some("r1")), "r1");
 
         // The runner records the run a start made, and forgets it when
         // the next start fails.

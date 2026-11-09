@@ -12,6 +12,12 @@
 //! ([`Unsent`]); sending it again unchanged asks only those, with the same
 //! `repeat_of` and no new turn (client review 2026-11-09 B2).
 //!
+//! One answer per mention (AbstractGateway f0f23bb0): every call carries
+//! `mention_id = <message>:<entity>:<mention_index>`, the message being its
+//! turn (`repeat_of`) or an id minted once for it (`mention::message_key`).
+//! The resend carries the same key ([`Unsent::message`]), so a call whose
+//! answer was lost gets that first answer back, never a second one.
+//!
 //! One chain at a time per session ([`MentionLanes`], the contract's "one
 //! mention at a time per session"): a message's chain waits for the
 //! previous chain of the same session, in send order.
@@ -77,28 +83,32 @@ impl Outcome {
 /// repeat, and the calls not answered (the stopped one and those after it,
 /// with their first `mention_index`). Submitting that exact draft again
 /// asks only these calls — never a new turn, never an entity that answered.
+/// `message`: the key the calls were first sent with (their `mention_id`s).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unsent {
     pub session_id: String,
     pub draft: String,
     pub text: String,
     pub repeat_of: Option<String>,
+    pub message: String,
     pub calls: Vec<MentionCall>,
 }
 
 /// Run one message's calls IN ORDER on the calling thread: each call is
 /// sent after the previous one answered. `on` receives every outcome as it
-/// lands; the chain stops after [`Outcome::ends_chain`].
+/// lands; the chain stops after [`Outcome::ends_chain`]. `message`: the
+/// message's key (each call's `mention_id`).
 pub fn run_chain(
     client: &EntityClient,
     session_id: &str,
     text: &str,
     repeat_of: Option<&str>,
+    message: &str,
     calls: &[MentionCall],
     mut on: impl FnMut(&MentionCall, Outcome),
 ) {
     for call in calls {
-        let body = mention::request_body(text, call, repeat_of);
+        let body = mention::request_body(text, call, repeat_of, message);
         let outcome = Outcome::from_result(client.mention(session_id, &body));
         let stop = outcome.ends_chain();
         on(call, outcome);
@@ -120,6 +130,9 @@ pub struct MentionMessage {
     pub chips: Vec<MentionCall>,
     /// The run id of the turn these words started, when they started one.
     pub repeat_of: Option<String>,
+    /// The message's key for every call's `mention_id`
+    /// (`mention::message_key`; a resend carries the first send's).
+    pub message: String,
     pub calls: Vec<MentionCall>,
 }
 
@@ -133,6 +146,7 @@ impl MentionMessage {
             draft: mention::restore_draft(&self.draft, &self.chips, &calls),
             text: self.text.clone(),
             repeat_of: self.repeat_of.clone(),
+            message: self.message.clone(),
             calls,
         }
     }
@@ -214,6 +228,7 @@ pub fn spawn_mentions(
             &msg.session_id,
             &msg.text,
             repeat.as_deref(),
+            &msg.message,
             &msg.calls,
             |call, outcome| {
                 let unsent = outcome.keeps_message().then(|| msg.unsent_from(call));
@@ -399,6 +414,7 @@ mod tests {
             "sess-1",
             "@Castor @Pollux does it hold?",
             Some("run-a1"),
+            "run-a1",
             &calls(),
             |call, outcome| {
                 log.lock().unwrap().push(format!("done {}", call.index));
@@ -446,6 +462,7 @@ mod tests {
             "sess-1",
             "@Castor @Pollux hi",
             None,
+            "msg-1",
             &calls(),
             |_, o| seen.push(o),
         );
@@ -473,6 +490,7 @@ mod tests {
             "sess-1",
             "@Castor hi",
             None,
+            "msg-1",
             &calls()[..1],
             |_, o| seen.push(o),
         );
@@ -506,6 +524,7 @@ mod tests {
             "sess-1",
             "@Castor @Pollux hi",
             None,
+            "msg-1",
             &calls(),
             |_, o| seen.push(o),
         );
@@ -535,6 +554,7 @@ mod tests {
                 "sess-1",
                 "@Castor @Pollux hi",
                 None,
+                "msg-1",
                 &calls(),
                 |_, o| seen.push(o),
             );
@@ -568,6 +588,7 @@ mod tests {
             draft: format!("{} and {} hi", m(0), m(1)),
             chips: calls(),
             repeat_of: Some("run-a1".into()),
+            message: "run-a1".into(),
             calls: calls(),
         };
         let unsent = msg.unsent_from(&calls()[1]);
@@ -578,6 +599,7 @@ mod tests {
                 draft: format!("Castor and {} hi", m(1)),
                 text: "@Castor and @Pollux hi".into(),
                 repeat_of: Some("run-a1".into()),
+                message: "run-a1".into(),
                 calls: calls()[1..].to_vec(),
             }
         );
@@ -585,6 +607,83 @@ mod tests {
             msg.unsent_from(&calls()[0]).calls,
             calls(),
             "a stop on the first keeps both"
+        );
+    }
+
+    /// One answer per mention (AbstractGateway f0f23bb0): every call names
+    /// `<message>:<entity>:<index>`; the resend of a stopped chain (its
+    /// [`Unsent`]) names the same ids, so a call whose answer was lost gets
+    /// that first answer back; a new message names new ones.
+    #[test]
+    fn a_resend_names_the_same_mention_ids_and_a_new_message_new_ones() {
+        for repeat_of in [Some("run-a1"), None] {
+            let message = crate::mention::message_key(repeat_of);
+            let log = Arc::new(Mutex::new(Vec::new()));
+            let (url, server) = serve(
+                vec![
+                    (200, "", answer("Castor", "Here.")),
+                    (
+                        503,
+                        "entity_cannot_answer",
+                        json!({"detail": "Pollux cannot answer right now."}),
+                    ),
+                    (200, "", answer("Pollux", "Here.")),
+                ],
+                log,
+            );
+            let client = EntityClient::new(&url, None);
+            let msg = MentionMessage {
+                session_id: "sess-1".into(),
+                text: "@Castor @Pollux hi".into(),
+                draft: "@Castor @Pollux hi".into(),
+                chips: calls(),
+                repeat_of: repeat_of.map(String::from),
+                message: message.clone(),
+                calls: calls(),
+            };
+            let mut unsent = None;
+            run_chain(
+                &client,
+                "sess-1",
+                &msg.text,
+                repeat_of,
+                &msg.message,
+                &msg.calls,
+                |call, o| {
+                    if o.keeps_message() {
+                        unsent = Some(msg.unsent_from(call));
+                    }
+                },
+            );
+            let held = unsent.expect("the 503 holds the message");
+            run_chain(
+                &client,
+                "sess-1",
+                &held.text,
+                held.repeat_of.as_deref(),
+                &held.message,
+                &held.calls,
+                |_, _| {},
+            );
+            let bodies = server.join().unwrap();
+            let ids: Vec<_> = bodies.iter().map(|b| b["mention_id"].clone()).collect();
+            assert_eq!(
+                ids,
+                [
+                    json!(format!("{message}:castor:0")),
+                    json!(format!("{message}:pollux:1")),
+                    json!(format!("{message}:pollux:1")),
+                ],
+                "{repeat_of:?}: the resend names Pollux's first id"
+            );
+            if let Some(turn) = repeat_of {
+                assert_eq!(message, turn, "the key is the turn the words started");
+            }
+        }
+        assert_ne!(
+            crate::mention::message_key(None),
+            crate::mention::message_key(None),
+            "a new message, a new key"
         );
     }
 
@@ -708,6 +807,7 @@ mod tests {
             "sess-1",
             "@Castor @Pollux hi",
             None,
+            "msg-1",
             &calls(),
             |_, o| seen.push(o),
         );

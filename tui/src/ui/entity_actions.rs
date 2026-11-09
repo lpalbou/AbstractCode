@@ -452,6 +452,7 @@ pub fn send_mentions(
         chips,
         repeat_turn,
         repeat_of: None,
+        message: None,
         calls,
     });
 }
@@ -467,7 +468,8 @@ pub fn take_mention_retry(store: Store, draft: &str) -> Option<crate::gateway::m
 }
 
 /// Resend a stopped chain (client review 2026-11-09 B2): ONLY the calls not
-/// answered, with the words as first sent and the same `repeat_of`; no
+/// answered, with the words as first sent, the same `repeat_of` and the same
+/// `mention_id` key (a call whose answer was lost gets it back); no
 /// turn starts and no steer goes out, and an entity that answered is never
 /// asked again.
 pub fn resend_mentions(
@@ -488,6 +490,7 @@ pub fn resend_mentions(
         chips,
         repeat_turn: false,
         repeat_of: held.repeat_of,
+        message: Some(held.message),
         calls: held.calls,
     });
 }

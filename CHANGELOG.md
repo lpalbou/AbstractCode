@@ -88,6 +88,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (terminal, ships with the next terminal release)
 
+- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
+  message's turn, the entity, its place in the message). If an answer was lost on the way back and
+  you press Enter on the message again, the gateway returns the answer the entity already gave
+  instead of asking it twice; a new message is asked as new. Needs an AbstractGateway that keeps
+  mention ids (main f0f23bb0 or later).
 - **Mentions, client review 2026-11-09.** "Castor cannot answer: …" (503) or a failed call now stops the asking
   (the next entity was asked anyway), and the message comes back with only the entities not answered left as chips
   (an answered one reads as its plain name). Enter on it unchanged asks only those, with the words as first sent,
