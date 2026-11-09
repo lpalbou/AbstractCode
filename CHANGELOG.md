@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `input_data._limits.max_iterations`; after a start the field says which limit that run got, from the gateway's
   `limits` receipt ("Last run: 12 iterations (gateway default)."). Needs the local ui-kit 0.9.26 pack, installed
   `--no-save` (the lockfile follows the kit publish).
+- `web/package.json` declares the kit versions the web app needs: `@abstractframework/ui-kit` ^0.9.26 (was ^0.9.18,
+  which has no `IterationLimitField`) and `@abstractframework/panel-chat` ^0.9.9 (was ^0.9.1, which has no
+  `chatAuthorOf` / `ChatAuthor`, imported for the reply's author). Neither is published yet: `package-lock.json` is
+  relocked when they are, and `npm run check:lock` fails until then.
 
 ### Added (terminal, ships with the next terminal release)
 
