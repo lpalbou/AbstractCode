@@ -12,8 +12,11 @@ import {
   foldRepeatedTurns,
   noteRepeats,
   noteRepeatsFrame,
+  mentionMessageKey,
   mentionRefusal,
+  mentionRepeatOf,
   mentionRequestBody,
+  sendMentions,
   withLiveAuthors,
 } from "./mentions";
 
@@ -107,6 +110,50 @@ describe("refusals with the gateway's codes", () => {
       kind: "failed",
       sentence: "Castor could not be asked: repeat_of names no turn of this session.",
     });
+  });
+});
+
+describe("a mention sent with guidance (docs audit 2026-11-09: it was refused 422 repeat_of_unknown)", () => {
+  // The gateway's rule (AbstractGateway entity_mentions `_check_repeat_of`): a `repeat_of` must be
+  // the caller's own turn of this session whose prompt, trimmed, IS the text, trimmed.
+  const prompts = new Map([["run-running", "plan the trip to Lyon"], ["run-new", "and the weather?"]]);
+  const chip = { id: "castor", name: "Castor", kind: "entity" as const, index: 0 };
+  async function ask(words: string, repeatOf: string) {
+    const message = mentionMessageKey(repeatOf);
+    const bodies: Array<ReturnType<typeof mentionRequestBody>> = [];
+    const outcome = await sendMentions([chip], async (mention) => {
+      const body = mentionRequestBody(words, mention, repeatOf, message);
+      bodies.push(body);
+      if (body.repeat_of !== undefined && (prompts.get(body.repeat_of) ?? "").trim() !== body.text.trim())
+        throw httpError(422, { detail: "That earlier message is not one of your own turns in this conversation.", code: "repeat_of_unknown" });
+      return { run_id: `turn-${mention.id}` };
+    });
+    return { outcome, bodies, message };
+  }
+
+  it("the door refuses a repeat_of whose turn carries other words (the old guidance wiring)", async () => {
+    const { outcome } = await ask("and the weather?", "run-running");
+    expect(outcome.stopped?.refusal.kind).toBe("failed");
+    expect(outcome.stopped?.refusal.sentence).toMatch(/^Castor could not be asked: That earlier message is not one of your own turns/);
+  });
+
+  it("guidance starts no turn: its mentions name none, carry the typed words and a key minted per message", async () => {
+    expect(mentionRepeatOf({ steered: "run-running" })).toBe("");
+    const first = await ask("and the weather?", mentionRepeatOf({ steered: "run-running" }));
+    expect(first.outcome.stopped).toBeNull();
+    expect(first.outcome.answered.map((a) => a.runId)).toEqual(["turn-castor"]);
+    expect(first.message).toMatch(/^msg-[0-9a-f]{24}$/);
+    expect(first.bodies).toEqual([{ entity: "castor", text: "and the weather?", mention_index: 0, mention_id: `${first.message}:castor:0` }]);
+    // A second guidance to the same running turn is a new message: its own ids, its own answer.
+    const second = await ask("and the trains?", mentionRepeatOf({ steered: "run-running" }));
+    expect(second.message).not.toBe(first.message);
+  });
+
+  it("a message that started a turn (sent, or queued then started) names it, and the door takes it", async () => {
+    expect(mentionRepeatOf({ started: " run-new " })).toBe("run-new");
+    const { outcome, bodies } = await ask(" and the weather? ", mentionRepeatOf({ started: "run-new" }));
+    expect(outcome.stopped).toBeNull();
+    expect(bodies[0]).toMatchObject({ text: "and the weather?", repeat_of: "run-new", mention_id: "run-new:castor:0" });
   });
 });
 

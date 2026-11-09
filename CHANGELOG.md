@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (web)
 
+- **A mention sent with guidance is answered.** A message sent while a run is working ("Guide this
+  run", or the Avatar view's message to the running turn) was refused with "That earlier message is
+  not one of your own turns in this conversation": its mentions named the running turn, whose words
+  are an earlier message. Guidance starts no turn, so its mentions now name none, and the entity is
+  asked your words. A message that starts a turn, sent or queued, still names it.
 - **A mention is answered once, even when sent again.** Each mention now carries its own id (your
   message's turn, the entity, its place in the message). If the answer was lost on the way back (a
   timeout, a dropped connection) and you send the same words again, the gateway returns the answer

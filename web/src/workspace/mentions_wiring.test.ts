@@ -23,12 +23,17 @@ describe("Code's chat offers @ names from the gateway", () => {
 
 describe("a send with picked names", () => {
   it("starts the person's turn first, then asks the names, keeping the message on a refusal", () => {
-    expect(app).toMatch(/const started = await startTurn\(text, opts\?\.signal\);\s*await askMentions\(sessionId, text, mentions, \{ repeatOf: started, signal: opts\?\.signal, keepDraft: true, resendable: true \}\);/);
+    expect(app).toMatch(/const started = await startTurn\(text, opts\?\.signal\);\s*await askMentions\(sessionId, text, mentions, \{ repeatOf: mentionRepeatOf\(\{ started \}\), signal: opts\?\.signal, keepDraft: true, resendable: true \}\);/);
   });
   it("guidance is accepted before the names are asked; a queued message carries them to its turn", () => {
-    expect(app).toMatch(/const guided = session\.runId;\s*const result = await guideRun\(text\);[\s\S]{0,250}if \(result\.accepted\) await askMentions\(sessionId, text, mentions, \{ repeatOf: guided, keepDraft: false, resendable: true \}\);/);
+    expect(app).toMatch(/const guided = session\.runId;\s*const result = await guideRun\(text\);[\s\S]{0,350}if \(result\.accepted\) await askMentions\(sessionId, text, mentions, \{ repeatOf: mentionRepeatOf\(\{ steered: guided \}\), keepDraft: false, resendable: true \}\);/);
     expect(app).toContain("if (mode === \"queue\") return queueNextTurn(text, mentions);");
-    expect(app).toMatch(/const nextRunId = await startTurn\(intent\.text\);[\s\S]{0,300}await askMentions\(intent\.sessionId, intent\.text, intent\.mentions \?\? \[\], \{ repeatOf: nextRunId,/);
+    expect(app).toMatch(/const nextRunId = await startTurn\(intent\.text\);[\s\S]{0,300}await askMentions\(intent\.sessionId, intent\.text, intent\.mentions \?\? \[\], \{ repeatOf: mentionRepeatOf\(\{ started: nextRunId \}\),/);
+  });
+  it("docs audit 2026-11-09: guidance (either door) names no repeat_of: the guided turn's prompt is an earlier message", () => {
+    expect(app).toContain("if (!queued) await askMentions(sessionId, text, mentions, { repeatOf: mentionRepeatOf({ steered: guided }), signal: opts?.signal, keepDraft: true, resendable: true });");
+    expect(app).not.toMatch(/repeatOf: guided\b/);
+    expect(app.match(/mentionRepeatOf\(\{ steered: guided \}\)/g)?.length).toBe(2);
   });
   it("each mention is one POST to the session's mentions route", () => {
     expect(app).toContain("gatewayApiPath(`sessions/${encodeURIComponent(sessionId)}/mentions`)");

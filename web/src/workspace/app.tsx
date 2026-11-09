@@ -1,6 +1,6 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionMessageKey, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
+import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionMessageKey, mentionNoticeFor, mentionRepeatOf, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -1382,8 +1382,9 @@ export function CodeWorkspace() {
             const guided = session.runId;
             const result = await guideRun(text);
             // The guidance is in the run: then the picked entities are asked (WorkflowChat keeps
-            // the draft and the chips when this rejects). The guided turn carries the same words.
-            if (result.accepted) await askMentions(sessionId, text, mentions, { repeatOf: guided, keepDraft: false, resendable: true });
+            // the draft and the chips when this rejects). Guidance starts no turn, and the guided
+            // turn's prompt is an earlier message: the mentions name no `repeat_of`.
+            if (result.accepted) await askMentions(sessionId, text, mentions, { repeatOf: mentionRepeatOf({ steered: guided }), keepDraft: false, resendable: true });
             return result;
           },
         }
@@ -1399,7 +1400,7 @@ export function CodeWorkspace() {
     if (await resendMentions(text, mentions, opts?.signal)) return;
     if (!active) {
       const started = await startTurn(text, opts?.signal);
-      await askMentions(sessionId, text, mentions, { repeatOf: started, signal: opts?.signal, keepDraft: true, resendable: true });
+      await askMentions(sessionId, text, mentions, { repeatOf: mentionRepeatOf({ started }), signal: opts?.signal, keepDraft: true, resendable: true });
       return;
     }
     const guided = session.runId;
@@ -1408,7 +1409,8 @@ export function CodeWorkspace() {
     if (!result.accepted) throw new Error("The gateway did not accept this message.");
     setDraft("");
     setNotice(avatarMode ? "Sent. Your message is available to the assistant." : queued ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
-    if (!queued) await askMentions(sessionId, text, mentions, { repeatOf: guided, signal: opts?.signal, keepDraft: true, resendable: true });
+    // Guidance (or an answer) starts no turn: its mentions name no `repeat_of` (`mentionRepeatOf`).
+    if (!queued) await askMentions(sessionId, text, mentions, { repeatOf: mentionRepeatOf({ steered: guided }), signal: opts?.signal, keepDraft: true, resendable: true });
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");
@@ -1425,7 +1427,7 @@ export function CodeWorkspace() {
     const nextRunId = await startTurn(intent.text);
     setQueue((items) => advanceQueueIntents(items, intent, nextRunId));
     // Its names are asked now; a refusal is said and never pauses the queue (the turn started).
-    await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { repeatOf: nextRunId, keepDraft: false }).catch((e) => setError(formatError(e)));
+    await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { repeatOf: mentionRepeatOf({ started: nextRunId }), keepDraft: false }).catch((e) => setError(formatError(e)));
   }
   useEffect(() => {
     if (

@@ -11,6 +11,9 @@
 // entity could not answer, a timeout or a lost answer) names the same ids, so the gateway gives back
 // the first answer instead of asking the entity again; a new message gets new ids.
 //
+// Only a message that started a turn has one to name (`mentionRepeatOf`): guidance, or an answer to
+// the running turn's question, starts none, so its mentions name no `repeat_of`.
+//
 // DOM-free: app.tsx wires these rules; mentions.test.ts checks them. Nothing here reads `@` out
 // of the message text (no-heuristics ruling): a mention is only ever a picked chip.
 import { uniqueMentions, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent } from "../vendor/abstractchat/conversation.js";
@@ -186,6 +189,21 @@ export function mintMessageId(): string {
  * id minted now. Taken once per message and held with it; a resend passes the one first used. */
 export function mentionMessageKey(repeatOf: string | null | undefined, mint: () => string = mintMessageId): string {
   return String(repeatOf ?? "").trim() || mint();
+}
+
+/**
+ * The turn a message's mentions name as `repeat_of` ("" = none). The gateway takes it only for the
+ * caller's own turn of this session whose prompt is the mention's text (AbstractGateway
+ * entity_mentions `_check_repeat_of`: both trimmed, then compared exactly), else 422
+ * `repeat_of_unknown`. A message that STARTED a turn (sent, or queued and then started) names it:
+ * that turn's prompt is the typed words, as the mention's text is. A message that STEERED the
+ * running turn (guidance through `inject_guidance`, or an answer to its question) names none: the
+ * running turn's prompt is an earlier message and the guidance travels in the steer's own field, so
+ * no turn carries these words. The mention turn then keeps them as its own prompt and its
+ * `mention_id`s take a key minted for the message (`mentionMessageKey("")`).
+ */
+export function mentionRepeatOf(sent: { started: string } | { steered: string }): string {
+  return "started" in sent ? String(sent.started ?? "").trim() : "";
 }
 
 /** One mention's `mention_id`: `<message>:<entity>:<mention_index>`. An empty message key throws. */
