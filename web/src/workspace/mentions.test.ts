@@ -16,6 +16,7 @@ import {
   sendMentions,
 } from "./mentions";
 import type { WorkflowDefinition } from "./catalog";
+import { mentionResend, mentionsStoppedError, unsentMentionsOf } from "../vendor/abstractchat/conversation.js";
 
 const httpError = (status: number, body: unknown) =>
   new GatewayHttpError(typeof (body as { detail?: unknown })?.detail === "string" ? (body as { detail: string }).detail : `Gateway request failed (${status})`, {
@@ -155,6 +156,58 @@ describe("asking the mentions of one message", () => {
     expect(calls).toEqual(["castor"]);
     expect(outcome.answered.map((a) => a.runId)).toEqual(["turn-castor"]);
     expect(outcome.aborted).toBe(true);
+  });
+  it("Stop says who was not asked (review 2026-11-09 N6)", async () => {
+    const abort = new AbortController();
+    const outcome = await sendMentions([castor, hypnos, ada], async (m) => {
+      abort.abort();
+      return { run_id: `turn-${m.id}` };
+    }, { signal: abort.signal });
+    expect(outcome.unasked.map((m) => m.id)).toEqual(["hypnos", "ada"]);
+    expect(mentionsSummary(outcome, { replyStillRunning: false })).toBe("Stopped before asking Hypnos and Ada.");
+  });
+  it("an entity named twice is asked once, at its first index", async () => {
+    const calls: string[] = [];
+    const outcome = await sendMentions([castor, hypnos, { ...castor, index: 2 }], async (m) => {
+      calls.push(`${m.id}#${m.index}`);
+      return { run_id: `turn-${m.id}` };
+    });
+    expect(calls).toEqual(["castor#0", "hypnos#1"]);
+    expect(outcome.answered).toHaveLength(2);
+  });
+  it("a 503 after an earlier answer: the unsent are the stopped one and those after it, with their index", async () => {
+    const calls: string[] = [];
+    const outcome = await sendMentions([castor, hypnos, ada], async (m) => {
+      calls.push(m.id);
+      if (m.id === "hypnos") throw httpError(503, { detail: "Hypnos cannot answer right now.", code: "entity_cannot_answer" });
+      return { run_id: `turn-${m.id}` };
+    });
+    expect(calls).toEqual(["castor", "hypnos"]);
+    expect(outcome.answered.map((a) => a.mention.id)).toEqual(["castor"]);
+    expect(outcome.unsent).toEqual([hypnos, ada]);
+    const plain = await sendMentions([castor], async () => ({ run_id: "turn-castor" }));
+    expect(plain.unsent).toEqual([]);
+  });
+  it("review 2026-11-09 B1: the resend asks only the unsent, with the same words and repeat_of; Castor is never asked again", async () => {
+    // First send: the person's turn run-a, then Castor (answers) and Hypnos (503).
+    const bodies: unknown[] = [];
+    const post = (fail: string) => async (m: typeof castor) => {
+      bodies.push(mentionRequestBody("does the plan hold?", m, "run-a"));
+      if (m.id === fail) throw httpError(503, { detail: "Hypnos cannot answer right now.", code: "entity_cannot_answer" });
+      return { run_id: `turn-${m.id}` };
+    };
+    const first = await sendMentions([castor, hypnos], post("hypnos"));
+    // What the app rejects the send with: the kit keeps only these chips.
+    const stopped = mentionsStoppedError(first.stopped!.refusal.sentence, first.unsent);
+    expect(unsentMentionsOf(stopped)).toEqual([hypnos]);
+    // The resend: the kit numbers its chips from 0; the first index comes back.
+    const asked = mentionResend({ text: "does the plan hold?", repeatOf: "run-a", unsent: first.unsent }, "does the plan hold?", [{ ...hypnos, index: 0 }]);
+    expect(asked).toEqual([hypnos]);
+    bodies.length = 0;
+    await sendMentions(asked!, post(""));
+    expect(bodies).toEqual([{ entity: "hypnos", text: "does the plan hold?", mention_index: 1, repeat_of: "run-a" }]);
+    // Other words are a new message (the app then starts a turn as for any message).
+    expect(mentionResend({ text: "does the plan hold?", repeatOf: "run-a", unsent: first.unsent }, "and now?", [{ ...hypnos, index: 0 }])).toBeNull();
   });
   it("answers waiting for the current reply are said; nothing is said when there is nothing to say", async () => {
     const outcome = await sendMentions([castor, hypnos], async (m) => ({ run_id: `turn-${m.id}` }));

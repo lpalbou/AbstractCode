@@ -2,7 +2,7 @@ import { gatewayApiPath } from "@abstractframework/ui-kit";
 import { createReplayViewTransport, type WorkflowTransport } from "@abstractframework/panel-chat";
 import { gateway, gatewayRequest } from "./transport";
 import { StreamGate } from "./stream_gate";
-import { foldRepeatedPrompts, foldRepeatedPromptsFrame } from "./mentions";
+import { noteRepeats, noteRepeatsFrame } from "./mentions";
 import type { ChatAuthor } from "@abstractframework/panel-chat";
 
 const runPath = (id: string) => gatewayApiPath(`runs/${encodeURIComponent(id)}`);
@@ -23,6 +23,9 @@ export function createWorkflowTransport(options: {
   onDeltaError: (report: DeltaFrameError) => void;
   /** The author a live reply frame names (by its run), told before the frame reaches the kit. */
   onDeltaAuthor?: (runId: string, author: ChatAuthor) => void;
+  /** Turns whose prompt repeats another turn's words (`repeat_of`: run id -> that turn), noted from
+   * every view read and view frame before it reaches the kit (app.tsx folds them when shown). */
+  repeats?: Map<string, string>;
   /** Stream rules (hidden tab holds none; one per run and kind); tests inject theirs. */
   streams?: StreamGate;
 }): WorkflowTransport {
@@ -73,11 +76,13 @@ export function createWorkflowTransport(options: {
     // detected once and the ledger fold above is used, labeled (`snapshot.source`).
     replayView: {
       ...replay,
-      // A mention turn's prompt that repeats the person's own turn (`repeat_of`) is folded: the
-      // words show once, on the person's turn (every view read, the earlier turns' included).
+      // A mention turn's prompt that repeats the person's own turn (`repeat_of`) is noted (every
+      // view read, the earlier turns' included); the conversation folds it only when that turn is
+      // on screen (mentions.ts `foldRepeatedTurns`), so the words are never lost.
       getView: async (id, opts) => {
         const read = await replay.getView(id, opts);
-        return read.notModified ? read : { ...read, view: foldRepeatedPrompts(read.view) };
+        if (!read.notModified && options.repeats) noteRepeats(read.view, options.repeats);
+        return read;
       },
       // A reopened stream resumes with the last frame id it delivered (Last-Event-ID).
       streamView: (id, opts) => {
@@ -90,7 +95,8 @@ export function createWorkflowTransport(options: {
             signal: inner,
             onFrame: (frame) => {
               if (frame.id) lastEventId = frame.id;
-              opts.onFrame(foldRepeatedPromptsFrame(frame));
+              if (options.repeats) noteRepeatsFrame(frame, options.repeats);
+              opts.onFrame(frame);
             },
           });
           bytes += result.bytes;

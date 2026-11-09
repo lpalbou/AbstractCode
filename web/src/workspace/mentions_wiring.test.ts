@@ -23,10 +23,10 @@ describe("Code's chat offers @ names from the gateway", () => {
 
 describe("a send with picked names", () => {
   it("starts the person's turn first, then asks the names, keeping the message on a refusal", () => {
-    expect(app).toMatch(/const started = await startTurn\(text, opts\?\.signal\);\s*await askMentions\(sessionId, text, mentions, \{ repeatOf: started, signal: opts\?\.signal, keepDraft: true \}\);/);
+    expect(app).toMatch(/const started = await startTurn\(text, opts\?\.signal\);\s*await askMentions\(sessionId, text, mentions, \{ repeatOf: started, signal: opts\?\.signal, keepDraft: true, resendable: true \}\);/);
   });
   it("guidance is accepted before the names are asked; a queued message carries them to its turn", () => {
-    expect(app).toMatch(/const guided = session\.runId;\s*const result = await guideRun\(text\);[\s\S]{0,250}if \(result\.accepted\) await askMentions\(sessionId, text, mentions, \{ repeatOf: guided, keepDraft: false \}\);/);
+    expect(app).toMatch(/const guided = session\.runId;\s*const result = await guideRun\(text\);[\s\S]{0,250}if \(result\.accepted\) await askMentions\(sessionId, text, mentions, \{ repeatOf: guided, keepDraft: false, resendable: true \}\);/);
     expect(app).toContain("if (mode === \"queue\") return queueNextTurn(text, mentions);");
     expect(app).toMatch(/const nextRunId = await startTurn\(intent\.text\);[\s\S]{0,300}await askMentions\(intent\.sessionId, intent\.text, intent\.mentions \?\? \[\], \{ repeatOf: nextRunId,/);
   });
@@ -36,7 +36,16 @@ describe("a send with picked names", () => {
   });
   it("live replies are labelled from their stream frames until the saved message replaces them", () => {
     expect(app).toContain("liveAuthors.current.set(runId, author);");
-    expect(app).toContain("const messages = mergeStreamNotes(withLiveAuthors(baseMessages, liveAuthors.current), [");
+    expect(app).toContain("const messages = mergeStreamNotes(withLiveAuthors(foldRepeatedTurns(baseMessages, repeatTurns.current), liveAuthors.current), [");
+    expect(app).toContain("repeats: repeatTurns.current,");
+  });
+  it("review 2026-11-09 B1: a stop names the unsent chips and remembers the message; a resend of it asks only those, before any turn", () => {
+    expect(app).toContain("pendingResend.current = { sessionId, identity: askedBy, epoch, resend: { text, repeatOf: options.repeatOf || null, unsent: outcome.unsent } };");
+    expect(app).toContain("throw mentionsStoppedError(stop.sentence, outcome.unsent);");
+    expect(app).toContain("await askMentions(held.sessionId, held.resend.text, asked, { repeatOf: held.resend.repeatOf ?? \"\", signal, keepDraft: true, resendable: true });");
+    // The resend check runs FIRST in both doors: before startTurn / guideRun / the queue.
+    expect(app).toMatch(/setMentionStatus\(null\);\s*if \(await resendMentions\(text, mentions, opts\?\.signal\)\) return;\s*if \(!active\) \{\s*const started = await startTurn/);
+    expect(app).toMatch(/setMentionStatus\(null\);\s*if \(await resendMentions\(text, mentions\)\) return \{ accepted: true \};\s*if \(mode === "queue"\)/);
   });
   it("the conversation opens on the newest reply once the current one has ended, and restores the agent turn's workflow", () => {
     expect(app).toContain("if (sending || mentioning || !terminal(snapshot.status) || String(snapshot.run?.run_id || \"\") !== session.runId) return;");

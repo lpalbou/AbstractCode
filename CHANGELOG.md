@@ -42,6 +42,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `chatAuthorOf` / `ChatAuthor`, imported for the reply's author). Neither is published yet: `package-lock.json` is
   relocked when they are, and `npm run check:lock` fails until then.
 
+### Fixed (web)
+
+- **Mentions, client review 2026-11-09.** Resending after an entity could not answer (503) no longer asks again
+  the entity that already answered, nor starts the person's turn again: the box keeps the words and only the chips
+  not answered, and sending the same words again asks only those, with the same `repeat_of` and their first
+  `mention_index` (a guided message the same way). Other words are a new message. An entity picked twice is asked
+  once. The person's words fold under their own turn only while that turn is on screen (a mention turn shown alone
+  keeps its question). An uncoded 405 means "This gateway does not offer mentions yet." like an uncoded 404. Stop
+  during the mentions says who was not asked ("Stopped before asking Hypnos."). Kit fixes from AbstractUIC
+  9aad042 (vendored copy re-synced; `node_modules` panel-chat 0.9.9 + ui-kit 0.9.26 local packs, `--no-save`):
+  a chip picked while a send is in flight stays, Enter waits while the `@` list loads, a picked name is not
+  offered again, and the list spans the box on a phone.
+
 ### Added (terminal, ships with the next terminal release)
 
 - **`@` mentions an entity from the conversation, and every answer says who wrote it** (operator

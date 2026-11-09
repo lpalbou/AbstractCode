@@ -1,6 +1,6 @@
-import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent} from "../vendor/abstractchat/conversation.js";
+import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, isMentionTurn, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
+import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -325,6 +325,12 @@ export function CodeWorkspace() {
   // Who is writing each live reply, from its stream frames (by run): the bubble is labelled before
   // the saved message, which carries its own author, replaces it.
   const liveAuthors = useRef(new Map<string, ChatAuthor>());
+  // Turns whose prompt repeats another turn's words (`repeat_of`), noted by the transport from the
+  // views; the conversation folds such a prompt only while the turn it repeats is shown.
+  const repeatTurns = useRef(new Map<string, string>());
+  // A send whose mentions stopped partway (a 503, a failure): its words, its `repeat_of` and the
+  // mentions not answered. The next send of the same words with chips asks only those (no new turn).
+  const pendingResend = useRef<{ sessionId: string; identity: string; epoch: number; resend: MentionResend } | null>(null);
   const unloadingRef = useRef(false);
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
@@ -451,6 +457,7 @@ export function CodeWorkspace() {
         onDeltaAuthor: (runId, author) => {
           liveAuthors.current.set(runId, author);
         },
+        repeats: repeatTurns.current,
         onDeltaError: (report) => {
           const scope = streamScopeRef.current;
           const note = malformedDeltaNote(report, lastMessageIdRef.current);
@@ -504,7 +511,7 @@ export function CodeWorkspace() {
       : recordedMessages;
   const lastBase = baseMessages[baseMessages.length - 1];
   lastMessageIdRef.current = lastBase?.id ? String(lastBase.id) : null;
-  const messages = mergeStreamNotes(withLiveAuthors(baseMessages, liveAuthors.current), [
+  const messages = mergeStreamNotes(withLiveAuthors(foldRepeatedTurns(baseMessages, repeatTurns.current), liveAuthors.current), [
     streamingUnsupportedNote(preferences.streamReplies, catalog.streaming, baseMessages),
     ...(streamNotes.scope === streamScope ? streamNotes.notes : []),
   ]);
@@ -1231,10 +1238,12 @@ export function CodeWorkspace() {
    * Ask the picked entities, in order, once the person's message is in the conversation (its turn
    * started, its guidance accepted, or its queued turn started). 409/404: said, the next one is
    * asked. 503 or any other failure: said, and the rest is not asked; `keepDraft` puts the message
-   * back in the composer (the chips stay: the send rejects). Each reply is a session turn the
-   * gateway recorded; the conversation opens on the newest once the current reply has ended.
+   * back in the composer and the send rejects naming the chips NOT answered (the kit keeps only
+   * those). `resendable`: that message is then remembered, so sending it again asks only those
+   * mentions with the same `repeat_of` (`resendMentions`). Each reply is a session turn the gateway
+   * recorded; the conversation opens on the newest once the current reply has ended.
    */
-  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { repeatOf: string; signal?: AbortSignal; keepDraft: boolean }) {
+  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { repeatOf: string; signal?: AbortSignal; keepDraft: boolean; resendable?: boolean }) {
     if (!mentions.length) return;
     const askedBy = identityRef.current;
     const epoch = authEpoch.current;
@@ -1262,8 +1271,26 @@ export function CodeWorkspace() {
     const stop = outcome.stopped?.refusal;
     if (stop && stop.kind !== "unavailable") {
       if (options.keepDraft && here()) setDraft(text);
-      throw new Error(stop.sentence);
+      if (options.resendable && outcome.unsent.length)
+        pendingResend.current = { sessionId, identity: askedBy, epoch, resend: { text, repeatOf: options.repeatOf || null, unsent: outcome.unsent } };
+      throw mentionsStoppedError(stop.sentence, outcome.unsent);
     }
+  }
+  /**
+   * A resend of the message whose mentions stopped partway (`pendingResend`: the same words, with
+   * chips): ONLY those mentions are asked, with the same `repeat_of` — never a new turn of the
+   * person, never an entity that already answered. False (and the remembered message is dropped)
+   * for any other send: that one is a new message.
+   */
+  async function resendMentions(text: string, mentions: readonly ChatMentionSent[], signal?: AbortSignal): Promise<boolean> {
+    const held = pendingResend.current;
+    pendingResend.current = null;
+    if (!held || held.sessionId !== session.sessionId || held.identity !== identityRef.current || held.epoch !== authEpoch.current) return false;
+    const asked = mentionResend(held.resend, text, mentions);
+    if (!asked) return false;
+    await askMentions(held.sessionId, held.resend.text, asked, { repeatOf: held.resend.repeatOf ?? "", signal, keepDraft: true, resendable: true });
+    if (sessionRef.current.sessionId === held.sessionId) setDraft("");
+    return true;
   }
   // The newest mention reply becomes the conversation's open turn once nothing else is under way
   // there: the current reply has ended, no send or mention is in flight and no turn is queued
@@ -1346,13 +1373,14 @@ export function CodeWorkspace() {
           onSteer: async (text: string, mode: "guide" | "queue", ctx?: { mentions: ChatMentionSent[] }) => {
             const mentions = ctx?.mentions ?? [];
             setMentionStatus(null);
+            if (await resendMentions(text, mentions)) return { accepted: true };
             if (mode === "queue") return queueNextTurn(text, mentions);
             const sessionId = session.sessionId;
             const guided = session.runId;
             const result = await guideRun(text);
             // The guidance is in the run: then the picked entities are asked (WorkflowChat keeps
             // the draft and the chips when this rejects). The guided turn carries the same words.
-            if (result.accepted) await askMentions(sessionId, text, mentions, { repeatOf: guided, keepDraft: false });
+            if (result.accepted) await askMentions(sessionId, text, mentions, { repeatOf: guided, keepDraft: false, resendable: true });
             return result;
           },
         }
@@ -1365,9 +1393,10 @@ export function CodeWorkspace() {
     const mentions = opts?.mentions ?? [];
     const sessionId = session.sessionId;
     setMentionStatus(null);
+    if (await resendMentions(text, mentions, opts?.signal)) return;
     if (!active) {
       const started = await startTurn(text, opts?.signal);
-      await askMentions(sessionId, text, mentions, { repeatOf: started, signal: opts?.signal, keepDraft: true });
+      await askMentions(sessionId, text, mentions, { repeatOf: started, signal: opts?.signal, keepDraft: true, resendable: true });
       return;
     }
     const guided = session.runId;
@@ -1376,7 +1405,7 @@ export function CodeWorkspace() {
     if (!result.accepted) throw new Error("The gateway did not accept this message.");
     setDraft("");
     setNotice(avatarMode ? "Sent. Your message is available to the assistant." : queued ? "Queued for the next turn." : "Guidance queued. The workflow will read it at its next supported boundary.");
-    if (!queued) await askMentions(sessionId, text, mentions, { repeatOf: guided, signal: opts?.signal, keepDraft: true });
+    if (!queued) await askMentions(sessionId, text, mentions, { repeatOf: guided, signal: opts?.signal, keepDraft: true, resendable: true });
   }
   async function executeQueuedIntent(intent: QueueIntent): Promise<void> {
     const snapshotRunId = String(snapshot.run?.run_id || "");

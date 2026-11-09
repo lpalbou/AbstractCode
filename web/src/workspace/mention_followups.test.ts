@@ -9,8 +9,9 @@ import { createWorkflowTransport } from "./session_transport";
 import { StreamGate } from "./stream_gate";
 import {
   MENTIONS_UNAVAILABLE,
-  foldRepeatedPrompts,
-  foldRepeatedPromptsFrame,
+  foldRepeatedTurns,
+  noteRepeats,
+  noteRepeatsFrame,
   mentionRefusal,
   mentionRequestBody,
   withLiveAuthors,
@@ -35,36 +36,59 @@ describe("repeat_of: the person's words show once", () => {
       { id: "m1:final", role: "assistant", kind: "final", text: "Start with the test.", run_id: "m1", author: castor },
     ],
   };
-  it("a mention turn's prompt that repeats a turn is folded; its answer stays; other views are untouched", () => {
-    expect(foldRepeatedPrompts(mentionView).messages.map((m) => m.id)).toEqual(["m1:final"]);
+  it("a view teaches which turn a mention's prompt repeats; a plain view teaches nothing", () => {
+    const repeats = new Map<string, string>();
+    expect(noteRepeats(mentionView, repeats)).toBe(true);
+    expect([...repeats]).toEqual([["m1", "run-agent"]]);
+    expect(noteRepeats(mentionView, repeats)).toBe(false);
     const plain = { ...mentionView, messages: [{ ...mentionView.messages[0], repeat_of: undefined }, mentionView.messages[1]] };
-    expect(foldRepeatedPrompts(plain)).toBe(plain);
+    expect(noteRepeats(plain, new Map())).toBe(false);
   });
-  it("the same fold on the view stream's view and delta frames", () => {
-    const view = foldRepeatedPromptsFrame({ event: "view", id: "m1:0~x", data: JSON.stringify(mentionView) });
-    expect(JSON.parse(view.data).messages.map((m: { id: string }) => m.id)).toEqual(["m1:final"]);
-    const delta = foldRepeatedPromptsFrame({ event: "delta", data: JSON.stringify({ messages: [mentionView.messages[0]] }) });
-    expect(JSON.parse(delta.data).messages).toEqual([]);
-    const done = { event: "done", data: "{}" };
-    expect(foldRepeatedPromptsFrame(done)).toBe(done);
+  it("the same from the view stream's view and delta frames", () => {
+    const fromView = new Map<string, string>();
+    expect(noteRepeatsFrame({ event: "view", data: JSON.stringify(mentionView) }, fromView)).toBe(true);
+    const fromDelta = new Map<string, string>();
+    expect(noteRepeatsFrame({ event: "delta", data: JSON.stringify({ messages: [mentionView.messages[0]] }) }, fromDelta)).toBe(true);
+    expect([...fromDelta]).toEqual([["m1", "run-agent"]]);
+    expect(noteRepeatsFrame({ event: "done", data: "{}" }, new Map())).toBe(false);
   });
-  it("the app's workflow transport folds every view it reads (the loaded turn and the earlier ones)", async () => {
+  // Review 2026-11-09 S5: the words fold only while the turn they repeat is on screen.
+  const asked = { id: "run-agent:input", role: "user" as const, content: "why does it fail?", runId: "run-agent" };
+  const agentAnswer = { id: "run-agent:final", role: "assistant" as const, content: "Look at the log.", runId: "run-agent" };
+  const repeat = { id: "m1:input", role: "user" as const, content: "why does it fail?", runId: "m1" };
+  const entityAnswer = { id: "m1:final", role: "assistant" as const, content: "Start with the test.", runId: "m1" };
+  it("a repeated prompt folds when the turn it repeats is shown: the words once, then each answer", () => {
+    const repeats = new Map([["m1", "run-agent"]]);
+    expect(foldRepeatedTurns([asked, agentAnswer, repeat, entityAnswer], repeats).map((m) => m.id)).toEqual(["run-agent:input", "run-agent:final", "m1:final"]);
+  });
+  it("a repeated prompt whose turn is NOT shown keeps its words (the question is never lost)", () => {
+    const repeats = new Map([["m1", "run-agent"]]);
+    expect(foldRepeatedTurns([repeat, entityAnswer], repeats).map((m) => m.id)).toEqual(["m1:input", "m1:final"]);
+    const unchanged = [asked, agentAnswer];
+    expect(foldRepeatedTurns(unchanged, repeats)).toBe(unchanged);
+    expect(foldRepeatedTurns(unchanged, new Map())).toBe(unchanged);
+  });
+  it("the app's workflow transport notes every view it reads and leaves the view whole", async () => {
     vi.stubGlobal("document", { cookie: "" });
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(mentionView), { status: 200, headers: { ETag: '"m1:0~x"' } })));
-    const transport = createWorkflowTransport({ onDeltaError() {}, streams: new StreamGate() });
+    const repeats = new Map<string, string>();
+    const transport = createWorkflowTransport({ onDeltaError() {}, streams: new StreamGate(), repeats });
     const read = await transport.replayView!.getView("m1");
     expect(read.notModified).toBe(false);
-    expect(read.notModified ? [] : read.view.messages.map((m) => m.id)).toEqual(["m1:final"]);
+    expect(read.notModified ? [] : read.view.messages.map((m) => m.id)).toEqual(["m1:input", "m1:final"]);
+    expect([...repeats]).toEqual([["m1", "run-agent"]]);
   });
   it("and every frame of the view stream", async () => {
     vi.stubGlobal("document", { cookie: "" });
     const wire = `id: m1:0~x\nevent: view\ndata: ${JSON.stringify(mentionView)}\n\nevent: done\ndata: {}\n\n`;
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(wire)); c.close(); } }), { status: 200, headers: { "Content-Type": "text/event-stream" } })));
-    const transport = createWorkflowTransport({ onDeltaError() {}, streams: new StreamGate() });
+    const repeats = new Map<string, string>();
+    const transport = createWorkflowTransport({ onDeltaError() {}, streams: new StreamGate(), repeats });
     const frames: Array<{ event?: string; data: string }> = [];
     await transport.replayView!.streamView("m1", { signal: new AbortController().signal, onFrame: (f) => frames.push(f) });
     const view = frames.find((f) => f.event === "view");
-    expect(JSON.parse(view!.data).messages.map((m: { id: string }) => m.id)).toEqual(["m1:final"]);
+    expect(JSON.parse(view!.data).messages.map((m: { id: string }) => m.id)).toEqual(["m1:input", "m1:final"]);
+    expect([...repeats]).toEqual([["m1", "run-agent"]]);
   });
 });
 
@@ -73,6 +97,10 @@ describe("refusals with the gateway's codes", () => {
     expect(mentionRefusal(httpError(404, { detail: "Entity 'castor' not found", code: "entity_not_found" }), "Castor").kind).toBe("not_offerable");
     expect(mentionRefusal(httpError(404, { detail: "Not Found" }), "Castor")).toEqual({ kind: "unavailable", sentence: MENTIONS_UNAVAILABLE });
     expect(mentionRefusal(httpError(404, { detail: "Entity 'castor' not found" }), "Castor").kind).toBe("unavailable");
+  });
+  it("an uncoded 405 is the route missing too (review 2026-11-09 N5); a coded 405 is not", () => {
+    expect(mentionRefusal(httpError(405, { detail: "Method Not Allowed" }), "Castor")).toEqual({ kind: "unavailable", sentence: MENTIONS_UNAVAILABLE });
+    expect(mentionRefusal(httpError(405, { detail: "no", code: "something_else" }), "Castor").kind).toBe("failed");
   });
   it("422 repeat_of_unknown says the gateway's sentence and keeps the message", () => {
     expect(mentionRefusal(httpError(422, { detail: "repeat_of names no turn of this session", code: "repeat_of_unknown" }), "Castor")).toEqual({

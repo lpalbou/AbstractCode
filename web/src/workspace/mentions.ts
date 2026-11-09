@@ -7,7 +7,7 @@
 //
 // DOM-free: app.tsx wires these rules; mentions.test.ts checks them. Nothing here reads `@` out
 // of the message text (no-heuristics ruling): a mention is only ever a picked chip.
-import type { ChatAuthor, ChatMentionCandidate, ChatMentionSent } from "../vendor/abstractchat/conversation.js";
+import { uniqueMentions, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent } from "../vendor/abstractchat/conversation.js";
 import type { ChatMessage } from "@abstractframework/panel-chat";
 
 /** The sentence an older gateway gets (no mentions route): shown, chips disabled, never silent. */
@@ -71,7 +71,8 @@ export type MentionRefusal =
   | { kind: "elsewhere"; sentence: string }
   /** 404 for this entity (hidden = missing): said, not offered again, next mention. */
   | { kind: "not_offerable"; sentence: string }
-  /** 404 for the route itself: an older gateway. Mentions stop and the composer says so. */
+  /** 404 (or 405) without a code: the route itself is missing (an older gateway). Mentions stop
+   * and the composer says so. */
   | { kind: "unavailable"; sentence: string }
   /** 503 `entity_cannot_answer`: said, the message stays in the composer, mentions stop. */
   | { kind: "cannot_answer"; sentence: string }
@@ -95,8 +96,9 @@ function errorBody(error: unknown): { status: number; detail: string; code: stri
 /**
  * The refusal an error of `POST /sessions/{sid}/mentions` stands for: the gateway's codes decide
  * (`{detail, code}`). A 404 with a code (`entity_not_found`: a missing entity, or one this account
- * may not see) is this entity; a plain 404 without a code is the route itself missing (an older
- * gateway). A 422 (`repeat_of_unknown`, …) is a failure with the gateway's sentence.
+ * may not see) is this entity; a plain 404 or 405 without a code is the route itself missing (an
+ * older gateway; every refusal of the door is coded). A 422 (`repeat_of_unknown`, …) is a failure
+ * with the gateway's sentence.
  */
 export function mentionRefusal(error: unknown, name: string): MentionRefusal {
   const { status, detail, code } = errorBody(error);
@@ -104,10 +106,8 @@ export function mentionRefusal(error: unknown, name: string): MentionRefusal {
     if (code === "in_another_conversation" || !detail) return { kind: "elsewhere", sentence: `${name} is in another conversation.` };
     return { kind: "elsewhere", sentence: detail };
   }
-  if (status === 404) {
-    if (!code) return { kind: "unavailable", sentence: MENTIONS_UNAVAILABLE };
-    return { kind: "not_offerable", sentence: `${name} cannot be mentioned here.` };
-  }
+  if ((status === 404 || status === 405) && !code) return { kind: "unavailable", sentence: MENTIONS_UNAVAILABLE };
+  if (status === 404) return { kind: "not_offerable", sentence: `${name} cannot be mentioned here.` };
   if (status === 503) return { kind: "cannot_answer", sentence: detail || `${name} cannot answer right now.` };
   return { kind: "failed", sentence: `${name} could not be asked: ${detail || "the gateway did not answer"}.` };
 }
@@ -120,8 +120,13 @@ export type MentionsOutcome = {
   skipped: Array<{ mention: ChatMentionSent; refusal: MentionRefusal }>;
   /** The refusal that stopped the rest (503, the route missing, any other failure). */
   stopped: { mention: ChatMentionSent; refusal: MentionRefusal } | null;
+  /** Not answered because of `stopped`: that mention and every one after it, with their index
+   * (what a resend asks, with the same `repeat_of`). Empty when nothing stopped. */
+  unsent: ChatMentionSent[];
   /** Stop was pressed: the mentions after the one in flight were not asked. */
   aborted: boolean;
+  /** The mentions Stop kept from being asked. */
+  unasked: ChatMentionSent[];
 };
 
 /** One `POST /sessions/{sid}/mentions`; resolves with the gateway's answer. */
@@ -129,19 +134,21 @@ export type MentionPost = (mention: ChatMentionSent) => Promise<unknown>;
 
 /**
  * Ask each mention in order (`index` = `mention_index`), each after the previous returned, so the
- * second entity reads the first one's answer. A request already sent is never cut (the entity
- * answers anyway and the gateway records the turn): Stop only keeps the next ones from being asked.
+ * second entity reads the first one's answer; an entity named twice is asked once (its first
+ * index). A request already sent is never cut (the entity answers anyway and the gateway records
+ * the turn): Stop only keeps the next ones from being asked.
  */
 export async function sendMentions(
   mentions: readonly ChatMentionSent[],
   post: MentionPost,
   options: { signal?: AbortSignal; onAsking?: (mention: ChatMentionSent) => void } = {},
 ): Promise<MentionsOutcome> {
-  const outcome: MentionsOutcome = { answered: [], skipped: [], stopped: null, aborted: false };
-  const ordered = [...mentions].sort((a, b) => a.index - b.index);
-  for (const mention of ordered) {
+  const outcome: MentionsOutcome = { answered: [], skipped: [], stopped: null, unsent: [], aborted: false, unasked: [] };
+  const ordered = uniqueMentions([...mentions].sort((a, b) => a.index - b.index));
+  for (const [at, mention] of ordered.entries()) {
     if (options.signal?.aborted) {
       outcome.aborted = true;
+      outcome.unasked = ordered.slice(at);
       break;
     }
     options.onAsking?.(mention);
@@ -155,6 +162,7 @@ export async function sendMentions(
         continue;
       }
       outcome.stopped = { mention, refusal };
+      outcome.unsent = ordered.slice(at);
       break;
     }
     outcome.answered.push({ mention, runId: text(record(answer)?.run_id) });
@@ -175,29 +183,46 @@ export function mentionRequestBody(
 }
 
 /**
- * A view (or a view delta) without the prompts that repeat another turn's (`repeat_of` on a mention
- * turn's input message): the person's words show once, on their own turn, and the entity's answer
- * follows it. Anything else is returned unchanged (the same object when nothing is folded).
+ * The turns whose prompt repeats another turn's words, learned from a view (or a view delta): a
+ * mention turn's input message carries `repeat_of` (the person's own turn with the same words).
+ * Noted as run id -> repeated turn into `into`; true when something new was noted.
  */
-export function foldRepeatedPrompts<V>(view: V): V {
-  const row = record(view);
-  const messages = Array.isArray(row?.messages) ? (row!.messages as unknown[]) : null;
-  if (!messages) return view;
-  const kept = messages.filter((m) => !text(record(m)?.repeat_of));
-  return kept.length === messages.length ? view : ({ ...row, messages: kept } as V);
+export function noteRepeats(view: unknown, into: Map<string, string>): boolean {
+  const messages = record(view)?.messages;
+  if (!Array.isArray(messages)) return false;
+  let noted = false;
+  for (const raw of messages) {
+    const m = record(raw);
+    const runId = text(m?.run_id);
+    const of = text(m?.repeat_of);
+    if (m?.role !== "user" || !runId || !of || of === runId || into.get(runId) === of) continue;
+    into.set(runId, of);
+    noted = true;
+  }
+  return noted;
 }
 
-/** The same fold on a `/view/stream` frame (`view` and `delta` carry messages; others pass). */
-export function foldRepeatedPromptsFrame<F extends { event?: string; data: string }>(frame: F): F {
-  if ((frame.event !== "view" && frame.event !== "delta") || !frame.data.includes('"repeat_of"')) return frame;
-  let data: unknown;
+/** The same on a `/view/stream` frame (`view` and `delta` carry messages; others teach nothing). */
+export function noteRepeatsFrame(frame: { event?: string; data: string }, into: Map<string, string>): boolean {
+  if ((frame.event !== "view" && frame.event !== "delta") || !frame.data.includes('"repeat_of"')) return false;
   try {
-    data = JSON.parse(frame.data);
+    return noteRepeats(JSON.parse(frame.data), into);
   } catch {
-    return frame; // the kit reports the malformed frame itself
+    return false; // the kit reports the malformed frame itself
   }
-  const folded = foldRepeatedPrompts(data);
-  return folded === data ? frame : { ...frame, data: JSON.stringify(folded) };
+}
+
+/**
+ * The conversation without the prompts that repeat a turn SHOWN in it (`repeats`: run id -> the
+ * turn it repeats): the person's words show once, on their own turn, and each entity's answer
+ * follows. A repeat whose turn is not on screen keeps its words (else the question is gone).
+ * The same array when nothing is folded.
+ */
+export function foldRepeatedTurns(messages: ChatMessage[], repeats: ReadonlyMap<string, string>): ChatMessage[] {
+  if (!repeats.size) return messages;
+  const asked = new Set(messages.filter((m) => m.role === "user" && m.runId && !repeats.has(m.runId)).map((m) => m.runId as string));
+  const kept = messages.filter((m) => !(m.role === "user" && m.runId && asked.has(repeats.get(m.runId) ?? "")));
+  return kept.length === messages.length ? messages : kept;
 }
 
 /** Live (streamed) replies labelled with the author their frames named, by run, until the saved
@@ -221,11 +246,13 @@ export function namesList(names: readonly string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** The sentence above the composer once the mentions were asked: what was refused (409/404), or
- * that the answers show when the current reply ends; null when there is nothing to say. */
+/** The sentence above the composer once the mentions were asked: what was refused (409/404), who
+ * Stop kept from being asked, or that the answers show when the current reply ends; null when there
+ * is nothing to say. */
 export function mentionsSummary(outcome: MentionsOutcome, options: { replyStillRunning: boolean }): string | null {
   const parts = outcome.skipped.map((s) => s.refusal.sentence);
   if (outcome.stopped?.refusal.kind === "unavailable") parts.push(outcome.stopped.refusal.sentence);
+  if (outcome.aborted && outcome.unasked.length) parts.push(`Stopped before asking ${namesList(outcome.unasked.map((m) => m.name))}.`);
   const answered = outcome.answered.map((a) => a.mention.name);
   if (answered.length && options.replyStillRunning)
     parts.push(`${namesList(answered)} answered; shown when the current reply ends.`);
