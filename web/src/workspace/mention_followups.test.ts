@@ -26,8 +26,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("repeat_of: the person's words show once", () => {
   it("each mention names the person's own turn that carries the same words", () => {
-    expect(mentionRequestBody("hi", { id: "castor", name: "Castor", kind: "entity", index: 0 }, "run-agent")).toEqual({ entity: "castor", text: "hi", mention_index: 0, repeat_of: "run-agent" });
-    expect(mentionRequestBody("hi", { id: "castor", name: "Castor", kind: "entity", index: 0 }, "")).toEqual({ entity: "castor", text: "hi", mention_index: 0 });
+    expect(mentionRequestBody("hi", { id: "castor", name: "Castor", kind: "entity", index: 0 }, "run-agent", "run-agent")).toEqual({ entity: "castor", text: "hi", mention_index: 0, repeat_of: "run-agent", mention_id: "run-agent:castor:0" });
+    expect(mentionRequestBody("hi", { id: "castor", name: "Castor", kind: "entity", index: 0 }, "", "msg-1")).toEqual({ entity: "castor", text: "hi", mention_index: 0, mention_id: "msg-1:castor:0" });
   });
   const mentionView = {
     version: "replay_view_v1", root_run_id: "m1", session_id: "s1", status: "completed", cursor: { token: "m1:0~x", records: 0, runs: { m1: 0 } },

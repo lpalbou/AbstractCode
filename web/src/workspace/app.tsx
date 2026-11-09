@@ -1,6 +1,6 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
+import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionMessageKey, mentionNoticeFor, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -330,7 +330,7 @@ export function CodeWorkspace() {
   const repeatTurns = useRef(new Map<string, string>());
   // A send whose mentions stopped partway (a 503, a failure): its words, its `repeat_of` and the
   // mentions not answered. The next send of the same words with chips asks only those (no new turn).
-  const pendingResend = useRef<{ sessionId: string; identity: string; epoch: number; resend: MentionResend } | null>(null);
+  const pendingResend = useRef<{ sessionId: string; identity: string; epoch: number; message: string; resend: MentionResend } | null>(null);
   const unloadingRef = useRef(false);
   // Workspace files attached by path (Files panel → `attachments_ingest`): already references.
   const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
@@ -1240,11 +1240,14 @@ export function CodeWorkspace() {
    * asked. 503 or any other failure: said, and the rest is not asked; `keepDraft` puts the message
    * back in the composer and the send rejects naming the chips NOT answered (the kit keeps only
    * those). `resendable`: that message is then remembered, so sending it again asks only those
-   * mentions with the same `repeat_of` (`resendMentions`). Each reply is a session turn the gateway
-   * recorded; the conversation opens on the newest once the current reply has ended.
+   * mentions with the same `repeat_of` (`resendMentions`). `message`: a resend's key, so its mentions
+   * name the `mention_id`s they were first sent with (the gateway answers each once); a new message
+   * takes `mentionMessageKey(repeatOf)`. Each reply is a session turn the gateway recorded; the
+   * conversation opens on the newest once the current reply has ended.
    */
-  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { repeatOf: string; signal?: AbortSignal; keepDraft: boolean; resendable?: boolean }) {
+  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { repeatOf: string; message?: string; signal?: AbortSignal; keepDraft: boolean; resendable?: boolean }) {
     if (!mentions.length) return;
+    const message = options.message || mentionMessageKey(options.repeatOf);
     const askedBy = identityRef.current;
     const epoch = authEpoch.current;
     const here = () => sessionRef.current.sessionId === sessionId && identityRef.current === askedBy && authEpoch.current === epoch;
@@ -1254,7 +1257,7 @@ export function CodeWorkspace() {
       (mention) =>
         gatewayRequest(gatewayApiPath(`sessions/${encodeURIComponent(sessionId)}/mentions`), {
           method: "POST",
-          body: JSON.stringify(mentionRequestBody(text, mention, options.repeatOf)),
+          body: JSON.stringify(mentionRequestBody(text, mention, options.repeatOf, message)),
         }),
       {
         signal: options.signal,
@@ -1272,7 +1275,7 @@ export function CodeWorkspace() {
     if (stop && stop.kind !== "unavailable") {
       if (options.keepDraft && here()) setDraft(text);
       if (options.resendable && outcome.unsent.length)
-        pendingResend.current = { sessionId, identity: askedBy, epoch, resend: { text, repeatOf: options.repeatOf || null, unsent: outcome.unsent } };
+        pendingResend.current = { sessionId, identity: askedBy, epoch, message, resend: { text, repeatOf: options.repeatOf || null, unsent: outcome.unsent } };
       throw mentionsStoppedError(stop.sentence, outcome.unsent);
     }
   }
@@ -1288,7 +1291,7 @@ export function CodeWorkspace() {
     if (!held || held.sessionId !== session.sessionId || held.identity !== identityRef.current || held.epoch !== authEpoch.current) return false;
     const asked = mentionResend(held.resend, text, mentions);
     if (!asked) return false;
-    await askMentions(held.sessionId, held.resend.text, asked, { repeatOf: held.resend.repeatOf ?? "", signal, keepDraft: true, resendable: true });
+    await askMentions(held.sessionId, held.resend.text, asked, { repeatOf: held.resend.repeatOf ?? "", message: held.message, signal, keepDraft: true, resendable: true });
     if (sessionRef.current.sessionId === held.sessionId) setDraft("");
     return true;
   }

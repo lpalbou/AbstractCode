@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (web)
 
+- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
+  message's turn, the entity, its place in the message). If the answer was lost on the way back (a
+  timeout, a dropped connection) and you send the same words again, the gateway returns the answer
+  the entity already gave instead of asking it twice; a new message is asked as new. Needs an
+  AbstractGateway that keeps mention ids (main f0f23bb0 or later).
 - **Mentions, client review 2026-11-09.** Resending after an entity could not answer (503) no longer asks again
   the entity that already answered, nor starts the person's turn again: the box keeps the words and only the chips
   not answered, and sending the same words again asks only those, with the same `repeat_of` and their first

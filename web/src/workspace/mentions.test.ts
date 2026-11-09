@@ -9,9 +9,12 @@ import {
   entityCandidates,
   filterMentionCandidates,
   isMentionTurn,
+  mentionId,
+  mentionMessageKey,
   mentionNoticeFor,
   mentionRefusal,
   mentionRequestBody,
+  mintMessageId,
   mentionsSummary,
   sendMentions,
 } from "./mentions";
@@ -110,8 +113,17 @@ describe("asking the mentions of one message", () => {
     expect(outcome.answered.map((a) => [a.mention.id, a.runId])).toEqual([["castor", "turn-castor"], ["hypnos", "turn-hypnos"]]);
     expect(outcome.stopped).toBeNull();
   });
-  it("the request body is the message as typed, the entity's id and its position", () => {
-    expect(mentionRequestBody("  what do you think?  ", hypnos)).toEqual({ entity: "hypnos", text: "what do you think?", mention_index: 1 });
+  it("the request body is the message as typed, the entity's id, its position and its mention_id", () => {
+    expect(mentionRequestBody("  what do you think?  ", hypnos, undefined, "msg-1")).toEqual({ entity: "hypnos", text: "what do you think?", mention_index: 1, mention_id: "msg-1:hypnos:1" });
+    expect(mentionRequestBody("hi", castor, "run-a", "run-a")).toEqual({ entity: "castor", text: "hi", mention_index: 0, repeat_of: "run-a", mention_id: "run-a:castor:0" });
+  });
+  it("one answer per mention (gateway f0f23bb0): the message key is the person's turn, else minted; a new message, a new key", () => {
+    expect(mentionMessageKey("run-a", () => "msg-x")).toBe("run-a");
+    expect(mentionMessageKey("", () => "msg-x")).toBe("msg-x");
+    expect(mintMessageId()).toMatch(/^msg-[0-9a-f]{24}$/);
+    expect(mentionMessageKey(undefined)).not.toBe(mentionMessageKey(undefined));
+    expect(mentionRequestBody("hi", castor, "run-a", mentionMessageKey("run-a")).mention_id).not.toBe(mentionRequestBody("hi", castor, "run-b", mentionMessageKey("run-b")).mention_id);
+    expect(() => mentionId("", castor)).toThrow();
   });
   it("409 and an entity's 404 are said and the next one is asked; never queued", async () => {
     const calls: string[] = [];
@@ -191,8 +203,9 @@ describe("asking the mentions of one message", () => {
   it("review 2026-11-09 B1: the resend asks only the unsent, with the same words and repeat_of; Castor is never asked again", async () => {
     // First send: the person's turn run-a, then Castor (answers) and Hypnos (503).
     const bodies: unknown[] = [];
+    const message = mentionMessageKey("run-a");
     const post = (fail: string) => async (m: typeof castor) => {
-      bodies.push(mentionRequestBody("does the plan hold?", m, "run-a"));
+      bodies.push(mentionRequestBody("does the plan hold?", m, "run-a", message));
       if (m.id === fail) throw httpError(503, { detail: "Hypnos cannot answer right now.", code: "entity_cannot_answer" });
       return { run_id: `turn-${m.id}` };
     };
@@ -205,7 +218,9 @@ describe("asking the mentions of one message", () => {
     expect(asked).toEqual([hypnos]);
     bodies.length = 0;
     await sendMentions(asked!, post(""));
-    expect(bodies).toEqual([{ entity: "hypnos", text: "does the plan hold?", mention_index: 1, repeat_of: "run-a" }]);
+    // The same mention_id as the first send's Hypnos ask: the gateway returns its first answer if
+    // the 503 was in fact a lost answer, never a second one.
+    expect(bodies).toEqual([{ entity: "hypnos", text: "does the plan hold?", mention_index: 1, repeat_of: "run-a", mention_id: "run-a:hypnos:1" }]);
     // Other words are a new message (the app then starts a turn as for any message).
     expect(mentionResend({ text: "does the plan hold?", repeatOf: "run-a", unsent: first.unsent }, "and now?", [{ ...hypnos, index: 0 }])).toBeNull();
   });

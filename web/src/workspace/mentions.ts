@@ -5,6 +5,12 @@
 // returned. Each reply is a turn of the session the gateway records (workflow `entity-mention`,
 // with its `author`), so the conversation shows it from the gateway's own history after a reload too.
 //
+// One answer per mention (AbstractGateway f0f23bb0, `mention_id`): each mention carries its own id,
+// `<message>:<entity>:<mention_index>`, the message being the person's turn (`repeat_of`), or an id
+// minted once for the message when it has none. A resend of the message (the same words after an
+// entity could not answer, a timeout or a lost answer) names the same ids, so the gateway gives back
+// the first answer instead of asking the entity again; a new message gets new ids.
+//
 // DOM-free: app.tsx wires these rules; mentions.test.ts checks them. Nothing here reads `@` out
 // of the message text (no-heuristics ruling): a mention is only ever a picked chip.
 import { uniqueMentions, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent } from "../vendor/abstractchat/conversation.js";
@@ -170,16 +176,37 @@ export async function sendMentions(
   return outcome;
 }
 
-/** The request body of one mention: the message as typed, the entity's id, its position, and
+/** A fresh message id: "msg-" and 24 random hex digits (crypto.getRandomValues: any page). */
+export function mintMessageId(): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  return `msg-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** The message part of its mentions' ids: the person's turn (`repeat_of`) when there is one, else an
+ * id minted now. Taken once per message and held with it; a resend passes the one first used. */
+export function mentionMessageKey(repeatOf: string | null | undefined, mint: () => string = mintMessageId): string {
+  return String(repeatOf ?? "").trim() || mint();
+}
+
+/** One mention's `mention_id`: `<message>:<entity>:<mention_index>`. An empty message key throws. */
+export function mentionId(message: string, mention: Pick<ChatMentionSent, "id" | "index">): string {
+  const key = String(message ?? "").trim();
+  if (!key) throw new Error("A mention needs its message key (mention_id).");
+  return `${key}:${mention.id}:${mention.index}`;
+}
+
+/** The request body of one mention: the message as typed, the entity's id, its position,
  * `repeat_of`, the person's own turn of this session that carries the same words (the gateway marks
- * the mention turn with it, and Code folds the repeated prompt by it). */
+ * the mention turn with it, and Code folds the repeated prompt by it), and its `mention_id` from the
+ * message's key (`message`). */
 export function mentionRequestBody(
   text: string,
   mention: ChatMentionSent,
-  repeatOf?: string,
-): { entity: string; text: string; mention_index: number; repeat_of?: string } {
+  repeatOf: string | undefined,
+  message: string,
+): { entity: string; text: string; mention_index: number; repeat_of?: string; mention_id: string } {
   const turn = String(repeatOf ?? "").trim();
-  return { entity: mention.id, text: String(text ?? "").trim(), mention_index: mention.index, ...(turn ? { repeat_of: turn } : {}) };
+  return { entity: mention.id, text: String(text ?? "").trim(), mention_index: mention.index, ...(turn ? { repeat_of: turn } : {}), mention_id: mentionId(message, mention) };
 }
 
 /**

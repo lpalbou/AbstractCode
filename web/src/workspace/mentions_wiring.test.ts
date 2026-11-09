@@ -32,7 +32,12 @@ describe("a send with picked names", () => {
   });
   it("each mention is one POST to the session's mentions route", () => {
     expect(app).toContain("gatewayApiPath(`sessions/${encodeURIComponent(sessionId)}/mentions`)");
-    expect(app).toContain("body: JSON.stringify(mentionRequestBody(text, mention, options.repeatOf))");
+    expect(app).toContain("body: JSON.stringify(mentionRequestBody(text, mention, options.repeatOf, message))");
+  });
+  it("one answer per mention (gateway f0f23bb0): a new message keys its mention_ids from its turn; a resend names the held key", () => {
+    expect(app).toContain("const message = options.message || mentionMessageKey(options.repeatOf);");
+    // The resend's held key goes back, never a new one (checked just above with the resend call).
+    expect(app).toMatch(/message: held\.message, signal, keepDraft: true, resendable: true/);
   });
   it("live replies are labelled from their stream frames until the saved message replaces them", () => {
     expect(app).toContain("liveAuthors.current.set(runId, author);");
@@ -40,9 +45,9 @@ describe("a send with picked names", () => {
     expect(app).toContain("repeats: repeatTurns.current,");
   });
   it("review 2026-11-09 B1: a stop names the unsent chips and remembers the message; a resend of it asks only those, before any turn", () => {
-    expect(app).toContain("pendingResend.current = { sessionId, identity: askedBy, epoch, resend: { text, repeatOf: options.repeatOf || null, unsent: outcome.unsent } };");
+    expect(app).toContain("pendingResend.current = { sessionId, identity: askedBy, epoch, message, resend: { text, repeatOf: options.repeatOf || null, unsent: outcome.unsent } };");
     expect(app).toContain("throw mentionsStoppedError(stop.sentence, outcome.unsent);");
-    expect(app).toContain("await askMentions(held.sessionId, held.resend.text, asked, { repeatOf: held.resend.repeatOf ?? \"\", signal, keepDraft: true, resendable: true });");
+    expect(app).toContain("await askMentions(held.sessionId, held.resend.text, asked, { repeatOf: held.resend.repeatOf ?? \"\", message: held.message, signal, keepDraft: true, resendable: true });");
     // The resend check runs FIRST in both doors: before startTurn / guideRun / the queue.
     expect(app).toMatch(/setMentionStatus\(null\);\s*if \(await resendMentions\(text, mentions, opts\?\.signal\)\) return;\s*if \(!active\) \{\s*const started = await startTurn/);
     expect(app).toMatch(/setMentionStatus\(null\);\s*if \(await resendMentions\(text, mentions\)\) return \{ accepted: true \};\s*if \(mode === "queue"\)/);
