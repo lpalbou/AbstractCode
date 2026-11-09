@@ -1,6 +1,6 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionMessageKey, mentionNoticeFor, mentionRepeatOf, mentionRequestBody, mentionsSummary, sendMentions, withLiveAuthors } from "./mentions";
+import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionMessageKey, mentionNoticeFor, mentionRepeatOf, mentionRequestBody, mentionsSummary, sendMentions, startRunMentions, withLiveAuthors } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -1006,7 +1006,9 @@ export function CodeWorkspace() {
     return input;
   }
 
-  async function startTurn(text: string, signal?: AbortSignal): Promise<string> {
+  // `mentions`: the names picked with the words. They ride the start, so the gateway tells the
+  // agent the mentioned entities answer for themselves (it may say nothing: no bubble shows).
+  async function startTurn(text: string, signal?: AbortSignal, mentions: readonly ChatMentionSent[] = []): Promise<string> {
     if (sendLock.current) throw new Error("A turn is already being submitted.");
     if (!connection.connected)
       throw new Error("Connect to your gateway first.");
@@ -1081,6 +1083,7 @@ export function CodeWorkspace() {
         workflow,
         sessionId: startedSession,
         input,
+        mentions: startRunMentions(mentions),
       });
       if (avatarMode) Object.assign(body, { conversation: true });
       // Stop pressed before the start left: nothing is started, nothing to cancel.
@@ -1399,7 +1402,7 @@ export function CodeWorkspace() {
     setMentionStatus(null);
     if (await resendMentions(text, mentions, opts?.signal)) return;
     if (!active) {
-      const started = await startTurn(text, opts?.signal);
+      const started = await startTurn(text, opts?.signal, mentions);
       await askMentions(sessionId, text, mentions, { repeatOf: mentionRepeatOf({ started }), signal: opts?.signal, keepDraft: true, resendable: true });
       return;
     }
@@ -1424,7 +1427,7 @@ export function CodeWorkspace() {
       })
     )
       throw staleSendAbort();
-    const nextRunId = await startTurn(intent.text);
+    const nextRunId = await startTurn(intent.text, undefined, intent.mentions ?? []);
     setQueue((items) => advanceQueueIntents(items, intent, nextRunId));
     // Its names are asked now; a refusal is said and never pauses the queue (the turn started).
     await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { repeatOf: mentionRepeatOf({ started: nextRunId }), keepDraft: false }).catch((e) => setError(formatError(e)));

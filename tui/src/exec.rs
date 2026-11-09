@@ -754,6 +754,8 @@ pub fn run(args: &Args) -> i32 {
         } else {
             None
         },
+        // A headless prompt picks no `@` chips.
+        mentions: Vec::new(),
     };
     let mut input = build_input_data(&prompt, &opts);
     // `--param` pins ride input_data top-level — on_flow_start resolves
@@ -781,6 +783,7 @@ pub fn run(args: &Args) -> i32 {
             None,
             Some(&session_id),
             input,
+            &[],
         )
     } else {
         client.start_run(
@@ -788,6 +791,7 @@ pub fn run(args: &Args) -> i32 {
             Some(&workflow.bundle_id),
             Some(&session_id),
             input,
+            &[],
         )
     };
     let (run_id, resolved) = match started {

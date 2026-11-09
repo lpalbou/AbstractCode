@@ -1079,8 +1079,10 @@ fn submit(
                 // The ONE call site that carries pending attachments
                 // (explicit plain-prompt send): goal starts and queue
                 // drains go through `start_run` and stay chip-free.
+                // The chips' entities ride the start (`mentions`): the agent
+                // is told they answer for themselves.
                 Phase::Idle => {
-                    start_run_attaching(store, ctx, &text);
+                    start_run_attaching(store, ctx, &text, crate::mention::start_mentions(&calls));
                     started = store.phase.get_untracked() == Phase::Starting;
                 }
             }
@@ -1107,15 +1109,16 @@ fn submit(
     }
 }
 
-/// Explicit composer send: carries the pending attachment chips.
-pub(crate) fn start_run_attaching(store: Store, ctx: &UiCtx, prompt: &str) {
+/// Explicit composer send: carries the pending attachment chips and the
+/// entities the message mentions (`mention::start_mentions`).
+pub(crate) fn start_run_attaching(store: Store, ctx: &UiCtx, prompt: &str, mentions: Vec<String>) {
     let pending = store.pending_attachments.get_untracked();
-    start_run_inner(store, ctx, prompt, pending);
+    start_run_inner(store, ctx, prompt, pending, mentions);
 }
 
 /// Chip-free start (queue drains, programmatic restarts).
 pub(crate) fn start_run(store: Store, ctx: &UiCtx, prompt: &str) {
-    start_run_inner(store, ctx, prompt, Vec::new());
+    start_run_inner(store, ctx, prompt, Vec::new(), Vec::new());
 }
 
 fn start_run_inner(
@@ -1123,6 +1126,7 @@ fn start_run_inner(
     ctx: &UiCtx,
     prompt: &str,
     attachments: Vec<crate::store::PendingAttachment>,
+    mentions: Vec<String>,
 ) {
     let workflow = store.workflow.get_untracked();
     if workflow.flow_id.is_empty() {
@@ -1139,7 +1143,10 @@ fn start_run_inner(
     }
     // No client conversation context: the gateway replays the session's
     // prior turns through the runtime's one history window (run_input.rs).
-    let opts = agent_start_opts(store, ctx);
+    let opts = StartOpts {
+        mentions,
+        ..agent_start_opts(store, ctx)
+    };
     send_start(store, ctx, workflow, prompt, opts, attachments);
 }
 
@@ -1332,6 +1339,9 @@ pub(crate) fn agent_start_opts(store: Store, ctx: &UiCtx) -> StartOpts {
         skills: store.selected_skills.get_untracked(),
         goal: None,
         tool_policy,
+        // Filled by the composer's plain send (`start_run_attaching`): goal
+        // and queue-drain starts mention no one.
+        mentions: Vec::new(),
     }
 }
 
@@ -3184,6 +3194,33 @@ mod tests {
     use super::*;
 
     use std::sync::mpsc;
+
+    /// AbstractGateway c26d38a2: the composer's plain send hands the
+    /// chips' entities to the start (`StartOpts::mentions`, the runner
+    /// sends them as the body's `mentions`); goal and queue-drain starts
+    /// mention no one.
+    #[test]
+    fn the_composer_send_hands_its_mentions_to_the_start() {
+        let src = include_str!("mod.rs");
+        // Needles are joined at run time: this test's own text never matches.
+        let has = |parts: &[&str]| src.contains(&parts.concat());
+        assert!(has(&[
+            "start_run_attaching(store, ctx, &text, ",
+            "crate::mention::start_mentions(&calls));"
+        ]));
+        assert!(has(&[
+            "start_run_inner(store, ctx, prompt, ",
+            "pending, mentions);"
+        ]));
+        assert!(has(&[
+            "start_run_inner(store, ctx, prompt, ",
+            "Vec::new(), Vec::new());"
+        ]));
+        assert!(has(&[
+            "let opts = StartOpts {\n        ",
+            "mentions,\n        ..agent_start_opts(store, ctx)\n    };"
+        ]));
+    }
 
     #[test]
     fn engine_notices_toast_only_in_debug_builds() {

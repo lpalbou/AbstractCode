@@ -17,6 +17,7 @@ import {
   mintMessageId,
   mentionsSummary,
   sendMentions,
+  startRunMentions,
 } from "./mentions";
 import type { WorkflowDefinition } from "./catalog";
 import { mentionResend, mentionsStoppedError, unsentMentionsOf } from "../vendor/abstractchat/conversation.js";
@@ -262,5 +263,15 @@ describe("a conversation whose newest turn is a mention reply", () => {
   it("an agent turn whose workflow is gone still says so", () => {
     const restore = conversationRestore({ ...base, workflows: [], restoredInputs: { run_id: "a2", workflow_id: "code-agent@1.0.0:main", input_data: {} }, run: { workflow_id: "entity-mention" } });
     expect(restore.error).toBe(WORKFLOW_GONE);
+  });
+});
+
+describe("the session agent stays silent for what is addressed to entities (AbstractGateway c26d38a2)", () => {
+  it("the start names the mentioned entities in pick order, each once; none when nothing is mentioned", () => {
+    const vega = { id: "vega", name: "Vega", kind: "entity" as const, index: 2 };
+    const picked = [vega, hypnos, castor, { ...hypnos, index: 3 }];
+    expect(startRunMentions(picked)).toEqual(["castor", "hypnos", "vega"]);
+    expect(picked.map((m) => m.id)).toEqual(["vega", "hypnos", "castor", "hypnos"]); // the chips are not reordered
+    expect(startRunMentions([])).toEqual([]);
   });
 });

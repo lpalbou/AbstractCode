@@ -109,6 +109,25 @@ pub fn route(value: &ComposerSubmission) -> Route {
     }
 }
 
+/// `mentions` of `POST /runs/start` (AbstractGateway c26d38a2): the
+/// entities the message mentions, by the slug the mention call names, in
+/// chip order (`index`), each once. With it the gateway tells the
+/// conversation's agent that the mentioned entities answer for themselves:
+/// it answers only the part addressed to it, or says nothing (an empty
+/// reply, which the gateway serves as no answer). Empty when the message
+/// mentions no entity: the start then carries no `mentions` key.
+pub fn start_mentions(calls: &[MentionCall]) -> Vec<String> {
+    let mut ordered: Vec<&MentionCall> = calls.iter().collect();
+    ordered.sort_by_key(|c| c.index);
+    let mut out: Vec<String> = Vec::new();
+    for c in ordered {
+        if !out.contains(&c.entity) {
+            out.push(c.entity.clone());
+        }
+    }
+    out
+}
+
 /// The composer's hint before a message that names someone new: "<name>
 /// will read this conversation's history." for every chip in the draft
 /// whose entity this session has not been told about (`told`: `(session,
@@ -413,6 +432,33 @@ mod tests {
         assert_eq!(c[1].name, "doorcheck", "a nameless row shows its slug");
         assert_eq!(c[1].hint.as_deref(), Some("awake · 2 task(s) pending"));
         assert!(candidates(&[]).is_empty());
+    }
+
+    /// AbstractGateway c26d38a2: the run start names the message's
+    /// entities in chip order, each once; none when it names nobody.
+    #[test]
+    fn the_start_names_the_mentioned_entities_in_order_each_once() {
+        let call = |entity: &str, index: usize| MentionCall {
+            entity: entity.into(),
+            name: entity.into(),
+            index,
+        };
+        let calls = vec![
+            call("vega", 2),
+            call("pollux", 1),
+            call("castor", 0),
+            call("pollux", 3),
+        ];
+        assert_eq!(start_mentions(&calls), vec!["castor", "pollux", "vega"]);
+        let two = ComposerSubmission {
+            text: "@Castor and @Pollux, does the plan hold?".into(),
+            mentions: vec![chip("castor", "Castor", 0), chip("pollux", "Pollux", 1)],
+        };
+        let Route::Mentions(routed) = route(&two) else {
+            panic!("chips with words are mentions")
+        };
+        assert_eq!(start_mentions(&routed), vec!["castor", "pollux"]);
+        assert!(start_mentions(&[]).is_empty());
     }
 
     #[test]

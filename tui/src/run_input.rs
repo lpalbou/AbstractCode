@@ -133,6 +133,11 @@ pub struct StartOpts {
     /// A/B measurement. Only an explicit posture is ever sent — an untouched
     /// caller keeps byte-parity.
     pub prompt_cache: Option<bool>,
+    /// The entities the message mentions (`mention::start_mentions`): the
+    /// run start's top-level `mentions` (AbstractGateway c26d38a2), never
+    /// part of `input_data`. Only the composer's plain send fills it; empty
+    /// = no key.
+    pub mentions: Vec<String>,
 }
 
 pub fn build_input_data(prompt: &str, opts: &StartOpts) -> Value {
@@ -611,8 +616,12 @@ mod tests {
             context_window: 262_144,
             attachments: vec![json!({"$artifact": "a1", "filename": "report.pdf"})],
             prompt_cache: Some(false),
+            mentions: vec!["castor".into()],
         };
         let input = build_input_data("make the suite green", &opts);
+        // The mentioned entities ride the start's own body (`start_run_body`),
+        // never input_data.
+        assert!(input.get("mentions").is_none(), "{input}");
         // Top-level surfaces.
         assert_eq!(input["prompt"], json!("make the suite green"));
         assert_eq!(input["use_session_history"], json!(true));

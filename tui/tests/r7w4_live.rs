@@ -86,6 +86,7 @@ fn start(session: &str, flow: &str, prompt: &str) -> String {
             Some(BUNDLE),
             Some(session),
             json!({ "prompt": prompt }),
+            &[],
         )
         .expect("start a fixture run")
         .run_id

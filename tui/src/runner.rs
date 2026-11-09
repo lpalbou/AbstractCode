@@ -1888,9 +1888,12 @@ impl Runner {
         } else {
             Some(bundle_id.as_str())
         };
+        // The message mentioned entities: they answer for themselves, and the
+        // agent may say nothing (no "without a readable final answer" line).
+        let entities_answer = !opts.mentions.is_empty();
         match self
             .client
-            .start_run(&flow_id, bundle, Some(&session_id), input)
+            .start_run(&flow_id, bundle, Some(&session_id), input, &opts.mentions)
         {
             Ok(started) => {
                 let run_id = started.run_id;
@@ -1927,7 +1930,7 @@ impl Runner {
                     // turn that never happened there (the boundary
                     // discard already emptied its pending list).
                     let current = store.session_id.with_untracked(|s| s == &started_session);
-                    apply_start_binding(&store, &tx, &rid, &started_session);
+                    apply_start_binding(&store, &tx, &rid, &started_session, entities_answer);
                     // Custody transfers: the sent batch leaves the pending
                     // list (chips added mid-flight survive) and the 📎
                     // line records what rode this turn.
@@ -3096,11 +3099,17 @@ impl Runner {
 /// old behavior streamed the orphan run's transcript into the new session
 /// and captured its composer): it is cancelled durably instead, and no
 /// signal moves. Extracted for unit tests (the closure runs via wake.post).
+///
+/// `entities_answer`: the start carried `mentions` (the message mentioned
+/// entities): the new turn is marked so an agent that says nothing ends it
+/// with no "without a readable final answer" line
+/// (`Fold::entities_answer_this_turn`).
 pub(crate) fn apply_start_binding(
     store: &Store,
     tx: &Sender<Cmd>,
     run_id: &str,
     started_session: &str,
+    entities_answer: bool,
 ) {
     if store.session_id.with_untracked(|s| s != started_session) {
         let _ = tx.send(Cmd::Cancel {
@@ -3114,7 +3123,12 @@ pub(crate) fn apply_start_binding(
     store.run_started.set(Some(std::time::Instant::now()));
     store.elapsed_secs.set(0);
     store.paused.set_if_changed(false);
-    store.fold.update(|f| f.begin_run(run_id));
+    store.fold.update(|f| {
+        f.begin_run(run_id);
+        if entities_answer {
+            f.entities_answer_this_turn();
+        }
+    });
     store.conn.set_if_changed(Conn::Ok);
 }
 
@@ -5912,7 +5926,7 @@ mod tests {
             store.session_id.set("session-B".into());
 
             // Ok landing for a run started under session-A.
-            apply_start_binding(&store, &tx, "orphan-run", "session-A");
+            apply_start_binding(&store, &tx, "orphan-run", "session-A", false);
             match rx.try_recv() {
                 Ok(Cmd::Cancel { run_id }) => assert_eq!(run_id, "orphan-run"),
                 other => panic!("expected a durable cancel, got {other:?}"),
@@ -5939,7 +5953,7 @@ mod tests {
             assert_eq!(store.fold.with_untracked(|f| f.items.len()), 0);
 
             // Same-session outcomes still work exactly as before.
-            apply_start_binding(&store, &tx, "live-run", "session-B");
+            apply_start_binding(&store, &tx, "live-run", "session-B", false);
             assert_eq!(store.run_id.get_untracked(), "live-run");
             assert_eq!(store.phase.get_untracked(), Phase::Running);
             assert!(store.fold.with_untracked(|f| f.is_following("live-run")));
@@ -6489,7 +6503,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
             store.session_id.set("s1".into());
-            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_start_binding(&store, &tx, "root1", "s1", false);
             apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
 
             // Connect, then a snapshot + a live delta build the bubble.
@@ -6652,7 +6666,7 @@ mod tests {
                 let store = Store::create(cx);
                 store.session_id.set("s1".into());
                 let (tx, _rx) = std::sync::mpsc::channel();
-                apply_start_binding(&store, &tx, "root1", "s1");
+                apply_start_binding(&store, &tx, "root1", "s1", false);
                 if !is_root {
                     apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
                 }
@@ -6736,6 +6750,139 @@ mod tests {
         root.dispose();
     }
 
+    /// The `(path, body)` of every request a fake gateway read.
+    type Requests = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
+    /// A fake gateway that READS each request whole (headers and
+    /// `Content-Length` body) and records `(path, body)`: for the request
+    /// bodies a test checks. Unrouted paths answer 404.
+    fn recording_gateway(routes: Vec<(&'static str, String)>) -> (String, Requests) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for sock in l.incoming() {
+                let Ok(mut sock) = sock else { continue };
+                let mut reader = BufReader::new(sock.try_clone().unwrap());
+                let mut first = String::new();
+                let _ = reader.read_line(&mut first);
+                let mut length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some((k, v)) = line.split_once(':') {
+                        if k.trim().eq_ignore_ascii_case("content-length") {
+                            length = v.trim().parse().unwrap_or(0);
+                        }
+                    }
+                }
+                let mut body = vec![0u8; length];
+                let _ = reader.read_exact(&mut body);
+                let path = first.split_whitespace().nth(1).unwrap_or("").to_string();
+                let path = path.trim_start_matches("/api/gateway").to_string();
+                log.lock()
+                    .unwrap()
+                    .push((path.clone(), String::from_utf8_lossy(&body).to_string()));
+                let (status, answer) = routes
+                    .iter()
+                    .find(|(prefix, _)| path.starts_with(prefix))
+                    .map(|(_, b)| ("200 OK", b.clone()))
+                    .unwrap_or(("404 Not Found", "{}".to_string()));
+                let _ = write!(
+                    sock,
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                    answer.len()
+                );
+            }
+        });
+        (url, seen)
+    }
+
+    /// AbstractGateway c26d38a2: a send with chips starts its turn with the
+    /// entities as the body's own `mentions` (in chip order); a send
+    /// without chips sends no key. The bound turn is marked from the same
+    /// opts: its agent may say nothing, and then no "without a readable
+    /// final answer" line shows.
+    #[test]
+    fn a_start_with_mentions_names_them_and_marks_its_turn() {
+        let (url, seen) =
+            recording_gateway(vec![("/runs/start", json!({"run_id": "r1"}).to_string())]);
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s1".into());
+            let mut runner = runner_for(&url, store);
+            for mentions in [vec!["castor".to_string(), "hypnos".to_string()], Vec::new()] {
+                runner.start_run(
+                    "@Castor and @Hypnos, hi".into(),
+                    "agent".into(),
+                    "basic-agent".into(),
+                    "s1".into(),
+                    StartOpts {
+                        mentions: mentions.clone(),
+                        ..Default::default()
+                    },
+                    Vec::new(),
+                    0,
+                );
+                runner.stop_streams();
+                let body = seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .rev()
+                    .find(|(path, _)| path == "/runs/start")
+                    .map(|(_, body)| serde_json::from_str::<Value>(body).expect("a JSON body"))
+                    .expect("the start was sent");
+                if mentions.is_empty() {
+                    assert!(body.get("mentions").is_none(), "{body}");
+                } else {
+                    assert_eq!(body["mentions"], json!(["castor", "hypnos"]));
+                    assert!(body["input_data"].get("mentions").is_none(), "{body}");
+                }
+                // The binding the start posted marks the turn from the same opts.
+                abstracttui::reactive::drain_posted();
+                store.fold.update(|f| f.run_terminal("completed"));
+                let quiet = store.fold.with_untracked(|f| {
+                    !f.items
+                        .iter()
+                        .any(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer")))
+                });
+                assert_eq!(quiet, !mentions.is_empty(), "{mentions:?}");
+                store.fold.update(|f| f.items.clear());
+            }
+        });
+        root.dispose();
+        // The UI-thread half marks the bound turn from the same flag.
+        let line = |store: &Store| {
+            store.fold.with_untracked(|f| {
+                f.items
+                    .iter()
+                    .filter(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer")))
+                    .count()
+            })
+        };
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s1".into());
+            let (tx, _rx) = std::sync::mpsc::channel();
+            apply_start_binding(&store, &tx, "r1", "s1", true);
+            store.fold.update(|f| f.run_terminal("completed"));
+            assert_eq!(line(&store), 0, "an agent that said nothing for entities");
+            apply_start_binding(&store, &tx, "r2", "s1", false);
+            store.fold.update(|f| f.run_terminal("completed"));
+            assert_eq!(
+                line(&store),
+                1,
+                "an ordinary turn without an answer says so"
+            );
+        });
+        root.dispose();
+    }
+
     /// `@entity` mentions (2026-11-08): the run snapshot read at the end
     /// of a turn names who answered (`author`), and the turn's answer says
     /// so; an older gateway's snapshot (no author) leaves it exactly as it
@@ -6753,7 +6900,7 @@ mod tests {
                 let store = Store::create(cx);
                 store.session_id.set("s1".into());
                 let (tx, _rx) = std::sync::mpsc::channel();
-                apply_start_binding(&store, &tx, "root1", "s1");
+                apply_start_binding(&store, &tx, "root1", "s1", false);
                 let castor = abstracttui::widgets::ChatAuthor::new(
                     abstracttui::widgets::AuthorKind::Entity,
                     "Castor",
@@ -6812,7 +6959,7 @@ mod tests {
                 let store = Store::create(cx);
                 store.session_id.set("s1".into());
                 let (tx, rx) = std::sync::mpsc::channel();
-                apply_start_binding(&store, &tx, "root1", "s1");
+                apply_start_binding(&store, &tx, "root1", "s1", false);
                 apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
                 apply_stream_records(
                     &store,
@@ -7065,7 +7212,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
             store.session_id.set("s1".into());
-            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_start_binding(&store, &tx, "root1", "s1", false);
             // Peak bubble count, observed on every live write.
             let peak = std::rc::Rc::new(std::cell::Cell::new(0usize));
             {
@@ -7117,7 +7264,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
             store.session_id.set("s1".into());
-            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_start_binding(&store, &tx, "root1", "s1", false);
             apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
             // The agent subrun starts a reason cycle (answer-source binding).
             apply_stream_records(
@@ -7162,7 +7309,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
             store.session_id.set("s1".into());
-            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_start_binding(&store, &tx, "root1", "s1", false);
             apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
             apply_live_event(&store, "root1", live("c9", 1, "never ended", false));
             assert_eq!(live_texts(&store).len(), 1, "an open bubble");
@@ -7185,7 +7332,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             let (tx, rx) = std::sync::mpsc::channel::<Cmd>();
             store.session_id.set("s1".into());
-            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_start_binding(&store, &tx, "root1", "s1", false);
 
             // Root stream: the subworkflow wait discovers the agent subrun.
             apply_stream_records(&store, &tx, "root1", "root1", &[wrapper_wait_record()]);
@@ -7228,7 +7375,7 @@ mod tests {
                 );
             });
             // The next turn starts clean.
-            apply_start_binding(&store, &tx, "root2", "s1");
+            apply_start_binding(&store, &tx, "root2", "s1", false);
             assert!(!store.fold.with_untracked(|f| f.root_open_at_conclusion));
         });
         root.dispose();
@@ -7242,7 +7389,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
             store.session_id.set("s1".into());
-            apply_start_binding(&store, &tx, "root1", "s1");
+            apply_start_binding(&store, &tx, "root1", "s1", false);
             apply_stream_records(
                 &store,
                 &tx,
@@ -7282,7 +7429,7 @@ mod tests {
             let store = crate::store::Store::create(cx);
             let (tx, _rx) = std::sync::mpsc::channel::<Cmd>();
             store.session_id.set("s1".into());
-            apply_start_binding(&store, &tx, "root2", "s1");
+            apply_start_binding(&store, &tx, "root2", "s1", false);
             store.totals.set(SessionTotals {
                 input_tokens: 7,
                 output_tokens: 3,

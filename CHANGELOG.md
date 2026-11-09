@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A conversation that opens on an entity's answer continues with its newest agent turn's workflow (an answer is
   never taken for the conversation's workflow, which said "no longer available").
 - On the vendored panel-chat of AbstractUIC main aab7240 (local 0.9.9, not published; `npm run sync:conversation`).
+- **The agent leaves what you ask an entity to that entity.** A message with `@` chips now starts its turn with
+  the entities it mentions (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message
+  too). The agent answers only the part meant for it, or says nothing: the conversation then shows your words
+  and the entities' answers, with no empty reply. Needs AbstractGateway main c26d38a2 or later, and an agent that
+  accepts an empty reply (AbstractAgent still asks again today); an older gateway ignores the key.
 
 - **"Iteration limit" moved to Model → Limits & streaming, as the shared kit control** (AbstractUIC ui-kit 0.9.26
   `IterationLimitField`, operator 2026-11-08). It is the third row after "Context token limit" and "Stream replies"
@@ -90,6 +95,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent's turn (on the streaming reply as it arrives, on the answer when the turn ends, and from the
   history on reopen), "● Castor · entity" for an entity. Without one (an older gateway) the rule is the plain "assistant" as before. The Markdown
   export uses the same name, and the SFT export never takes an entity's reply as the agent's answer.
+- **The agent leaves what you ask an entity to that entity.** A message with `@` chips now starts its
+  turn with the entities it mentions (`mentions` on `POST /runs/start`, in chip order, each once). The
+  agent answers only the part meant for it, or says nothing: the turn then ends with your words and
+  the entities' answers, without "the run completed without a readable final answer". An answer that
+  arrives late still shows. Needs AbstractGateway main c26d38a2 or later, and an agent that accepts an
+  empty reply (AbstractAgent still asks again today); an older gateway ignores the key.
 
 ### Fixed (terminal, ships with the next terminal release)
 

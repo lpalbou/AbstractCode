@@ -187,6 +187,16 @@ describe("workflow selection", () => {
     });
   });
 
+  it("carries the mentioned entities with either choice, and no key when none (AbstractGateway c26d38a2)", () => {
+    const mentioned = startRunBody({ selection: GATEWAY_DEFAULT, workflow: agent, sessionId: "s1", input: { prompt: "hi" }, mentions: ["castor", "hypnos"] });
+    expect(mentioned.mentions).toEqual(["castor", "hypnos"]);
+    expect(startRunBody({ selection: agent.id, workflow: agent, sessionId: "s1", input: {}, mentions: ["castor"] }).mentions).toEqual(["castor"]);
+    for (const selection of [GATEWAY_DEFAULT, agent.id]) {
+      expect("mentions" in startRunBody({ selection, workflow: agent, sessionId: "s1", input: {}, mentions: [] })).toBe(false);
+      expect("mentions" in startRunBody({ selection, workflow: agent, sessionId: "s1", input: {} })).toBe(false);
+    }
+  });
+
   it("shows what the gateway resolved, and says when it did not report it", () => {
     expect(
       resolvedWorkflowNote({

@@ -585,15 +585,17 @@ impl GatewayClient {
     /// GATEWAY to run its default agent workflow for this client's interface:
     /// no `bundle_id` is sent and `interface` names `abstractcode.agent.v1`.
     /// A gateway without a usable default answers 409 with the reason, which
-    /// surfaces verbatim — there is no client-side substitute.
+    /// surfaces verbatim — there is no client-side substitute. `mentions`:
+    /// the entities the message mentions (`mention::start_mentions`).
     pub fn start_run(
         &self,
         flow_id: &str,
         bundle_id: Option<&str>,
         session_id: Option<&str>,
         input_data: Value,
+        mentions: &[String],
     ) -> GwResult<StartedRun> {
-        let body = start_run_body(flow_id, bundle_id, session_id, input_data);
+        let body = start_run_body(flow_id, bundle_id, session_id, input_data, mentions);
         let resp = self.post_json("/runs/start", &body)?;
         started_run_from_response(&resp)
     }
@@ -1269,12 +1271,15 @@ impl ResolvedWorkflow {
     }
 }
 
-/// The `/runs/start` request body (pure; test-pinned).
+/// The `/runs/start` request body (pure; test-pinned). `mentions` (the
+/// entities the message mentions, in chip order) rides only when there is
+/// one: the gateway then tells the agent they answer for themselves.
 pub fn start_run_body(
     flow_id: &str,
     bundle_id: Option<&str>,
     session_id: Option<&str>,
     input_data: Value,
+    mentions: &[String],
 ) -> Value {
     let mut body = json!({ "flow_id": flow_id, "input_data": input_data });
     if flow_id == crate::discovery::GATEWAY_DEFAULT_SENTINEL {
@@ -1289,6 +1294,9 @@ pub fn start_run_body(
         if !s.trim().is_empty() {
             body["session_id"] = json!(s.trim());
         }
+    }
+    if !mentions.is_empty() {
+        body["mentions"] = json!(mentions);
     }
     body
 }
@@ -1495,15 +1503,38 @@ mod tests {
             Some("ignored"),
             Some("s1"),
             json!({"prompt": "hi"}),
+            &[],
         );
         assert_eq!(d["flow_id"], "@default");
         assert_eq!(d["interface"], "abstractcode.agent.v1");
         assert!(d.get("bundle_id").is_none(), "{d}");
         assert_eq!(d["session_id"], "s1");
-        let n = start_run_body("coder", Some("coding-agent"), None, json!({}));
+        let n = start_run_body("coder", Some("coding-agent"), None, json!({}), &[]);
         assert_eq!(n["bundle_id"], "coding-agent");
         assert!(n.get("interface").is_none());
         assert!(n.get("session_id").is_none());
+    }
+
+    /// AbstractGateway c26d38a2: the entities a message mentions ride the
+    /// start as `mentions`, in chip order, with either workflow choice; a
+    /// message that mentions none sends no key.
+    #[test]
+    fn start_body_carries_the_mentioned_entities_only_when_there_are_some() {
+        let names = vec!["castor".to_string(), "hypnos".to_string()];
+        let d = start_run_body("@default", None, Some("s1"), json!({}), &names);
+        assert_eq!(d["mentions"], json!(["castor", "hypnos"]));
+        let n = start_run_body(
+            "coder",
+            Some("coding-agent"),
+            Some("s1"),
+            json!({}),
+            &names[..1],
+        );
+        assert_eq!(n["mentions"], json!(["castor"]));
+        for flow in ["@default", "coder"] {
+            let plain = start_run_body(flow, Some("coding-agent"), Some("s1"), json!({}), &[]);
+            assert!(plain.get("mentions").is_none(), "{plain}");
+        }
     }
 
     #[test]

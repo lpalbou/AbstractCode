@@ -179,6 +179,18 @@ export async function sendMentions(
   return outcome;
 }
 
+/**
+ * `mentions` of `POST /runs/start` (AbstractGateway c26d38a2): the entities the message mentions, by
+ * the id the mention door is sent (`entity`, the chip's slug), in the order they were picked
+ * (`index`), each once. With it the gateway tells the conversation's agent that the mentioned
+ * entities answer for themselves: it answers only the part addressed to it, or says nothing (an
+ * empty reply, which the gateway serves as no answer, so the kit shows no bubble for it). Empty for
+ * a message that mentions no entity: the start then carries no `mentions` key (`startRunBody`).
+ */
+export function startRunMentions(mentions: readonly ChatMentionSent[]): string[] {
+  return uniqueMentions(mentions.filter((m) => m.kind === "entity").sort((a, b) => a.index - b.index)).map((m) => m.id);
+}
+
 /** A fresh message id: "msg-" and 24 random hex digits (crypto.getRandomValues: any page). */
 export function mintMessageId(): string {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(12));

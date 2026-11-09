@@ -884,6 +884,13 @@ pub struct Fold {
     /// completion may correct this turn's provisional notice, never a prior turn
     /// or a failed/cancelled run. The exact note identifies its existing card.
     unresolved_terminal: Option<ProvisionalConclusion>,
+    /// This turn's message mentioned entities (`mentions` at its start,
+    /// AbstractGateway c26d38a2): they answer for themselves, and the agent
+    /// may say nothing (an empty reply, which the gateway serves as no
+    /// answer). Its turn then ends with no "without a readable final
+    /// answer" line; the entities' answers follow. Per-turn: cleared at
+    /// `begin_run`.
+    entities_answer: bool,
 }
 
 /// The attributed form of the newest reasoning gist — see
@@ -903,6 +910,7 @@ impl Fold {
 
     pub fn begin_run(&mut self, root_run_id: &str) {
         self.root_run_id = root_run_id.to_string();
+        self.entities_answer = false;
         self.steer_run_id.clear();
         self.agent_run_id.clear();
         self.followed.clear();
@@ -2103,7 +2111,22 @@ impl Fold {
         self.push_item(Item::Info { text: summary });
     }
 
+    /// The turn just begun was started with `mentions` (see
+    /// `entities_answer`).
+    pub fn entities_answer_this_turn(&mut self) {
+        self.entities_answer = true;
+    }
+
     fn note_missing_final(&mut self, note: &str) {
+        if self.entities_answer {
+            // The agent said nothing: no line. The conclusion stays
+            // provisional (a late answer still replaces it), with no notice.
+            self.unresolved_terminal = Some(ProvisionalConclusion {
+                notice: String::new(),
+                summary: String::new(),
+            });
+            return;
+        }
         self.unresolved_terminal = Some(ProvisionalConclusion {
             notice: note.to_owned(),
             summary: String::new(),
@@ -2122,6 +2145,17 @@ impl Fold {
         // even if bounded scrollback already evicted its visible markers.
         self.stopped_short = None;
         self.stop = None;
+        if provisional.notice.is_empty() {
+            // A quiet conclusion (`entities_answer`): no notice was shown, so
+            // only its own done summary goes.
+            let summary = self.items.iter().rposition(|item| {
+                matches!(item, Item::Info { text } if !provisional.summary.is_empty() && text == &provisional.summary)
+            });
+            if let Some(index) = summary {
+                self.items.remove(index);
+            }
+            return;
+        }
         let notice_index = self
             .items
             .iter()
@@ -4600,6 +4634,113 @@ mod tests {
             crate::exec::exit_code_for_status_with_verdict("cancelled", true),
             130
         );
+    }
+
+    /// AbstractGateway c26d38a2: a turn whose message mentioned entities
+    /// (`entities_answer_this_turn`) may get no reply from its agent. It
+    /// ends with no "without a readable final answer" line on every
+    /// conclusion path (status only, an output with an empty answer, the
+    /// agent subrun's end), its done summary once; a late answer still
+    /// shows once (the conclusion stays provisional). An unmarked turn and
+    /// the next turn keep the line.
+    #[test]
+    fn an_agent_that_says_nothing_for_entities_leaves_no_line() {
+        let line = |f: &Fold| {
+            f.items
+                .iter()
+                .filter(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer")))
+                .count()
+        };
+        let done = |f: &Fold| {
+            f.items
+                .iter()
+                .filter(|i| matches!(i, Item::Info { text } if text.starts_with("✓ done")))
+                .count()
+        };
+        let conclude = |f: &mut Fold, path: &str| match path {
+            "status" => f.run_terminal("completed"),
+            "empty answer" => {
+                f.apply(
+                    "root",
+                    &json!({"run_id":"root","node_id":"end","status":"completed",
+                        "result":{"completed":true,"output":{"answer":""}}}),
+                );
+            }
+            _ => f.subrun_terminal("agent1", "completed"),
+        };
+        for path in ["status", "empty answer", "agent"] {
+            let mut fold = Fold::new();
+            fold.begin_run("root");
+            fold.entities_answer_this_turn();
+            wire_agent_subrun(&mut fold, "root", "agent1");
+            conclude(&mut fold, path);
+            assert!(fold.finished, "{path}");
+            assert_eq!(line(&fold), 0, "{path}: no line");
+            assert!(
+                !fold
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, Item::Assistant { .. })),
+                "{path}: no answer card"
+            );
+            if path != "agent" {
+                assert_eq!(done(&fold), 1, "{path}: its done summary");
+            }
+            // A late answer still lands, once, and replaces the summary.
+            fold.apply(
+                "root",
+                &json!({"run_id":"root","node_id":"end","status":"completed",
+                    "result":{"completed":true,"output":{"answer":"Late words."}}}),
+            );
+            let answers = fold
+                .items
+                .iter()
+                .filter(|i| matches!(i, Item::Assistant { text, final_answer: true, .. } if text == "Late words."))
+                .count();
+            assert_eq!(answers, 1, "{path}: the late answer");
+            assert_eq!(done(&fold), 1, "{path}: one done summary");
+            assert_eq!(line(&fold), 0, "{path}");
+            // Control: the same end without the mark says so.
+            let mut plain = Fold::new();
+            plain.begin_run("root");
+            wire_agent_subrun(&mut plain, "root", "agent1");
+            conclude(&mut plain, path);
+            assert_eq!(line(&plain), 1, "{path}: an unmarked turn keeps the line");
+        }
+        // The mark is per turn.
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.entities_answer_this_turn();
+        fold.run_terminal("completed");
+        fold.begin_run("root2");
+        fold.run_terminal("completed");
+        assert_eq!(line(&fold), 1, "the next turn is ordinary");
+        // Bounded scrollback: a late answer to a quiet conclusion removes
+        // its done summary only, never the rows before it.
+        let mut fold = Fold::new();
+        fold.begin_run("root");
+        fold.entities_answer_this_turn();
+        for n in 0..MAX_ITEMS + TRUNCATE_CHUNK + 20 {
+            fold.push_item(Item::Info {
+                text: format!("Earlier detail {n}"),
+            });
+        }
+        assert!(fold.truncated());
+        fold.run_terminal("completed");
+        let earlier = |f: &Fold| {
+            f.items
+                .iter()
+                .filter(|i| matches!(i, Item::Info { text } if text.starts_with("Earlier detail")))
+                .count()
+        };
+        let kept = earlier(&fold);
+        fold.apply(
+            "root",
+            &json!({"run_id":"root","node_id":"end","status":"completed",
+                "result":{"completed":true,"output":{"answer":"Late words."}}}),
+        );
+        assert_eq!(earlier(&fold), kept, "the rows before the conclusion stay");
+        assert_eq!(done(&fold), 1);
     }
 
     #[test]

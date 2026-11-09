@@ -224,20 +224,25 @@ export function selectionSourceNote(restoredInputs: unknown): string {
 }
 
 /** `POST /runs/start` body. The gateway default is sent as the sentinel and
- * resolved by the server (no bundle fields); any other choice is explicit. */
+ * resolved by the server (no bundle fields); any other choice is explicit.
+ * `mentions`: the entities the message mentions (mentions.ts
+ * `startRunMentions`), sent only when there is one. */
 export function startRunBody(options: {
   selection: string;
   workflow: WorkflowDefinition;
   sessionId: string;
   input: Record<string, unknown>;
   interfaceId?: string;
+  mentions?: readonly string[];
 }): Record<string, unknown> {
+  const mentions = options.mentions?.length ? { mentions: [...options.mentions] } : {};
   if (options.selection === GATEWAY_DEFAULT)
     return {
       flow_id: GATEWAY_DEFAULT,
       interface: options.interfaceId ?? CODE_AGENT_INTERFACE,
       session_id: options.sessionId,
       input_data: options.input,
+      ...mentions,
     };
   return {
     bundle_id: options.workflow.bundleId,
@@ -246,6 +251,7 @@ export function startRunBody(options: {
     flow_id: options.workflow.flowId,
     session_id: options.sessionId,
     input_data: options.input,
+    ...mentions,
   };
 }
 

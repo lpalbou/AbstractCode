@@ -12,6 +12,7 @@ import { createWorkflowTransport } from "./session_transport";
 import { activityAttention, activityRowsOf } from "./workspace_panels";
 import { RunStatusBar } from "./run_status_bar";
 import view from "../lib/fixtures/replay_view/a_delegated_child_approval/view.json";
+import answered from "../lib/fixtures/replay_view/l_answer_then_completion/view.json";
 
 const ROOT = view.root_run_id;
 const CHILD = view.interaction!.run_id;
@@ -106,5 +107,42 @@ describe("replay-view mode through the app's transport", () => {
     const again = await rv.getView(ROOT, { ifNoneMatch: first.etag });
     expect(again).toMatchObject({ notModified: true, bytes: 0 });
     expect(requests.at(-1)?.headers.get("If-None-Match")).toBe(ETAG);
+  });
+});
+
+describe("an agent that says nothing (a message addressed to entities, AbstractGateway c26d38a2)", () => {
+  // The gateway tells the agent the mentioned entities answer for themselves; it may answer with an
+  // empty reply, and its view then holds the person's words alone (test_gateway_agent_mentions_line:
+  // roles == ["user"]). Code shows no bubble for it: the words, then the entities' answers.
+  const silent = { ...answered, messages: answered.messages.filter((m) => m.role === "user") };
+  const shown = async (served: typeof answered) => {
+    const root = served.root_run_id;
+    vi.stubGlobal("document", { cookie: "" });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json", ETag: `"${served.cursor.token}"` } });
+      if (url.endsWith("/view")) return json(served);
+      if (url.endsWith(`/runs/${root}`)) return json({ run_id: root, status: served.status, session_id: served.session_id });
+      if (url.includes(`/runs/${root}/history_bundle`)) return json({ session: { session_id: served.session_id, turns: [{ run_id: root }] } });
+      throw new Error(`unexpected request ${url}`);
+    }));
+    const controller = new WorkflowSessionController(createWorkflowTransport({ onDeltaError: () => {} }));
+    await controller.load(root);
+    for (let i = 0; i < 20 && controller.getSnapshot().status !== "completed"; i += 1) await tick();
+    const snapshot = controller.getSnapshot();
+    controller.dispose();
+    vi.unstubAllGlobals();
+    return snapshot;
+  };
+
+  it("its completed turn shows the person's words and no bubble; the same turn with words shows them (control)", async () => {
+    const quiet = await shown(silent);
+    expect(quiet.source).toBe("replay_view");
+    expect(quiet.status).toBe("completed");
+    expect(quiet.messages.map((m) => m.role)).toEqual(["user"]);
+    const chat = renderToStaticMarkup(<WorkflowChat messages={quiet.messages} draft="" onDraftChange={() => {}} onSend={() => {}} />);
+    expect(chat).toContain("Say hello");
+    const spoken = await shown(answered);
+    expect(spoken.messages.filter((m) => m.role === "assistant").map((m) => m.content)).toContain("Hello there.");
   });
 });
