@@ -3,7 +3,7 @@ name: abstractcode
 description: Operate AbstractCode terminal and browser clients of AbstractGateway. Use for connecting, continuing durable coding sessions, inspecting tool permissions and workspaces, asking scoped assistant questions, or configuring terminal voice and dictation.
 license: MIT
 metadata:
-  package-version: "terminal 0.15.0 / web 0.15.21"
+  package-version: "terminal 0.15.0 / web 0.16.0"
 ---
 
 # Use AbstractCode
@@ -47,11 +47,15 @@ scrolling, arrow keys and explicit buttons are available in the Tools list.
 
 ## Mentions
 
-In either client (terminal 0.15.0, web 0.15.21, with AbstractGateway 0.21.0),
+In either client (terminal 0.15.0, web 0.16.0, with AbstractGateway 0.21.0),
 type `@` and pick an entity: the pick is a chip, and a typed `@name` that was
-not picked is plain text. In the terminal, a message that is only one chip opens
-that entity's visit. Any other message starts the agent's turn, which answers
-only the part meant for it or says nothing, then each picked entity answers in
+not picked is plain text. The list starts with the conversation's agent (sent
+as `agent` in the start's `mentions`). In the terminal, a message that is only
+one entity chip opens that entity's visit. A message whose chips name entities
+and not the agent does not reach the agent: no agent run starts ("The agent
+stays out of this message." above the box). With the agent's chip too, the
+message starts the agent's turn, which answers only the part meant for it or
+says nothing. Either way each picked entity then answers in
 order under its own name (`● Castor · entity` in the terminal; the entity's
 name, orb and an "entity" tag on the browser's bubble). When an entity cannot
 answer, the message returns with only the unanswered chips: send it unchanged

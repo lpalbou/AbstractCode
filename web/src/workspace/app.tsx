@@ -1,6 +1,7 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, conversationWorkflowTurn, entityCandidates, filterMentionCandidates, foldRepeatedTurns, isMentionTurn, mentionMessageKey, mentionNoticeFor, mentionRepeatOf, mentionRequestBody, mentionsSummary, sendMentions, startRunMentions, withLiveAuthors } from "./mentions";
+import { MENTIONS_UNAVAILABLE, agentHint, agentNotAddressed, conversationWorkflowTurn, entityCandidates, entityMentions, filterMentionCandidates, foldRepeatedTurns, isSideTurn, mentionMessageKey, mentionNoticeFor, mentionRepeatOf, mentionRequestBody, mentionRoster, mentionsSummary, sendMentions, startRunMentions, startedTurn, withLiveAuthors, type StartedTurn } from "./mentions";
+import { useComposerChipKinds } from "./mention_chip_kinds";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -328,6 +329,16 @@ export function CodeWorkspace() {
   // Turns whose prompt repeats another turn's words (`repeat_of`), noted by the transport from the
   // views; the conversation folds such a prompt only while the turn it repeats is shown.
   const repeatTurns = useRef(new Map<string, string>());
+  // Turns the agent was not addressed in (mentions routing, operator 2026-11-10): the person's turn
+  // the gateway recorded for a message whose chips named entities and not the agent. Learned from
+  // the start's answer (`agent: "not_addressed"`) and from the gateway's marker on the turn
+  // (`agent_addressed: false` on its run and its view message), so it reads the same live and after
+  // a reload: no reply under way, no working dots.
+  const unaddressedTurns = useRef(new Set<string>());
+  // The conversation's element (a callback ref: it mounts again after an automation's view), whose
+  // composer chips decide the line above it (`agentHint`).
+  const [chatRoot, setChatRoot] = useState<HTMLElement | null>(null);
+  const chipKinds = useComposerChipKinds(chatRoot);
   // A send whose mentions stopped partway (a 503, a failure): its words, its `repeat_of` and the
   // mentions not answered. The next send of the same words with chips asks only those (no new turn).
   const pendingResend = useRef<{ sessionId: string; identity: string; epoch: number; message: string; resend: MentionResend } | null>(null);
@@ -458,6 +469,7 @@ export function CodeWorkspace() {
           liveAuthors.current.set(runId, author);
         },
         repeats: repeatTurns.current,
+        unaddressed: unaddressedTurns.current,
         onDeltaError: (report) => {
           const scope = streamScopeRef.current;
           const note = malformedDeltaNote(report, lastMessageIdRef.current);
@@ -496,8 +508,15 @@ export function CodeWorkspace() {
     );
   }, [controller, connection.connected, catalog.capabilitiesLoading, catalog.capabilitiesError, sessionPolicyCapability, session.sessionId]);
   useEffect(() => setAvatarReplyContext(null), [identity, session.sessionId]);
+  // The open turn is one the agent was not addressed in: nothing is under way there, whatever
+  // status its record carries (no spinner, no working dots, the conversation can move on).
+  const unaddressedTurn =
+    Boolean(session.runId) &&
+    (unaddressedTurns.current.has(session.runId) ||
+      (String(snapshot.run?.run_id || "") === session.runId && agentNotAddressed(snapshot.run)));
   const active =
     Boolean(session.runId) &&
+    !unaddressedTurn &&
     !terminal(snapshot.status) &&
     snapshot.status !== "idle";
   const paused = snapshot.run?.paused === true || snapshot.status === "paused";
@@ -567,6 +586,10 @@ export function CodeWorkspace() {
   // a timer or an event, nor while paused. WorkflowChat shows the working dots for it.
   const progressTone = useMemo(() => workflowProgress(snapshot).tone, [snapshot]);
   const working = !paused && (sending || (active && progressTone === "working"));
+  // The line above the composer while its chips name entities and not the agent (operator
+  // 2026-11-10), for a message that starts a turn: while a reply runs the words guide it, so the
+  // line would not be true then.
+  const composerAgentHint = !active && mentionsOff !== identity ? agentHint(chipKinds) : null;
   const interaction = useMemo(
     () =>
       // Deny / Allow (this tool) / Allow All (every tool), the two allows for the rest of this
@@ -812,10 +835,11 @@ export function CodeWorkspace() {
       gatewayRequest(gatewayApiPath(`runs/${encodeURIComponent(runId)}/input_data`), { signal: abort.signal });
     void inputsOf(loaded)
       .then(async (data) => {
-        // An entity's reply to an @mention is a turn of the conversation, not its workflow: the
-        // conversation continues with its newest agent turn's (`mentions.ts`). Only mention
-        // replies: none is restored (conversation_restore.ts says nothing is gone).
-        if (!isMentionTurn(data)) return data;
+        // An entity's reply to an @mention, or the person's turn the agent was not addressed in, is
+        // a turn of the conversation, not its workflow: the conversation continues with its newest
+        // agent turn's (`mentions.ts` isSideTurn). Only such turns: none is restored
+        // (conversation_restore.ts says nothing is gone).
+        if (!isSideTurn(data)) return data;
         const bundle = await gatewayRequest<any>(
           gatewayApiPath(`runs/${encodeURIComponent(loaded)}/history_bundle?include_session=true&include_subruns=false&ledger_max_items=1&detail=replay&session_turn_limit=201`),
           { signal: abort.signal },
@@ -880,7 +904,7 @@ export function CodeWorkspace() {
     const next = conversationSelection({ restoredInputs, restored: restoredWorkflow });
     if (next) setSelection(next);
   }, [session.runId, restoredInputs, restoredWorkflow?.id, notesSession]);
-  const sourceNote = session.runId && !isMentionTurn(restoredInputs) ? selectionSourceNote(restoredInputs) : "";
+  const sourceNote = session.runId && !isSideTurn(restoredInputs) ? selectionSourceNote(restoredInputs) : "";
 
   const newConversation = useCallback(() => {
     const next = { sessionId: newId(), runId: "" };
@@ -1006,9 +1030,11 @@ export function CodeWorkspace() {
     return input;
   }
 
-  // `mentions`: the names picked with the words. They ride the start, so the gateway tells the
-  // agent the mentioned entities answer for themselves (it may say nothing: no bubble shows).
-  async function startTurn(text: string, signal?: AbortSignal, mentions: readonly ChatMentionSent[] = []): Promise<string> {
+  // `mentions`: the names picked with the words. They ride the start (the agent's chip as "agent"):
+  // entities without the agent start no agent run (`agent: "not_addressed"`: the gateway recorded the
+  // person's turn, `turn` below, which the mentions repeat); with the agent, the gateway tells it the
+  // mentioned entities answer for themselves (it may say nothing: no bubble shows).
+  async function startTurn(text: string, signal?: AbortSignal, mentions: readonly ChatMentionSent[] = []): Promise<StartedTurn> {
     if (sendLock.current) throw new Error("A turn is already being submitted.");
     if (!connection.connected)
       throw new Error("Connect to your gateway first.");
@@ -1116,7 +1142,8 @@ export function CodeWorkspace() {
       void starting.then(
         (answer) => {
           if (!signal?.aborted) return;
-          const runId = String(answer?.run_id || "");
+          // A message the agent was not addressed in started no run: nothing to stop.
+          const runId = answer?.agent === "not_addressed" ? "" : String(answer?.run_id || "");
           if (!runId) {
             forgetStopWhileStarting(pendingStop);
             if (sameConversation()) endStopping();
@@ -1159,18 +1186,36 @@ export function CodeWorkspace() {
           ])
         : await starting;
       signal?.removeEventListener("abort", onStop);
-      if (!result.run_id)
-        throw new Error("The gateway did not return a run identifier.");
+      // A started run needs its id; a message the agent was not addressed in needs its recorded
+      // turn (`turn_id`): either missing throws.
+      const started = startedTurn(result);
       // The conversation may already show this new run (it follows its session's newest run on a
       // slow start): that is this start, not a change of conversation.
       if (
         sessionRef.current.sessionId !== startedSession ||
-        (sessionRef.current.runId !== startedRun && sessionRef.current.runId !== String(result.run_id)) ||
+        (sessionRef.current.runId !== startedRun && sessionRef.current.runId !== started.runId) ||
         identityRef.current !== startedIdentity ||
         authEpoch.current !== startedEpoch
       )
         throw staleSendAbort();
-      attachedRun = String(result.run_id);
+      if (!started.agentAddressed) {
+        // No agent run: the conversation opens on the person's recorded turn when the gateway names
+        // its run (finished: no spinner, no answer to wait for), else stays where it is; the
+        // entities' answers follow it. The last run's workflow note and limits stay as they were.
+        if (started.runId) unaddressedTurns.current.add(started.runId);
+        attachedRun = started.runId || startedRun;
+        if (started.runId) {
+          setOptimistic([...messages, ...(text.trim() ? [{ id: `pending:${started.runId}`, role: "user", content: text.trim() }] : [])]);
+          setSession({ sessionId: startedSession, runId: started.runId });
+          writeRoute(startedSession, started.runId);
+        }
+        setDraft("");
+        setAttachments([]);
+        uploads.clear();
+        setInputsOpen(false);
+        return started;
+      }
+      attachedRun = started.runId;
       startedRunInput.current = { runId: attachedRun, input };
       // "@default" resolves at every start: refresh the label from each one.
       setResolvedNote({
@@ -1198,7 +1243,7 @@ export function CodeWorkspace() {
       setInputsOpen(false);
       if (result.runner_warning) setNotice(String(result.runner_warning));
       void catalog.refresh();
-      return attachedRun;
+      return started;
     } finally {
       if (
         sessionRef.current.sessionId === startedSession &&
@@ -1214,8 +1259,10 @@ export function CodeWorkspace() {
     }
   }
 
-  // @ mentions: the names the `@` list offers, from `GET /entities` (read again at each new `@`,
-  // the result kept for the letters typed after it); entities the gateway refused are left out.
+  // @ mentions: the names the `@` list offers, the conversation's agent and then `GET /entities`
+  // (read again at each new `@`, the result kept for the letters typed after it); entities the
+  // gateway refused are left out.
+  const agentLabel = workflow?.name || "";
   const mentionCandidates = useCallback(
     async (query: string): Promise<ChatMentionCandidate[]> => {
       if (!entityRoster.current || entityRoster.current.identity !== identity || !query) {
@@ -1225,9 +1272,10 @@ export function CodeWorkspace() {
           if (entityRoster.current?.load === load) entityRoster.current = null;
         });
       }
-      return filterMentionCandidates(await entityRoster.current.load, query, refusedEntities.current);
+      // The conversation's agent first, named as its workflow is (`agent` on the start).
+      return filterMentionCandidates(mentionRoster(agentLabel, await entityRoster.current.load), query, refusedEntities.current);
     },
-    [identity],
+    [identity, agentLabel],
   );
   useEffect(() => {
     entityRoster.current = null;
@@ -1248,7 +1296,9 @@ export function CodeWorkspace() {
    * takes `mentionMessageKey(repeatOf)`. Each reply is a session turn the gateway recorded; the
    * conversation opens on the newest once the current reply has ended.
    */
-  async function askMentions(sessionId: string, text: string, mentions: readonly ChatMentionSent[], options: { repeatOf: string; message?: string; signal?: AbortSignal; keepDraft: boolean; resendable?: boolean }) {
+  async function askMentions(sessionId: string, text: string, picked: readonly ChatMentionSent[], options: { repeatOf: string; message?: string; signal?: AbortSignal; keepDraft: boolean; resendable?: boolean; agentAddressed?: boolean }) {
+    // The agent's chip rode the start; only the entities are asked here.
+    const mentions = entityMentions(picked);
     if (!mentions.length) return;
     const message = options.message || mentionMessageKey(options.repeatOf);
     const askedBy = identityRef.current;
@@ -1272,7 +1322,8 @@ export function CodeWorkspace() {
     if (outcome.stopped?.refusal.kind === "unavailable") setMentionsOff(askedBy);
     const last = outcome.answered[outcome.answered.length - 1];
     if (last?.runId) setFollowTurn({ sessionId, runId: last.runId, identity: askedBy });
-    const summary = mentionsSummary(outcome, { replyStillRunning: Boolean(last?.runId) });
+    // No agent run (it was not addressed): no reply to wait for before the answers show.
+    const summary = mentionsSummary(outcome, { replyStillRunning: Boolean(last?.runId) && options.agentAddressed !== false });
     setMentionStatus(summary ? { sessionId, text: summary, answered: Boolean(last?.runId) } : null);
     const stop = outcome.stopped?.refusal;
     if (stop && stop.kind !== "unavailable") {
@@ -1311,11 +1362,11 @@ export function CodeWorkspace() {
       done();
       return;
     }
-    if (sending || mentioning || !terminal(snapshot.status) || String(snapshot.run?.run_id || "") !== session.runId) return;
+    if (sending || mentioning || !(terminal(snapshot.status) || unaddressedTurn) || String(snapshot.run?.run_id || "") !== session.runId) return;
     done();
     setSession({ sessionId: followTurn.sessionId, runId: followTurn.runId });
     writeRoute(followTurn.sessionId, followTurn.runId);
-  }, [followTurn, session.sessionId, session.runId, identity, queue.length, sending, mentioning, snapshot.status, snapshot.run?.run_id]);
+  }, [followTurn, session.sessionId, session.runId, identity, queue.length, sending, mentioning, snapshot.status, snapshot.run?.run_id, unaddressedTurn]);
 
   // Press to talk (like the terminal's Space): releasing the microphone SENDS
   // what was said, after anything already typed. While a start is in flight,
@@ -1403,7 +1454,7 @@ export function CodeWorkspace() {
     if (await resendMentions(text, mentions, opts?.signal)) return;
     if (!active) {
       const started = await startTurn(text, opts?.signal, mentions);
-      await askMentions(sessionId, text, mentions, { repeatOf: mentionRepeatOf({ started }), signal: opts?.signal, keepDraft: true, resendable: true });
+      await askMentions(sessionId, text, mentions, { repeatOf: mentionRepeatOf({ started: started.turn }), agentAddressed: started.agentAddressed, signal: opts?.signal, keepDraft: true, resendable: true });
       return;
     }
     const guided = session.runId;
@@ -1427,10 +1478,12 @@ export function CodeWorkspace() {
       })
     )
       throw staleSendAbort();
-    const nextRunId = await startTurn(intent.text, undefined, intent.mentions ?? []);
-    setQueue((items) => advanceQueueIntents(items, intent, nextRunId));
+    const next = await startTurn(intent.text, undefined, intent.mentions ?? []);
+    // The queue follows the turn the conversation opens on (a message the agent was not addressed
+    // in without a run of its own leaves it where it was).
+    setQueue((items) => advanceQueueIntents(items, intent, next.runId || intent.sourceRunId));
     // Its names are asked now; a refusal is said and never pauses the queue (the turn started).
-    await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { repeatOf: mentionRepeatOf({ started: nextRunId }), keepDraft: false }).catch((e) => setError(formatError(e)));
+    await askMentions(intent.sessionId, intent.text, intent.mentions ?? [], { repeatOf: mentionRepeatOf({ started: next.turn }), agentAddressed: next.agentAddressed, keepDraft: false }).catch((e) => setError(formatError(e)));
   }
   useEffect(() => {
     if (
@@ -2161,6 +2214,7 @@ export function CodeWorkspace() {
           <main
             className="code-conversation"
             id="code-conversation"
+            ref={setChatRoot}
             tabIndex={-1}
           >
             {/* This client's trouble reaching the gateway: the page's one notice (operator 2026-11-08),
@@ -2372,7 +2426,7 @@ export function CodeWorkspace() {
               mentionNotice={mentionNoticeFor}
               mentionSessionKey={`${identity}:${session.sessionId}`}
               mentionsUnavailable={mentionsOff === identity ? MENTIONS_UNAVAILABLE : null}
-              mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : null}
+              mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : composerAgentHint}
               busy={locked && !stoppingStart}
               busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
               working={working}

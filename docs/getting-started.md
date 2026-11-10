@@ -14,7 +14,7 @@ Use AbstractGateway 0.13.0 or later to archive conversations and to see the
 gateway's default voice routes in the clients. The browser client 0.15.0 needs
 AbstractGateway 0.20.0 or later for shared unread markers, the Avatar view's live
 line and Findings, and the `Paused · N` automation section. `@` mentions and the
-reply's author (terminal 0.15.0, browser 0.15.21) need AbstractGateway 0.21.0.
+reply's author (terminal 0.15.0, browser 0.16.0) need AbstractGateway 0.21.0.
 
 The gateway ships working agent bundles out of the box. Its default agent
 workflow is the shipped `basic-agent` until its operator chooses another, and
@@ -155,9 +155,21 @@ or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
 after `@` without picking it stays ordinary text. The first time you name an entity
 in a conversation, a line tells you "Castor will read this conversation's history."
 
-When you send, your message starts the agent's turn, and the agent answers only the
-part meant for it, or says nothing. Then each entity you picked
-is asked in turn, in the order you picked them, each once the previous one has
+The list starts with the conversation's agent, under its workflow's name (for example
+"Basic agent"). A message is for the names it carries:
+
+- **Entities only:** the agent stays out. Before you send, a line says "The agent
+  stays out of this message."; the gateway keeps your words as a turn of the
+  conversation, no agent reply starts (no spinner, nothing to wait for), and only
+  the entities answer.
+- **Entities and the agent:** your message starts the agent's turn, and the agent
+  answers only the part meant for it, or says nothing.
+- **No chip:** the agent answers, as always.
+
+While the agent is working on a reply, a message you send guides that reply, so the
+agent reads it whatever its chips; the line does not show then.
+
+Then each entity you picked is asked in turn, in the order you picked them, each once the previous one has
 answered, so a later entity reads the earlier answers. An entity picked twice is
 asked once. Every reply says who wrote it: in the browser, the bubble shows the
 agent's workflow name with an "agent" tag, or the entity's name, its orb and an

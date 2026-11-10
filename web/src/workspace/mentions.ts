@@ -14,6 +14,13 @@
 // Only a message that started a turn has one to name (`mentionRepeatOf`): guidance, or an answer to
 // the running turn's question, starts none, so its mentions name no `repeat_of`.
 //
+// Who the message is for (operator 2026-11-10): the `@` list also offers the conversation's own
+// agent (`agentCandidate`, sent as the reserved slug `agent` in the start's `mentions`). A message
+// whose chips name entities and not the agent does not reach the agent: the gateway records the
+// person's turn and starts no agent run (`agent: "not_addressed"` with that turn's `turn_id`), and the
+// entities answer through the mention door with `repeat_of` = that turn. With the agent's chip, or
+// with no chip, the agent answers as before.
+//
 // DOM-free: app.tsx wires these rules; mentions.test.ts checks them. Nothing here reads `@` out
 // of the message text (no-heuristics ruling): a mention is only ever a picked chip.
 import { uniqueMentions, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent } from "../vendor/abstractchat/conversation.js";
@@ -24,6 +31,38 @@ export const MENTIONS_UNAVAILABLE = "This gateway does not offer mentions yet.";
 
 /** The workflow id of a turn the gateway recorded for an entity's reply to a mention. */
 export const MENTION_WORKFLOW_ID = "entity-mention";
+
+/** The workflow id of the person's turn the gateway recorded when the agent was not addressed. */
+export const PERSON_TURN_WORKFLOW_ID = "person-turn";
+
+/** The reserved slug naming the conversation's own agent in the start's `mentions` (no entity can
+ * be called `agent`: the gateway refuses that slug). */
+export const AGENT_MENTION_ID = "agent";
+
+/** The line above the composer while the chips name entities and not the agent. */
+export const AGENT_STAYS_OUT = "The agent stays out of this message.";
+
+/** The `@` list's row for the conversation's agent: the workflow's display name (e.g. "Basic agent";
+ * "Agent" when it has none), kind agent, id `agent`. */
+export function agentCandidate(label: string | null | undefined): ChatMentionCandidate {
+  return { id: AGENT_MENTION_ID, name: String(label ?? "").trim() || "Agent", kind: "agent" };
+}
+
+/** The `@` list: the conversation's agent first, then the entities (`entityCandidates`). */
+export function mentionRoster(agentLabel: string | null | undefined, entities: readonly ChatMentionCandidate[]): ChatMentionCandidate[] {
+  return [agentCandidate(agentLabel), ...entities.filter((c) => c.kind === "entity")];
+}
+
+/** The mentions the mention door asks: the entities only (the agent's chip rides the start). */
+export function entityMentions<M extends Pick<ChatMentionSent, "kind">>(mentions: readonly M[]): M[] {
+  return mentions.filter((m) => m.kind === "entity");
+}
+
+/** The line above the composer for the chips it holds (their kinds, in order): `AGENT_STAYS_OUT`
+ * while they name an entity and not the agent; null with the agent's chip or with no chip. */
+export function agentHint(kinds: readonly string[]): string | null {
+  return kinds.includes("entity") && !kinds.includes("agent") ? AGENT_STAYS_OUT : null;
+}
 
 type Row = Record<string, unknown>;
 
@@ -69,9 +108,10 @@ export function filterMentionCandidates(
   return [...offered.filter(starts), ...offered.filter((c) => !starts(c) && contains(c))];
 }
 
-/** The first-pick sentence under a chip (once per conversation). */
-export function mentionNoticeFor(candidate: Pick<ChatMentionCandidate, "name">): string {
-  return `${candidate.name} will read this conversation's history.`;
+/** The first-pick sentence under an entity's chip (once per conversation); none for the agent's
+ * chip (the agent already reads the conversation). */
+export function mentionNoticeFor(candidate: Pick<ChatMentionCandidate, "name"> & { kind?: ChatMentionCandidate["kind"] }): string | null {
+  return candidate.kind === "agent" ? null : `${candidate.name} will read this conversation's history.`;
 }
 
 /** What a refused mention means for the rest of the send. */
@@ -142,10 +182,11 @@ export type MentionsOutcome = {
 export type MentionPost = (mention: ChatMentionSent) => Promise<unknown>;
 
 /**
- * Ask each mention in order (`index` = `mention_index`), each after the previous returned, so the
- * second entity reads the first one's answer; an entity named twice is asked once (its first
- * index). A request already sent is never cut (the entity answers anyway and the gateway records
- * the turn): Stop only keeps the next ones from being asked.
+ * Ask each entity mention in order (`index` = `mention_index`), each after the previous returned, so
+ * the second entity reads the first one's answer; an entity named twice is asked once (its first
+ * index); the agent's chip is never asked here (it rides the start). A request already sent is never
+ * cut (the entity answers anyway and the gateway records the turn): Stop only keeps the next ones
+ * from being asked.
  */
 export async function sendMentions(
   mentions: readonly ChatMentionSent[],
@@ -153,7 +194,7 @@ export async function sendMentions(
   options: { signal?: AbortSignal; onAsking?: (mention: ChatMentionSent) => void } = {},
 ): Promise<MentionsOutcome> {
   const outcome: MentionsOutcome = { answered: [], skipped: [], stopped: null, unsent: [], aborted: false, unasked: [] };
-  const ordered = uniqueMentions([...mentions].sort((a, b) => a.index - b.index));
+  const ordered = uniqueMentions(entityMentions(mentions).sort((a, b) => a.index - b.index));
   for (const [at, mention] of ordered.entries()) {
     if (options.signal?.aborted) {
       outcome.aborted = true;
@@ -180,15 +221,77 @@ export async function sendMentions(
 }
 
 /**
- * `mentions` of `POST /runs/start` (AbstractGateway c26d38a2): the entities the message mentions, by
- * the id the mention door is sent (`entity`, the chip's slug), in the order they were picked
- * (`index`), each once. With it the gateway tells the conversation's agent that the mentioned
- * entities answer for themselves: it answers only the part addressed to it, or says nothing (an
+ * `mentions` of `POST /runs/start` (AbstractGateway c26d38a2): every chip of the message, by the id
+ * the mention door is sent (`entity`, the chip's slug; `agent` for the agent's chip), in the order
+ * they were picked (`index`), each once. Entities without the agent: the gateway starts no agent
+ * run (`agent: "not_addressed"`). The agent with entities: the gateway tells the agent the mentioned
+ * entities answer for themselves, so it answers only the part addressed to it, or says nothing (an
  * empty reply, which the gateway serves as no answer, so the kit shows no bubble for it). Empty for
- * a message that mentions no entity: the start then carries no `mentions` key (`startRunBody`).
+ * a message without chips: the start then carries no `mentions` key (`startRunBody`).
  */
 export function startRunMentions(mentions: readonly ChatMentionSent[]): string[] {
-  return uniqueMentions(mentions.filter((m) => m.kind === "entity").sort((a, b) => a.index - b.index)).map((m) => m.id);
+  return uniqueMentions([...mentions].sort((a, b) => a.index - b.index)).map((m) => (m.kind === "agent" ? AGENT_MENTION_ID : m.id));
+}
+
+/** What `POST /runs/start` answered about the message's turn. */
+export type StartedTurn = {
+  /** The agent's run, which the conversation follows; "" when the agent was not addressed and the
+   * gateway names no run for the recorded turn. */
+  runId: string;
+  /** The turn the message's words are: what its mentions name as `repeat_of` (`turn_id` when the
+   * agent was not addressed, else the agent's run). */
+  turn: string;
+  /** False for `agent: "not_addressed"`: no agent run started (no spinner, no answer to wait for). */
+  agentAddressed: boolean;
+};
+
+/** Read a start's answer. A started run needs its `run_id`; a message the agent was not addressed in
+ * needs the recorded turn's `turn_id`. Either missing throws: never a guess. */
+export function startedTurn(answer: unknown): StartedTurn {
+  const row = record(answer);
+  const runId = text(row?.run_id);
+  if (text(row?.agent) === "not_addressed") {
+    const turn = text(row?.turn_id);
+    if (!turn) throw new Error("The gateway did not name the turn it recorded for this message.");
+    return { runId, turn, agentAddressed: false };
+  }
+  if (!runId) throw new Error("The gateway did not return a run identifier.");
+  return { runId, turn: runId, agentAddressed: true };
+}
+
+/** A turn the agent was not asked to answer: its row says `agent_addressed: false` (`GET /runs/{id}`,
+ * a session turn, a view message); absent or true is an ordinary turn. */
+export function agentNotAddressed(value: unknown): boolean {
+  return record(value)?.agent_addressed === false;
+}
+
+/**
+ * The turns the agent was not addressed in, learned from a view (or a view delta): the person's
+ * message of such a turn carries `agent_addressed: false`. Noted by run id into `into`; true when
+ * something new was noted.
+ */
+export function noteUnaddressed(view: unknown, into: Set<string>): boolean {
+  const messages = record(view)?.messages;
+  if (!Array.isArray(messages)) return false;
+  let noted = false;
+  for (const raw of messages) {
+    const m = record(raw);
+    const runId = text(m?.run_id);
+    if (m?.role !== "user" || !runId || !agentNotAddressed(m) || into.has(runId)) continue;
+    into.add(runId);
+    noted = true;
+  }
+  return noted;
+}
+
+/** The same on a `/view/stream` frame (`view` and `delta` carry messages; others teach nothing). */
+export function noteUnaddressedFrame(frame: { event?: string; data: string }, into: Set<string>): boolean {
+  if ((frame.event !== "view" && frame.event !== "delta") || !frame.data.includes('"agent_addressed"')) return false;
+  try {
+    return noteUnaddressed(JSON.parse(frame.data), into);
+  } catch {
+    return false; // the kit reports the malformed frame itself
+  }
 }
 
 /** A fresh message id: "msg-" and 24 random hex digits (crypto.getRandomValues: any page). */
@@ -321,10 +424,18 @@ export function isMentionTurn(value: unknown): boolean {
   return text(record(value)?.workflow_id) === MENTION_WORKFLOW_ID;
 }
 
+/** A turn of the conversation that is not its workflow's: an entity's reply to a mention, or the
+ * person's turn the gateway recorded when the agent was not addressed (`agent_addressed: false`,
+ * workflow `person-turn`). Its inputs restore no workflow. */
+export function isSideTurn(value: unknown): boolean {
+  return isMentionTurn(value) || agentNotAddressed(value) || text(record(value)?.workflow_id) === PERSON_TURN_WORKFLOW_ID;
+}
+
 /**
- * The conversation's workflow turn when the loaded turn is a mention reply: the newest session turn
- * at or before `loadedRunId` that is not one (the runtime lists the turns oldest first, as the
- * kit's replay view reads them). Null when the conversation holds only mention replies.
+ * The conversation's workflow turn when the loaded turn is a side turn (`isSideTurn`: a mention
+ * reply, or a person's turn the agent was not addressed in): the newest session turn at or before
+ * `loadedRunId` that is not one (the runtime lists the turns oldest first, as the kit's replay view
+ * reads them). Null when the conversation holds only side turns.
  */
 export function conversationWorkflowTurn(turns: unknown, loadedRunId: string): string | null {
   const rows = Array.isArray(turns) ? turns.map(record).filter((row): row is Row => row !== null) : [];
@@ -332,7 +443,7 @@ export function conversationWorkflowTurn(turns: unknown, loadedRunId: string): s
   const before = at >= 0 ? rows.slice(0, at + 1) : rows;
   for (let i = before.length - 1; i >= 0; i -= 1) {
     const id = text(before[i].run_id);
-    if (id && !isMentionTurn(before[i])) return id;
+    if (id && !isSideTurn(before[i])) return id;
   }
   return null;
 }

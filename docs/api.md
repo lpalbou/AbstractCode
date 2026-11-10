@@ -95,15 +95,21 @@ is in [getting started](getting-started.md#mentioning-an-entity)):
 
 - A mention is a chip picked from the `@` list; neither client reads `@` out of the
   message text.
-- The message starts its turn with `mentions` on the run start: the entity slugs in
-  chip order, each once (no chips, no key; a gateway that predates it ignores it).
-  The agent then answers only the part meant for it, or says nothing, and an empty
-  reply shows no bubble or line. (In the terminal, a message that is only one chip
-  opens that entity's visit instead.) Then the clients ask each entity once,
+- The message starts its turn with `mentions` on the run start: the chips' slugs in
+  chip order, each once, the conversation's agent as the reserved slug `agent` (no
+  chips, no key; a gateway that predates it ignores it). Entities without `agent`:
+  the gateway starts no agent run and answers `agent: "not_addressed"` with the
+  `turn_id` of the person's turn it recorded; the clients show no reply under way,
+  and the recorded turn carries `agent_addressed: false` (on its run, in the history
+  and in the replay view), so a reopened conversation reads the same. With `agent`
+  among them, the agent answers only the part meant for it, or says nothing, and an
+  empty reply shows no bubble or line. (In the terminal, a message that is only one
+  entity chip opens that entity's visit instead.) Then the clients ask each entity once,
   in pick order (`mention_index`), each call after the previous one returned, so a
   later entity reads the earlier answers. A session asks one message's entities at a
   time.
-- `repeat_of` names the person's own turn that carries the same words, so the words
+- `repeat_of` names the person's own turn that carries the same words (the agent's
+  run, or the recorded turn's `turn_id` when the agent was not addressed), so the words
   are shown once; `mention_id` is `<message>:<entity>:<mention_index>`, so resending
   a message after a lost answer gets each entity's first answer back, never a second
   one. Answers are ordered by when they came (`updated_at`).

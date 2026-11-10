@@ -8,7 +8,7 @@
 //   the same bundle and flow, and says so in plain words.
 // - Only a conversation whose workflow (bundle or flow) is gone altogether refuses the next turn.
 import { replacedVersionNote, resolveConversationWorkflow, type SessionSummary, type WorkflowDefinition } from "./catalog";
-import { isMentionTurn } from "./mentions";
+import { isSideTurn } from "./mentions";
 import { NOTES_SESSION_NOTICE, isNotesRun, isNotesRunInput } from "./notes_work";
 import { runSelectionSource } from "./workflow_selection";
 
@@ -52,10 +52,12 @@ export function conversationRestore(options: {
       (Boolean(options.runId) && (isNotesRunInput(options.restoredInputs) || isNotesRun(options.run))));
   if (notesSession)
     return { notesSession, readOnlyNotice: NOTES_SESSION_NOTICE, versionNote: "", error: "" };
-  // An entity's reply to an @mention (workflow `entity-mention`) is a turn of the conversation, not
-  // its workflow. app.tsx restores from the newest agent turn before it, whose inputs name their own
-  // run; a conversation made only of mention replies restores no workflow (the picker's applies).
-  if (isMentionTurn(options.restoredInputs)) return { notesSession, readOnlyNotice: "", versionNote: "", error: "" };
+  // An entity's reply to an @mention (workflow `entity-mention`) and the person's turn the gateway
+  // recorded when the agent was not addressed (`agent_addressed: false`, workflow `person-turn`) are
+  // turns of the conversation, not its workflow. app.tsx restores from the newest agent turn before
+  // them, whose inputs name their own run; a conversation made only of such turns restores no
+  // workflow (the picker's applies).
+  if (isSideTurn(options.restoredInputs)) return { notesSession, readOnlyNotice: "", versionNote: "", error: "" };
   const inputs = options.restoredInputs as { run_id?: unknown; workflow_id?: unknown } | null;
   const fromEarlierTurn = Boolean(inputs && typeof inputs.run_id === "string" && inputs.run_id && inputs.run_id !== options.runId);
   const resolution = resolveConversationWorkflow(options.workflows, {

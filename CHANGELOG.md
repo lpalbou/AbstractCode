@@ -86,9 +86,10 @@ offer mentions yet." once and every answer reads "assistant" as before.
   ("Process my notes", "Reflect on my notes", "Consolidate my notes") leave the
   automations list and its counts.
 
-## [web 0.15.21] - 2026-11-10
+## [web 0.16.0] - 2026-11-10
 
-The first npm release since web 0.15.6: it also carries the local builds 0.15.7 to 0.15.20 listed below.
+The first npm release since web 0.15.6 (prepared as 0.15.21, released as 0.16.0): it also carries the local
+builds 0.15.7 to 0.15.20 listed below.
 Built on the published AbstractUIC kit, `@abstractframework/ui-kit` 0.9.27 and `@abstractframework/panel-chat`
 0.9.11. `@` mentions, the reply's author, the agent leaving an entity's part to it and the gateway's iteration
 default need AbstractGateway 0.21.0; with an older gateway `@` says "This gateway does not offer mentions yet."
@@ -111,10 +112,18 @@ once and replies carry no author.
   entity's name, its orb and an "entity" tag, from the first words of a live reply on. Without an author (an
   older gateway) the bubble is unchanged.
 - **The agent leaves what you ask an entity to that entity.** A message with `@` chips starts its turn with the
-  entities it mentions (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message too).
-  The agent answers only the part meant for it, or says nothing: the conversation then shows your words and the
-  entities' answers, with no empty reply. The agent can stay silent with an AbstractAgent newer than 0.6.0; an
-  older gateway ignores the key.
+  names it holds (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message too). When
+  the agent is among them, it answers only the part meant for it, or says nothing: the conversation then shows
+  your words and the entities' answers, with no empty reply. The agent can stay silent with an AbstractAgent
+  newer than 0.6.0; an older gateway ignores the key.
+- **A message to entities only does not reach the agent; `@` names the agent too.** The `@` list starts with the
+  conversation's agent, under its workflow's name (for example "Basic agent"). A message whose chips name
+  entities and not the agent starts no agent run: the gateway records your words as a turn of the conversation,
+  the line above the box says "The agent stays out of this message." before you send, and there is no spinner
+  and no reply to wait for; the entities answer as before, and the conversation reads the same after a reload.
+  Pick `@Basic agent` as well to ask the agent too; a message without chips goes to the agent as before. While a
+  reply is running, a message still guides it, so the line does not show then. The agent's chip is sent as
+  `agent` in `mentions`, in the order picked; it needs an AbstractGateway 0.21.0 that routes mentions this way.
 
 ### Changed
 

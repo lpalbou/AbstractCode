@@ -24,7 +24,7 @@ Ground rules for reading this repository:
   voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
   (shared unread markers, the Avatar view's live line and Findings, the Paused · N
   section) needs 0.20.0 or later; `@` mentions and the reply's author (terminal
-  0.15.0, browser 0.15.21) need 0.21.0.
+  0.15.0, browser 0.16.0) need 0.21.0.
 - Tools are approval-gated by default; approvals are durable gateway commands,
   so a wait raised in one client is answerable from the other.
 - The authoritative command list is `/help` inside the terminal client, and
@@ -34,7 +34,7 @@ Ground rules for reading this repository:
 
 Open **Model** directly from the right-hand icon rail to change the selected conversation or automation’s model. **Agent** groups workflow, tools and skills; **Workspace** controls folders. **Voice** configures this app’s speech and devices. Automation Model panels show **Limits**; conversation panels show **Limits & streaming**. The Docs assistant’s speaker reads a reply aloud when speech is configured.
 
-Type `@` in the message box and pick an entity to mention it: your message starts the agent's turn (the agent answers only the part meant for it, or says nothing), then each picked entity answers in turn under its own name, and every reply says who wrote it. If an entity cannot answer, the message comes back with only the entities that did not answer; send it again unchanged to ask only those. See [mentioning an entity](docs/getting-started.md#mentioning-an-entity).
+Type `@` in the message box and pick an entity to mention it. The list starts with the conversation's agent: a message to entities only does not reach the agent (no agent run; the line above the box says "The agent stays out of this message."), and with the agent picked too your message starts the agent's turn (the agent answers only the part meant for it, or says nothing). Then each picked entity answers in turn under its own name, and every reply says who wrote it. If an entity cannot answer, the message comes back with only the entities that did not answer; send it again unchanged to ask only those. See [mentioning an entity](docs/getting-started.md#mentioning-an-entity).
 
 The terminal client supports source-aware assistant text/table/code selection.
 Explain, Use as context and Change stage quoted content into an existing draft;
