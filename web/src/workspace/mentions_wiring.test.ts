@@ -16,7 +16,7 @@ describe("Code's chat offers @ names from the gateway", () => {
     expect(chatMount).toContain("mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : null}");
   });
   it("the names come from GET /entities, without the entities the gateway refused", () => {
-    expect(app).toContain('gatewayRequest(gatewayApiPath("entities")).then(entityCandidates)');
+    expect(app).toMatch(/gatewayRequest\(gatewayApiPath\("entities"\)\)\.then\(\(body\) => \{\s*entityCards\.current = \{ identity, cards: entityMentionCards\(body\) \};\s*return entityCandidates\(body\);/);
     expect(app).toContain("filterMentionCandidates(mentionRoster(agentLabel, await entityRoster.current.load), query, refusedEntities.current)");
     expect(app).toContain('const agentLabel = workflow?.name || "";');
   });
@@ -51,7 +51,7 @@ describe("a send with picked names", () => {
   });
   it("live replies are labelled from their stream frames until the saved message replaces them", () => {
     expect(app).toContain("liveAuthors.current.set(runId, author);");
-    expect(app).toContain("const messages = mergeStreamNotes(withLiveAuthors(foldRepeatedTurns(baseMessages, repeatTurns.current), liveAuthors.current), [");
+    expect(app).toContain("const messages = mergeStreamNotes(withLiveAuthors(withSentMentions(foldRepeatedTurns(baseMessages, repeatTurns.current), sentMentions.current), liveAuthors.current), [");
     expect(app).toContain("repeats: repeatTurns.current,");
   });
   it("review 2026-11-09 B1: a stop names the unsent chips and remembers the message; a resend of it asks only those, before any turn", () => {

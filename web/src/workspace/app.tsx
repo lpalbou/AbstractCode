@@ -1,6 +1,7 @@
-import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type MentionResend} from "../vendor/abstractchat/conversation.js";
+import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type ChatMessageMention, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, agentNotAddressed, conversationWorkflowTurn, entityCandidates, entityMentions, filterMentionCandidates, foldRepeatedTurns, isSideTurn, mentionMessageKey, mentionRepeatOf, mentionRequestBody, mentionRoster, mentionsSummary, sendMentions, startRunMentions, startedTurn, withLiveAuthors, type StartedTurn } from "./mentions";
+import { mentionCard } from "./mention_card";
+import { MENTIONS_UNAVAILABLE, agentNotAddressed, conversationWorkflowTurn, entityCandidates, entityMentionCards, entityMentions, filterMentionCandidates, foldRepeatedTurns, isSideTurn, mentionMessageKey, mentionRepeatOf, mentionRequestBody, mentionRoster, mentionsSummary, sendMentions, sentMessageMentions, startRunMentions, startedTurn, withLiveAuthors, withSentMentions, type EntityMentionCard, type StartedTurn } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -323,6 +324,10 @@ export function CodeWorkspace() {
   const [followTurn, setFollowTurn] = useState<{ sessionId: string; runId: string; identity: string } | null>(null);
   const refusedEntities = useRef(new Set<string>());
   const entityRoster = useRef<{ identity: string; load: Promise<ChatMentionCandidate[]> } | null>(null);
+  // The same rows as cards (name, orb, state sentence), for the card on a mention chip; and the
+  // mentions each turn this page started carried, by run (a sent message shows them as chips).
+  const entityCards = useRef<{ identity: string; cards: Map<string, EntityMentionCard> } | null>(null);
+  const sentMentions = useRef(new Map<string, ChatMessageMention[]>());
   // Who is writing each live reply, from its stream frames (by run): the bubble is labelled before
   // the saved message, which carries its own author, replaces it.
   const liveAuthors = useRef(new Map<string, ChatAuthor>());
@@ -523,7 +528,7 @@ export function CodeWorkspace() {
       : recordedMessages;
   const lastBase = baseMessages[baseMessages.length - 1];
   lastMessageIdRef.current = lastBase?.id ? String(lastBase.id) : null;
-  const messages = mergeStreamNotes(withLiveAuthors(foldRepeatedTurns(baseMessages, repeatTurns.current), liveAuthors.current), [
+  const messages = mergeStreamNotes(withLiveAuthors(withSentMentions(foldRepeatedTurns(baseMessages, repeatTurns.current), sentMentions.current), liveAuthors.current), [
     streamingUnsupportedNote(preferences.streamReplies, catalog.streaming, baseMessages),
     ...(streamNotes.scope === streamScope ? streamNotes.notes : []),
   ]);
@@ -1178,6 +1183,11 @@ export function CodeWorkspace() {
       // A started run needs its id; a message the agent was not addressed in needs its recorded
       // turn (`turn_id`): either missing throws.
       const started = startedTurn(result);
+      // The message shows the chips its send carried (panel-chat 0.9.13), placed by `start` on the
+      // trimmed words the start sent, with their looks from the `@` list.
+      const cards = entityCards.current?.identity === startedIdentity ? entityCards.current.cards : null;
+      const shown = sentMessageMentions(text, mentions, (m) => (m.kind === "entity" ? cards?.get(m.id)?.avatar : null));
+      const mentionsField = shown.length ? { mentions: shown } : {};
       // The conversation may already show this new run (it follows its session's newest run on a
       // slow start): that is this start, not a change of conversation.
       if (
@@ -1194,7 +1204,8 @@ export function CodeWorkspace() {
         if (started.runId) unaddressedTurns.current.add(started.runId);
         attachedRun = started.runId || startedRun;
         if (started.runId) {
-          setOptimistic([...messages, ...(text.trim() ? [{ id: `pending:${started.runId}`, role: "user", content: text.trim() }] : [])]);
+          if (shown.length) sentMentions.current.set(started.runId, shown);
+          setOptimistic([...messages, ...(text.trim() ? [{ id: `pending:${started.runId}`, role: "user", content: text.trim(), ...mentionsField }] : [])]);
           setSession({ sessionId: startedSession, runId: started.runId });
           writeRoute(startedSession, started.runId);
         }
@@ -1212,6 +1223,7 @@ export function CodeWorkspace() {
         ...resolvedWorkflowNote(result.resolved_workflow),
       });
       setRunLimits(runLimitsReceipt(result.limits));
+      if (shown.length) sentMentions.current.set(started.runId, shown);
       setOptimistic([
         ...messages,
         ...(text.trim()
@@ -1220,6 +1232,7 @@ export function CodeWorkspace() {
                 id: `pending:${result.run_id}`,
                 role: "user",
                 content: text.trim(),
+                ...mentionsField,
               },
             ]
           : []),
@@ -1255,7 +1268,10 @@ export function CodeWorkspace() {
   const mentionCandidates = useCallback(
     async (query: string): Promise<ChatMentionCandidate[]> => {
       if (!entityRoster.current || entityRoster.current.identity !== identity || !query) {
-        const load = gatewayRequest(gatewayApiPath("entities")).then(entityCandidates);
+        const load = gatewayRequest(gatewayApiPath("entities")).then((body) => {
+          entityCards.current = { identity, cards: entityMentionCards(body) };
+          return entityCandidates(body);
+        });
         entityRoster.current = { identity, load };
         load.catch(() => {
           if (entityRoster.current?.load === load) entityRoster.current = null;
@@ -1268,6 +1284,8 @@ export function CodeWorkspace() {
   );
   useEffect(() => {
     entityRoster.current = null;
+    entityCards.current = null;
+    sentMentions.current = new Map();
     refusedEntities.current = new Set();
     liveAuthors.current = new Map();
     setMentionsOff(null);
@@ -2386,6 +2404,7 @@ export function CodeWorkspace() {
                   : messages
               }
               messageProps={{
+                renderMentionCard: (mention) => mentionCard(mention, entityCards.current?.identity === identity ? entityCards.current.cards : null),
                 renderFooter: (message) => {
                   const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
                   if (!status) return null;
