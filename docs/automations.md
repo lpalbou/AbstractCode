@@ -161,8 +161,13 @@ play-in-a-circle icon for Run now.
 ## Runs, approvals and answers
 
 Open an automation (Enter in `/automations`, or select it in the sidebar) to
-read its runs as chat pairs, oldest first: the trigger turn and the answer,
-with failures, notifications and artifacts.
+read its runs. The browser shows them as chat pairs, oldest first: the trigger
+turn and the answer, with failures, notifications and artifacts. The terminal
+shows a header panel (the Active switch, the schedule, what runs now and what
+waits for you) and a **Details** panel above the runs as a table, newest first,
+beside the selected run's panel: its output as Markdown, its artifacts folded
+(`l` lists them) and its task; `PgUp`/`PgDn`/`Home`/`End` and the mouse wheel
+scroll it.
 
 Runs that wait for you are listed first, by kind:
 

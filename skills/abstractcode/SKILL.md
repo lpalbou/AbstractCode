@@ -3,7 +3,7 @@ name: abstractcode
 description: Operate AbstractCode terminal and browser clients of AbstractGateway. Use for connecting, continuing durable coding sessions, inspecting tool permissions and workspaces, asking scoped assistant questions, or configuring terminal voice and dictation.
 license: MIT
 metadata:
-  package-version: "terminal 0.14.0 / web 0.15.4"
+  package-version: "terminal 0.15.0 / web 0.15.4"
 ---
 
 # Use AbstractCode
@@ -41,8 +41,21 @@ pause. Workflow and Gateway ceilings still apply. `/permissions` opens the
 existing broader approval controls; `/workspace` inspects workspace policy.
 
 `/settings`, `/workflow`, `/model` and `/help` expose the other supported panels.
-Outside clicks dismiss ordinary modals; approval steps remain protected. Wheel
+Outside clicks dismiss ordinary modals; the tool approval, the agent question and
+the "Disconnect this terminal?" confirmation stay open until answered. Wheel
 scrolling, arrow keys and explicit buttons are available in the Tools list.
+
+## Mentions
+
+In the terminal (0.15.0, with AbstractGateway 0.21.0), type `@` and pick an
+entity: the pick is a chip, and a typed `@name` that was not picked is plain
+text. A message that is only one chip opens that entity's visit. Any other
+message starts the agent's turn, which answers only the part meant for it or
+says nothing, then each picked entity answers in order under its own name
+(`● Castor · entity`). When an entity cannot answer, the message returns with
+only the unanswered chips: send it unchanged to ask only those (no new turn,
+and an entity that answered is never asked twice). An older gateway says "This
+gateway does not offer mentions yet."
 
 ## Questions beside the coding task
 
@@ -81,6 +94,10 @@ execute tools on the Gateway: use it only within the user's authorized scope.
 Choose a workflow explicitly when no default exists. Exit codes are 0 completed,
 1 failed, 2 usage/configuration, 124 timeout, 130 cancelled. See `--help` and the
 CLI reference for workspace, permissions, timeout and streaming options.
+
+In the terminal, one automation (`/automations`, then `Enter`) shows its runs as
+a table beside the selected run's output; `l` lists that run's artifacts and
+`PgUp`/`PgDn` or the wheel scroll the output.
 
 Client tool choices are local preferences; they are not a shared policy record.
 Completed canonical answers render outside folded cycles. Terminal reconnect paths

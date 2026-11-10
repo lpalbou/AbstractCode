@@ -7,11 +7,12 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.14.0**, pre-alpha. What's new in 0.14.0: Companion and Documentation
-questions read the newest whole turns of your conversation up to 50,000 tokens,
-never a shortened message, and say what they left out; `/automations` folds the
-paused ones under `Paused · N`; `/sessions` and `--resume` list conversations only
-([CHANGELOG.md](CHANGELOG.md#0140---2026-11-04)).
+Status: **0.15.0**, pre-alpha. What's new in 0.15.0: `@` mentions an entity from
+the conversation and every answer names its author (`✦ basic-agent · agent`,
+`● Castor · entity`); the agent leaves what you ask an entity to that entity; one
+automation reads as panels, with its runs as a table and the selected run's output
+you can scroll with the wheel; built on AbstractTUI 0.8.0
+([CHANGELOG.md](CHANGELOG.md#0150---2026-11-10)).
 
 ## What it looks like
 
@@ -67,8 +68,9 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
 - **Summoned entities**: type `@` and pick an entity (`/entities` lists
   the roster with identity cards). A message that is only that chip opens
   a durable visit with it; a chip among other words mentions it: your
-  message goes to the agent as usual, then the entity answers in the
-  conversation as `● Castor · entity`. Each visit gets its own transcript
+  message starts the agent's turn, which leaves the entity's part to it,
+  then the entity answers in the conversation as `● Castor · entity`
+  (AbstractGateway 0.21.0). Each visit gets its own transcript
   and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
   non-interruptible and stream no mid-turn progress (a server-side
@@ -102,7 +104,9 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
   ones the Assistant, the Observer and Code web show) as cards —
   `↻ Every 24 hours (UTC) · last 3 h ago` (the gateway's words), `next in 20 h` and the **Active** switch —
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
-  line with **Unarchive**; open one to read its runs, approve its tool calls,
+  line with **Unarchive**; open one to see its header and Details panels and
+  its runs as a table, read the selected run's output (Markdown; `l` lists its
+  artifacts; the wheel and `PgUp`/`PgDn` scroll it), approve its tool calls,
   browse its folder, discuss a run as a new chat in place, or hear a run's
   reply (`Ctrl+P`). `/automation [task]` (**New automation**; `/schedule`
   still works in 0.11.0) creates one with the Code web's
@@ -141,7 +145,9 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
   collect the first three controls under **Menu**. Use `/docs` for direct access
   to the Docs assistant; its answers use the gateway's documentation corpus.
 - **Dialogs**: click outside an ordinary dialog to close it and return to the
-  composer. Approval and user-question steps stay open until you respond.
+  composer. The tool approval, the agent question and the "Disconnect this
+  terminal?" confirmation stay open until you respond. The mouse wheel scrolls
+  a dialog's content wherever the pointer is.
 - **Honest telemetry**: the header names the workflow, provider/model and
   workspace mode; the footer keeps context, session token and host resource
   meters, the workspace, session and keys reference. Click context/tokens for

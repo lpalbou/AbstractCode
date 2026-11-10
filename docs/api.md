@@ -95,8 +95,11 @@ is in [getting started](getting-started.md#mentioning-an-entity)):
 
 - A mention is a chip picked from the `@` list; neither client reads `@` out of the
   message text.
-- The message starts its turn as usual (or, in the terminal, a message that is only
-  one chip opens that entity's visit instead). Then the clients ask each entity once,
+- The message starts its turn with `mentions` on the run start: the entity slugs in
+  chip order, each once (no chips, no key; a gateway that predates it ignores it).
+  The agent then answers only the part meant for it, or says nothing, and an empty
+  reply shows no bubble or line. (In the terminal, a message that is only one chip
+  opens that entity's visit instead.) Then the clients ask each entity once,
   in pick order (`mention_index`), each call after the previous one returned, so a
   later entity reads the earlier answers. A session asks one message's entities at a
   time.

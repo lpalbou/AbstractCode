@@ -24,7 +24,10 @@ close your laptop, and pick the same session up in the browser.
 
 Status: **pre-alpha.** Interfaces and UX may change.
 
-What's new: browser 0.15.4 never sends a reasoning level or MTP setting the model cannot use
+What's new: terminal 0.15.0 mentions an entity with `@` (the agent leaves the
+entity's part to it, and every answer names its author), shows one automation as
+panels with a runs table and a scrollable run output, and is built on AbstractTUI
+0.8.0. Browser 0.15.4 never sends a reasoning level or MTP setting the model cannot use
 (changing the model puts both back on the gateway default) and always opens on the Conversation
 view. Browser 0.15.3 no longer lists AbstractNote's own work (note captures and the
 "Process / Reflect / Consolidate my notes" automations) among your conversations and automations,
@@ -63,7 +66,8 @@ Archiving conversations, the **Archived · N** lists and the gateway's default
 voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
 (shared unread markers, the Avatar view's live line and Findings, the `Paused · N`
 section) needs 0.20.0 or later; with an older gateway every update shows as progress
-and automations are listed without sections.
+and automations are listed without sections. The terminal client 0.15.0's `@`
+mentions and answer authors need 0.21.0 or later.
 
 Then start whichever client you prefer:
 
@@ -88,7 +92,8 @@ for credentials, remote gateways, and first-run configuration.
   reject from either client.
 - **Steering** — inject guidance into a run without restarting it.
 - **Mentions** — type `@` and pick an entity to bring it into the conversation: your
-  message goes to the agent as usual, then the entity answers under its own name, and
+  message starts the agent's turn, which leaves the entity's part to it, then the
+  entity answers under its own name, and
   every reply says who wrote it
   (see [mentioning an entity](docs/getting-started.md#mentioning-an-entity)).
 - **Workflows** — run the gateway's default agent workflow, or pick a named
@@ -314,7 +319,8 @@ or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
 after `@` without picking it stays ordinary text. The first time you name an entity
 in a conversation, a line tells you "Castor will read this conversation's history."
 
-When you send, your message goes to the agent as usual. Then each entity you picked
+When you send, your message starts the agent's turn, and the agent answers only the
+part meant for it, or says nothing. Then each entity you picked
 is asked in turn, in the order you picked them, each once the previous one has
 answered, so a later entity reads the earlier answers. An entity picked twice is
 asked once. Every reply says who wrote it: in the browser, the bubble shows the
@@ -688,8 +694,11 @@ is in [getting started](getting-started.md#mentioning-an-entity)):
 
 - A mention is a chip picked from the `@` list; neither client reads `@` out of the
   message text.
-- The message starts its turn as usual (or, in the terminal, a message that is only
-  one chip opens that entity's visit instead). Then the clients ask each entity once,
+- The message starts its turn with `mentions` on the run start: the entity slugs in
+  chip order, each once (no chips, no key; a gateway that predates it ignores it).
+  The agent then answers only the part meant for it, or says nothing, and an empty
+  reply shows no bubble or line. (In the terminal, a message that is only one chip
+  opens that entity's visit instead.) Then the clients ask each entity once,
   in pick order (`mention_index`), each call after the previous one returned, so a
   later entity reads the earlier answers. A session asks one message's entities at a
   time.
@@ -1026,8 +1035,13 @@ play-in-a-circle icon for Run now.
 ## Runs, approvals and answers
 
 Open an automation (Enter in `/automations`, or select it in the sidebar) to
-read its runs as chat pairs, oldest first: the trigger turn and the answer,
-with failures, notifications and artifacts.
+read its runs. The browser shows them as chat pairs, oldest first: the trigger
+turn and the answer, with failures, notifications and artifacts. The terminal
+shows a header panel (the Active switch, the schedule, what runs now and what
+waits for you) and a **Details** panel above the runs as a table, newest first,
+beside the selected run's panel: its output as Markdown, its artifacts folded
+(`l` lists them) and its task; `PgUp`/`PgDn`/`Home`/`End` and the mouse wheel
+scroll it.
 
 Runs that wait for you are listed first, by kind:
 
@@ -1967,11 +1981,12 @@ cockpit — it starts runs, streams their ledgers live, renders reasoning cycles
 tool calls, and answers as they happen, resolves tool-approval and ask-user waits,
 steers the agent mid-run, and keeps a durable session with server-side history.
 
-Status: **0.14.0**, pre-alpha. What's new in 0.14.0: Companion and Documentation
-questions read the newest whole turns of your conversation up to 50,000 tokens,
-never a shortened message, and say what they left out; `/automations` folds the
-paused ones under `Paused · N`; `/sessions` and `--resume` list conversations only
-([CHANGELOG.md](CHANGELOG.md#0140---2026-11-04)).
+Status: **0.15.0**, pre-alpha. What's new in 0.15.0: `@` mentions an entity from
+the conversation and every answer names its author (`✦ basic-agent · agent`,
+`● Castor · entity`); the agent leaves what you ask an entity to that entity; one
+automation reads as panels, with its runs as a table and the selected run's output
+you can scroll with the wheel; built on AbstractTUI 0.8.0
+([CHANGELOG.md](CHANGELOG.md#0150---2026-11-10)).
 
 ## What it looks like
 
@@ -2027,8 +2042,9 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
 - **Summoned entities**: type `@` and pick an entity (`/entities` lists
   the roster with identity cards). A message that is only that chip opens
   a durable visit with it; a chip among other words mentions it: your
-  message goes to the agent as usual, then the entity answers in the
-  conversation as `● Castor · entity`. Each visit gets its own transcript
+  message starts the agent's turn, which leaves the entity's part to it,
+  then the entity answers in the conversation as `● Castor · entity`
+  (AbstractGateway 0.21.0). Each visit gets its own transcript
   and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
   non-interruptible and stream no mid-turn progress (a server-side
@@ -2062,7 +2078,9 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
   ones the Assistant, the Observer and Code web show) as cards —
   `↻ Every 24 hours (UTC) · last 3 h ago` (the gateway's words), `next in 20 h` and the **Active** switch —
   with **Run now**, **Stop**, **Edit**, **Archive** and an **Archived · N**
-  line with **Unarchive**; open one to read its runs, approve its tool calls,
+  line with **Unarchive**; open one to see its header and Details panels and
+  its runs as a table, read the selected run's output (Markdown; `l` lists its
+  artifacts; the wheel and `PgUp`/`PgDn` scroll it), approve its tool calls,
   browse its folder, discuss a run as a new chat in place, or hear a run's
   reply (`Ctrl+P`). `/automation [task]` (**New automation**; `/schedule`
   still works in 0.11.0) creates one with the Code web's
@@ -2101,7 +2119,9 @@ paused ones under `Paused · N`; `/sessions` and `--resume` list conversations o
   collect the first three controls under **Menu**. Use `/docs` for direct access
   to the Docs assistant; its answers use the gateway's documentation corpus.
 - **Dialogs**: click outside an ordinary dialog to close it and return to the
-  composer. Approval and user-question steps stay open until you respond.
+  composer. The tool approval, the agent question and the "Disconnect this
+  terminal?" confirmation stay open until you respond. The mouse wheel scrolls
+  a dialog's content wherever the pointer is.
 - **Honest telemetry**: the header names the workflow, provider/model and
   workspace mode; the footer keeps context, session token and host resource
   meters, the workspace, session and keys reference. Click context/tokens for
@@ -2497,9 +2517,11 @@ that is only that chip opens a durable **visit** (`/entities` lists the
 roster with identity cards; `Enter` there does the same). The visit gets its
 own transcript and a header chip; `Alt+E` cycles focus between the agent and
 open visits, and everything you submit under entity focus is that visit's
-next turn. A chip among other words is a **mention**: your message goes to
-the agent as usual, then each mentioned entity answers in the conversation,
-in order, under its own name (`● Castor · entity`).
+next turn. A chip among other words is a **mention**: your message starts
+the agent's turn, and the agent answers only the part meant for it (or says
+nothing); then each mentioned entity answers in the conversation, in order,
+under its own name (`● Castor · entity`), and the agent's answer reads
+`✦ basic-agent · agent`. Mentions need AbstractGateway 0.21.0.
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
 and stream **no mid-turn progress** (both server-side boundaries — the app
@@ -2626,8 +2648,11 @@ Assistant, the browser and this terminal (first choice **Gateway default
 under **Archived · N**, where `u` brings it back). In `/automations` each
 card reads the gateway's words, `↻ Every 24 hours (UTC) · last 3 h ago`, and `next in 20 h` with its
 **Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
-the automation: each change is saved as a new revision), `a` Archive; inside
-one, `Ctrl+P` reads the selected run's reply aloud. When an automation waits
+the automation: each change is saved as a new revision), `a` Archive. Inside
+one, a header panel and a Details panel sit above its runs, shown as a table
+beside the selected run's output (Markdown; `l` lists its artifacts;
+`PgUp`/`PgDn` and the mouse wheel scroll it), and `Ctrl+P` reads the selected
+run's reply aloud. When an automation waits
 for you (an approval, a question, a result you have not seen), the status
 line says so (**1 waiting for you**, **Automations · 2 new**, from your event
 stream on the gateway; **Automations · N waiting** on an older gateway);
@@ -2734,7 +2759,7 @@ abstractcode --help | --version
 | `/theme [id]` | Live-preview theme picker, or set directly |
 | `/workflow` | Pick the agent workflow (`/agent` too). First row: **Gateway default → name @version** — the gateway decides at every new turn. Below it: the catalog's `abstractcode.agent.v1` entrypoints (a pick pins that workflow). The start of each turn names what ran. When the gateway keeps your account's **Default for new conversations** (AbstractGateway 0.13.1+; see [Settings panels](#settings-panels-settings)), this picks THIS conversation's workflow only and saves nothing on this computer; with an older gateway the pick is also saved on this computer for new conversations, as before |
 | `/files` | The run's workspace on the gateway host (`/workspace files` too): full path and machine, folders (`Enter` opens, `←`/`Backspace` goes up), sizes, the gateway's own list cut when it applies. `Enter` on a file previews it (text, Markdown, JSON, PNG/JPEG/GIF; a large file shows its first 512 KiB, labelled). `c` copies the path; `o` shows the workspace folder itself (never a sub-folder; never a folder that would be launched, such as `.app`) in your file manager, only when the gateway is on this machine and allows it; `r` refreshes |
-| `/automations [id]` | The gateway's automations (`/autos` too), shared with every client, as the Code web's cards: the name (+ **waiting for you** while an approval or a question waits), `↻ Every 24 hours (UTC) · last 3 h ago` (the schedule is always the gateway's own sentence, `schedule_rule_text` — Repeat with its bounds too, e.g. `Every 7 days (UTC) · 12 runs max`; a missing one shows `—`) (`waiting since 5 min` while a run waits on you, `running now` while one runs, `last never` before the first), then `next in 20 h` (absent when nothing is scheduled) with the **Active** switch; a Daily / Weekly / Monthly / Once automation reads the same way (`↻ Every day at 08:00 (Europe/Paris) · last …`), and every next run is the gateway's (`next_run_at`; the one-automation screen's Run now line adds `Next scheduled run: 2026-10-09 08:00 Europe/Paris.`, cut from the served `next_run_local` — the terminal never computes a next run or a time zone; a gateway older than round 16 serves none of these fields, only `next_fire_at`: the list still reads, the schedule shows `—` and the next run is that `next_fire_at`, in UTC) at the right (`[x]` runs on its schedule, `[ ]` paused, `[-]` cannot change). The quiet **Archived · N** line ends the list (N = the gateway's `archived_automations`; absent at 0): `Enter` opens the archived ones inline, `Enter`/`u` on one unarchives it (it comes back paused). Keys: `Enter` opens · `Space` switches Active (`p` too) · `g` Run now (once now; the next scheduled run keeps its time) · `x` Stop · `e` Edit (the settings panels on its definition, see below) · `a` Archive (asks inline: `y` archives, `n`/`Esc` keeps it) · `u` Unarchive · `n` new · `r` refresh. In one automation: `Automations / <title>`, the Active switch, the timing line `Every 24 hours (UTC) · last 3 h ago · next in 14 h`, the workspace as a short name, the waits that need you first (`y`/`n` approve/deny a tool call, `Enter` answers a question or an event), its runs as chat pairs, `o` **Open as chat** (or `Enter` on a run): the automation's loaded runs in the conversation's transcript widget, read-only — a separator per run (`#7 · completed · <trigger> · <time>`), its task as your turn, its answer as the reply, then what it notified, its failure and artifacts; `↑↓`, `PgUp`/`PgDn`, `Home`/`End` and the wheel scroll, it opens on the run you selected (else the newest), `Esc` goes back; `d` discuss the selected run (a new chat; this session switches to it), `Ctrl+P` reads the selected run's reply aloud (again = stop; spoken through the automation's run, like the Code web), `w` browse its folder, `Esc` back. Re-read every 15 s while open. Outside `/automations`, the status line shows what waits for you (**N waiting for you · M new** from your event stream; **Automations · N waiting** on a gateway without it; see [Status surfaces](#status-surfaces)). See [Automations](../../docs/automations.md) |
+| `/automations [id]` | The gateway's automations (`/autos` too), shared with every client, as the Code web's cards: the name (+ **waiting for you** while an approval or a question waits), `↻ Every 24 hours (UTC) · last 3 h ago` (the schedule is always the gateway's own sentence, `schedule_rule_text` — Repeat with its bounds too, e.g. `Every 7 days (UTC) · 12 runs max`; a missing one shows `—`) (`waiting since 5 min` while a run waits on you, `running now` while one runs, `last never` before the first), then `next in 20 h` (absent when nothing is scheduled) with the **Active** switch; a Daily / Weekly / Monthly / Once automation reads the same way (`↻ Every day at 08:00 (Europe/Paris) · last …`), and every next run is the gateway's (`next_run_at`; the one-automation screen's Run now line adds `Next scheduled run: 2026-10-09 08:00 Europe/Paris.`, cut from the served `next_run_local` — the terminal never computes a next run or a time zone; a gateway older than round 16 serves none of these fields, only `next_fire_at`: the list still reads, the schedule shows `—` and the next run is that `next_fire_at`, in UTC) at the right (`[x]` runs on its schedule, `[ ]` paused, `[-]` cannot change). The quiet **Archived · N** line ends the list (N = the gateway's `archived_automations`; absent at 0): `Enter` opens the archived ones inline, `Enter`/`u` on one unarchives it (it comes back paused). Keys: `Enter` opens · `Space` switches Active (`p` too) · `g` Run now (once now; the next scheduled run keeps its time) · `x` Stop · `e` Edit (the settings panels on its definition, see below) · `a` Archive (asks inline: `y` archives, `n`/`Esc` keeps it) · `u` Unarchive · `n` new · `r` refresh. In one automation: `Automations / <title>`, then panels — the header panel (the Active switch, the timing line `Every 24 hours (UTC) · last 3 h ago · next in 14 h`, what runs now and what waits for you) beside the **Details** panel (Runs and revision, Context, Tools, Workflow, Workspace as a short name — `w` browses it); below, the runs as a table, newest first under the waits that need you (`#`, status in its colour, when, tick; `y`/`n` approve/deny a tool call, `Enter` answers a question or an event), beside the selected row's panel: the run's output as Markdown, its artifacts folded to `5 artifacts — l lists them` (`l` lists their names, again folds them), then its task. `PgUp`/`PgDn`/`Home`/`End` scroll that panel; the mouse wheel scrolls the runs over the runs and the output anywhere else, three rows a notch. The key hints are two rows: the automation's keys, then the selected row's. Narrow and short terminals stack the panels without frames and put the details at the end of the output. `o` **Open as chat** (or `Enter` on a run): the automation's loaded runs in the conversation's transcript widget, read-only — a separator per run (`#7 · completed · <trigger> · <time>`), its task as your turn, its answer as the reply, then what it notified, its failure and artifacts; `↑↓`, `PgUp`/`PgDn`, `Home`/`End` and the wheel scroll, it opens on the run you selected (else the newest), `Esc` goes back; `d` discuss the selected run (a new chat; this session switches to it), `Ctrl+P` reads the selected run's reply aloud (again = stop; spoken through the automation's run, like the Code web), `w` browse its folder, `Esc` back. Re-read every 15 s while open. Outside `/automations`, the status line shows what waits for you (**N waiting for you · M new** from your event stream; **Automations · N waiting** on a gateway without it; see [Status surfaces](#status-surfaces)). See [Automations](../../docs/automations.md) |
 | `/automation [task]` | **New automation** (the Code web's name; `/schedule`, the old name, is a silent alias in 0.11.0) — the Code web's dialog in seven steps (`New automation — n/7 …`), in its words: **1/7 What** (the **Workflow**: the conversation's own to start with; `Enter` lists the workflows you may run, `GET /bundles?executable_for=abstractcode.agent.v1`, **Gateway default — <what it resolves to>** first; and the **Task**, default: your last prompt — `Enter` on it opens a multiline editor, the composer's widget: it wraps and scrolls, `Enter` and `Ctrl+J` insert a newline, `Home`/`End` move along the line, **Continue — When** (`Tab` then `Enter`, or a click) keeps the text, `Esc` goes back without it; every line is sent as the prompt), **2/7 When** (**Repeat** with the UTC presets or every N minutes/hours/days — a fixed interval in UTC; **Daily**, **Weekly** (the days as `[x] Mon` toggles), **Monthly** (**on day** 1–31 or **last**; a day the month does not have runs on its last day), each with **Time of day** `HH:MM`; **Once at…** (`Run once at` `YYYY-MM-DD HH:MM`) — Daily, Weekly, Monthly and Once run on your account's time zone; or **When an email arrives** with its check interval, batch size and filters — offered only when `GET /api/gateway/me/email` says your mailbox is usable, otherwise disabled with "Connect a mailbox first — open My email"). Every schedule kind (Repeat too) shows the gateway's answer to `POST /api/gateway/automations/schedule-preview` — its sentence, e.g. `Runs every 24 hours (UTC), first run now.` or `Runs every day at 08:00 (Europe/Paris), first run Fri 9 Oct 08:00.` (the calendar kinds and Once add `in Europe/Paris (your account's time zone)`; Repeat does not), "Checking the schedule…" while it answers, or its refusal (which stops **Continue**); every schedule kind is sent as `schedule@2`; the words are the ui-kit's (`assets/automation_controls.json`, `schedule` block, byte-identical), **3/7 Context** (Independent / Growing + **Max growing context (tokens)**), **4/7 Tools** (every tool starts **deselected** and **Use workflow default tools** off; **Select all** / **Unselect all** on top; each toolset's header carries a box that shows its state — `[x]` all, `[ ]` none, `[~]` some, `[-]` nothing grantable on this gateway — and turns its tools on, or off when all were; then the `/tools` rows; a click on a line toggles it, `Space`/`Enter` toggle the focused line and the focus stays there, the mouse wheel and `PgUp`/`PgDn` scroll the list; then **Run without asking** / **Ask me before each tool call (the run waits for you)**), **5/7 Workspaces** (starting from **Use my default**; `input_data.workspace`), **6/7 Mailbox** (**Email result**, **Recipients**), **7/7 Title and limits** (Title; First run at (UTC; empty = now) for Repeat; Stop after this many runs and Stop at (UTC) for Repeat, Daily, Weekly and Monthly; the gateway's line for the rule with its limits) and **Create automation**. The run input is the web's: the workflow's input schema defaults, then this conversation's provider/model, reasoning, stream setting, iteration and token limits, tools and skills (never its workspace or approval policy), checked against the schema before anything is sent — a problem shows the check's sentence (e.g. "Topic is required.") on the last step. `↑↓` move (`PgUp`/`PgDn`, `Home`/`End` too), `Enter`/`Space` change a row or continue, `Esc` goes back to the previous step with its values kept (on **1/7 What** it closes the dialog, first asking "Discard this new automation?" — a second `Esc` in a row discards, any other key clears the question — when something was entered); a step opens with the cursor on **Continue**, a change keeps it on the row changed (`End` goes back to **Continue**). Opens the automation once the gateway answers |
 | `/workspace send [auto\|always\|never]` | Whether your folder is sent as the workspace: `auto` (default) = only when the gateway is on this machine; `always` = also to a gateway on another machine that sees the same path (a shared mount); `never`. Bare reports what is in force. Saved in `prefs.json` |
 | `/about` | Version, "Part of AbstractFramework", author and licence, website / source / documentation / issue / feedback links, contact, and the gateway's package versions (`/version` too) |
@@ -2774,7 +2799,7 @@ abstractcode --help | --version
 | `/gpu` | Toggle the gateway-host GPU meter in the footer |
 | `/stance [line\|figure\|off]` | How the turn is going, from mechanical facts (effort, calls, verify-shaped share of calls); floats bottom-right over the transcript, `Ctrl+G` folds it (`/conduct` too) |
 | `/redraw` | Force a full-screen repaint (`Ctrl+L`) — recovery from an external terminal clear (Cmd+K), which damage-tracked rendering cannot detect |
-| `@` + pick | Mention an entity. `@` opens a list of the entities this account may see (the cached roster); a pick is one chip in the box (Backspace removes it whole), and a typed `@name` that was not picked is plain text. A message that is only one chip opens (or focuses) that entity's durable visit. Any other message is sent as usual, then each picked entity is asked in order through `POST /api/gateway/sessions/{id}/mentions`, the next once the previous answered; each answer appears as `● Castor · entity`. An entity picked twice is asked once, and a message's entities are asked after those of the previous message in the same conversation. "Castor is in another conversation." and the gateway's other refusals are shown and the next entity is asked; "Castor cannot answer: …" (or a failed call) stops the asking and puts the message back in the box, with only the entities not answered left as chips: Enter on it unchanged asks only those, starting no new turn; each mention carries its own id, so an entity whose answer was lost on the way is never asked twice (the gateway gives back its first answer). A gateway without the route says "This gateway does not offer mentions yet." once and `@` then offers nothing. Under an entity's focus the chips ask no one (a notice says so) |
+| `@` + pick | Mention an entity. `@` opens a list of the entities this account may see (the cached roster); a pick is one chip in the box (Backspace removes it whole), and a typed `@name` that was not picked is plain text. A message that is only one chip opens (or focuses) that entity's durable visit. Any other message starts the agent's turn with the entities it mentions (`mentions` on `POST /api/gateway/runs/start`, in chip order, each once: the agent answers only the part meant for it, or says nothing, and an empty reply adds no line), then each picked entity is asked in order through `POST /api/gateway/sessions/{id}/mentions`, the next once the previous answered; each answer appears as `● Castor · entity`. Needs AbstractGateway 0.21.0. An entity picked twice is asked once, and a message's entities are asked after those of the previous message in the same conversation. "Castor is in another conversation." and the gateway's other refusals are shown and the next entity is asked; "Castor cannot answer: …" (or a failed call) stops the asking and puts the message back in the box, with only the entities not answered left as chips: Enter on it unchanged asks only those, starting no new turn; each mention carries its own id, so an entity whose answer was lost on the way is never asked twice (the gateway gives back its first answer). A gateway without the route says "This gateway does not offer mentions yet." once and `@` then offers nothing. Under an entity's focus the chips ask no one (a notice says so) |
 | `/entities [name]` | Entity roster + identity cards (opens instantly on the cached roster, refreshes async — the live fetch can be slow behind the gateway's drives fold). `[name]` deep-links to that card |
 | `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
 | `/task <name> <title>` | Leave a task on the entity's desk — durable, no visit needed, works while the entity sleeps. Pickup happens at the entity's own boundary (day end, wake check, or visit close), never "immediately" |
@@ -3277,7 +3302,8 @@ recovers it.
 | `?` + Enter | empty composer | Open the keys + commands reference (the footer's `? keys + commands`) |
 | `Ctrl+Q` | anywhere | Quit |
 | `Ctrl+C` | anywhere | Clear the current prompt (if any) and arm quit — a second Ctrl+C within 2s quits (with a live run, the quit gate opens; a third press = leave & quit) |
-| click outside | ordinary dialogs | Close without activating the control underneath; approval and user-question steps remain open |
+| click outside | ordinary dialogs | Close without activating the control underneath; the tool approval, the agent question and the "Disconnect this terminal?" confirmation stay open until answered |
+| wheel | a dialog | Scroll the dialog's content wherever the pointer is; the wheel over a tool approval or an agent question never scrolls the conversation behind |
 | `↑↓` + `Enter`/`Space` | pickers | Move + choose — Space confirms too, single-select semantics (theme picker previews live) |
 | `Tab` | anywhere | Move focus (composer ↔ transcript ↔ modal fields) |
 | any character | transcript focused | Return focus to the composer and keep the character — typing is never dropped because focus wandered. `/` opens the command dropdown the same way |
@@ -3305,7 +3331,7 @@ recovers it.
 | `/workspace` | the Workspace panel: `↑↓` move · `Enter` changes the row (a mode picker, the posture, **Add a workspace path**) · `Space` flips **Use my default** · `d` back to **Use my default** · `Esc` close |
 | `/settings` | `←`/`→`/`Tab`/`1`–`8` panel (an automation's Edit: `1`–`5`, or a click on a section) · `↑↓` move · `PgUp`/`PgDn`/`Home`/`End` · wheel scrolls · `Enter` change · `Space` switch · `d` Gateway default · `Esc` close (an automation's Edit: back to the automation) |
 | `/sessions` | `↑↓` move · `Enter` continue / open `Archived · N` / unarchive · `a` Archive → `y` archives, `n`/`Esc` cancels · `u` Unarchive · `n` new conversation · `r` refresh · `/` search (typing filters on title + id; `Backspace`; `Esc` clears it) · `Esc` close |
-| `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `o` Open as chat (or `Enter` on a run; `Esc` back) |
+| `/automations` | `↑↓` move · `Enter` open / open `Archived · N` / unarchive · `Space` Active · `g` Run now · `x` Stop · `e` Edit · `a` Archive → `y`, `n`/`Esc` keeps it · `u` Unarchive · `n` new · `r` refresh · `Esc` close; in one automation `↑↓` select a run or a wait · `PgUp`/`PgDn`/`Home`/`End` and the wheel scroll the selected run's output · `l` lists its artifacts · `y`/`n` approve/deny · `d` Discuss · `w` Folder · `Ctrl+P` read aloud · `o` Open as chat (or `Enter` on a run; `Esc` back) |
 
 ## Selected content
 
@@ -3372,7 +3398,7 @@ toggles).
 | `↳ …` | A tool error, attached under its card (error ink) |
 | `│ …` | Tool result output (JSON output is laid out instead: indented, keys / strings / numbers in the theme's syntax inks) |
 | `▶` / `‖` (top right) | Read this message aloud / pause it |
-| `══ assistant ══…` | The answer (markdown; `✦ assistant (update)` mid-run) |
+| `══ assistant ══…` | The answer (markdown; `✦ assistant (update)` mid-run). When the gateway names the turn's author the rule reads `✦ basic-agent · agent` for the agent and `● Castor · entity` for an entity, the mark in the entity's own colour |
 | `↪ steer` | Guidance you sent mid-run |
 | `▦` | Generated image (unicode mosaic) |
 | `·` | Informational notice |
@@ -3468,6 +3494,11 @@ Monthly, Once at… in the account's time zone).
 - The account's default workflow (`/accounts/me/preferences`) exists on
   0.13.1; a gateway without it (404 or 405) gets the panel's own "needs a
   newer gateway" line, and `/workflow` saves on this computer as before.
+- `@` mentions (`POST /sessions/{id}/mentions`, the `mentions` key on
+  `POST /runs/start`) and the turn's `author` need AbstractGateway 0.21.0. On
+  an older gateway `@` says "This gateway does not offer mentions yet." once
+  and then offers nothing, the `mentions` key is ignored, and every answer
+  reads `assistant` as before.
 
 ### Automation actions show a pending state
 
@@ -3998,6 +4029,8 @@ when the gateway advertises live replies. See
 | `src/voice.rs`, `src/voice_host.rs`, `src/ui/voice_view.rs` | Voice: the gateway's voice routes (`/voice/defaults`, `/runs/{id}/voice/tts/stream`, `/runs/{id}/audio/transcribe`), the host-audio bridge (`assets/voice_bridge.py`, AbstractVoice in Python over JSON lines), the `/voice` screen and the status line. Every gateway call and bridge wait runs on a named voice thread; results come back as posted closures. |
 | `src/rail.rs`, `src/conversations.rs`, `src/gateway/rail.rs` | The settings panels and the conversations board (R7.3), pure rules first: an automation definition's run settings read from / written to its `input_data` with the keys a conversation turn writes, the revision line, the Activity groups (one per model step, one per automation run), the conversation card's `Oct 2 · 2 turns · 7 tools`. The lane runs the same routes as Code web on one short-lived thread per action: `/workspace/policy`, `/runs/{id}/ledger`, `/runs?root_only=true&archived_only=true`, `POST /sessions/{id}/archive\|unarchive`, `PATCH /automations/{id}`. |
 | `src/ui/rail_view.rs`, `src/ui/conversations_view.rs`, `src/ui/cards.rs` | `/settings` (the eight panels bound to the conversation or an automation), `/sessions` (the board, Archive / Unarchive), and the wrapping card list both share with `/automations` (nothing cut; a switch's state inked; the selected card kept in view). |
+| `src/mention.rs` | `@entity` mentions, pure rules: the composer's `@` roster, what a submitted message with chips means (a lone chip opens a visit; otherwise the turn starts with `mentions`, then one `POST /sessions/{id}/mentions` call per chip, in order), `mention_id`, the gateway's refusals, and the `author` every turn surface carries. |
+| `src/automations.rs`, `src/ui/automations_view.rs`, `src/ui/automation_detail.rs` | Automations: the wire shapes and the labels every client prints (pure), `/automations` and `/automation`, and one automation's screen built from AbstractTUI parts (`Block` panels, the engine `List` for the runs, a `Scroll` over a `MarkdownView` for the selected run's output). |
 | `src/runner.rs` | Worker thread: commands, per-run stream threads, terminal detection. |
 | `src/store.rs` | The signal store (UI-thread owned). |
 | `src/ui/` | AbstractTUI views: chrome, transcript pane, modals. |
@@ -4660,6 +4693,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A conversation that opens on an entity's answer continues with its newest agent turn's workflow (an answer is
   never taken for the conversation's workflow, which said "no longer available").
 - On the vendored panel-chat of AbstractUIC main aab7240 (local 0.9.9, not published; `npm run sync:conversation`).
+- **The agent leaves what you ask an entity to that entity.** A message with `@` chips now starts its turn with
+  the entities it mentions (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message
+  too). The agent answers only the part meant for it, or says nothing: the conversation then shows your words
+  and the entities' answers, with no empty reply. Needs AbstractGateway main c26d38a2 or later, and an agent that
+  accepts an empty reply (AbstractAgent still asks again today); an older gateway ignores the key.
 
 - **"Iteration limit" moved to Model → Limits & streaming, as the shared kit control** (AbstractUIC ui-kit 0.9.26
   `IterationLimitField`, operator 2026-11-08). It is the third row after "Context token limit" and "Stream replies"
@@ -4678,6 +4716,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (web)
 
+- **A mention sent with guidance is answered.** A message sent while a run is working ("Guide this
+  run", or the Avatar view's message to the running turn) was refused with "That earlier message is
+  not one of your own turns in this conversation": its mentions named the running turn, whose words
+  are an earlier message. Guidance starts no turn, so its mentions now name none, and the entity is
+  asked your words. A message that starts a turn, sent or queued, still names it.
 - **A mention is answered once, even when sent again.** Each mention now carries its own id (your
   message's turn, the entity, its place in the message). If the answer was lost on the way back (a
   timeout, a dropped connection) and you send the same words again, the gateway returns the answer
@@ -4694,73 +4737,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a chip picked while a send is in flight stays, Enter waits while the `@` list loads, a picked name is not
   offered again, and the list spans the box on a phone.
 
-### Added (terminal, ships with the next terminal release)
+## [terminal 0.15.0] - 2026-11-10
 
-- **`@` mentions an entity from the conversation, and every answer says who wrote it** (operator
-  2026-11-08; needs the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway
-  main f32c8ca9 + 06e9968c/0997ce4a with AbstractRuntime 6706188 + 1abcc26/cd65610; built on
-  AbstractTUI main b06ba9a through a temporary `[patch.crates-io]` that goes when AbstractTUI 0.8.0
-  is published). Typing `@` lists the entities
-  this account may see; a pick is one chip, which Backspace removes whole. A typed `@name` that was
-  not picked is plain text, sent as typed (a leading `@name` used to be read out of the text and
-  route the message). Before the first message that names an entity in a conversation, the line
-  above the box says "Castor will read this conversation's history." A message that is only one chip
-  opens that entity's conversation, as `@name` did. Any other message is sent as before, then each
-  picked entity is asked in order, the next once the previous answered, and each answer appears as
-  "● Castor · entity" with the mark in the entity's own colour. Each call names the turn the same
-  words started (`repeat_of`), so a reopened conversation shows those words once, with each
-  mention's answer right after that turn, the answers in the order they came. "Castor is in another
-  conversation.", "Castor cannot be mentioned here." and the gateway's other refusals are shown and
-  the next entity is asked; "Castor cannot answer: …" is shown and the message goes back into the
-  box. A gateway without the route says "This gateway does not offer mentions yet." once, and `@`
-  then offers nothing. Under an entity's focus, or inside a slash command, the chips ask no one,
-  and a notice says so.
-- **The answer rule names its author** when the gateway gives one: "✦ basic-agent · agent" for the
-  agent's turn (on the streaming reply as it arrives, on the answer when the turn ends, and from the
-  history on reopen), "● Castor · entity" for an entity. Without one (an older gateway) the rule is the plain "assistant" as before. The Markdown
-  export uses the same name, and the SFT export never takes an entity's reply as the agent's answer.
+Built on AbstractTUI 0.8.0. `@` mentions and the answer's author need
+AbstractGateway 0.21.0; with an older gateway `@` says "This gateway does not
+offer mentions yet." once and every answer reads "assistant" as before.
 
-### Fixed (terminal, ships with the next terminal release)
+### Added
 
-- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
-  message's turn, the entity, its place in the message). If an answer was lost on the way back and
-  you press Enter on the message again, the gateway returns the answer the entity already gave
-  instead of asking it twice; a new message is asked as new. Needs an AbstractGateway that keeps
-  mention ids (main f0f23bb0 or later).
-- **Mentions, client review 2026-11-09.** "Castor cannot answer: …" (503) or a failed call now stops the asking
-  (the next entity was asked anyway), and the message comes back with only the entities not answered left as chips
-  (an answered one reads as its plain name). Enter on it unchanged asks only those, with the words as first sent,
-  the same `repeat_of` and their first `mention_index`: no new turn, and an entity that answered is never asked
-  again. An entity picked twice is asked once. One conversation runs one message's mentions at a time: the next
-  message's wait for them, in order. An uncoded 405 means "This gateway does not offer mentions yet." like an
-  uncoded 404.
+- **`@` mentions an entity from the conversation.** Typing `@` lists the
+  entities this account may see; a pick is one chip, which Backspace removes
+  whole, and a typed `@name` that was not picked is plain text, sent as typed.
+  Before the first message that names an entity in a conversation, the line
+  above the box says "Castor will read this conversation's history." A message
+  that is only one chip opens that entity's conversation (a visit). Any other
+  message starts the agent's turn, then each picked entity is asked in order,
+  the next once the previous answered; an entity picked twice is asked once,
+  and a conversation asks one message's entities at a time. Each answer is a
+  turn of the conversation, so a reopened conversation shows your words once
+  with each answer after them. "Castor is in another conversation.", "Castor
+  cannot be mentioned here." and the gateway's other refusals are shown and the
+  next entity is asked. "Castor cannot answer: …" or a failed call stops the
+  asking and puts the message back in the box with only the entities not
+  answered as chips; Enter on it unchanged asks only those, without starting a
+  new turn. Each mention carries its own id, so an entity whose answer was lost
+  on the way is never asked twice: the gateway returns the answer it already
+  gave. Under an entity's focus, or inside a slash command, the chips ask no
+  one and a notice says so.
+- **The agent leaves what you ask an entity to that entity.** A message with
+  `@` chips starts its turn with the entities it mentions (`mentions` on
+  `POST /runs/start`, in chip order, each once), so the agent answers only the
+  part meant for it, or says nothing: the turn then ends with your words and
+  the entities' answers, with no "without a readable final answer" line. An
+  answer that arrives late still shows. The agent can stay silent with an
+  AbstractAgent newer than 0.6.0; an older gateway ignores the key.
+- **Every answer names its author** when the gateway gives one: the answer rule
+  reads `✦ basic-agent · agent` for the agent (on the streaming reply, on the
+  final answer and from the history on reopen) and `● Castor · entity` for an
+  entity, the mark in the entity's own colour. The Markdown export uses the
+  same name, and the SFT export never takes an entity's reply as the agent's
+  answer.
 
-- **`/sessions` and `--resume` leave AbstractNote's own work out.** A session whose first turn runs
-  an AbstractNote workflow (a note captured from the watch or the web) is not a conversation: it is
-  no longer listed, and `--resume` never reopens it. AbstractNote's automations ("Process my notes",
-  "Reflect on my notes", "Consolidate my notes") leave the automations list and its counts.
-- **A conversation without a known first message is called "Untitled conversation"**, never
-  "Conversation" followed by part of its session ID.
-- **The mouse wheel scrolls one automation, and every screen that windows its content.** One
-  automation's screen painted its runs as a window that only followed the ↑↓ cursor, so the wheel
-  did nothing and a long reply could never be read past the window. The wheel now scrolls the runs
-  over the runs and the selected run's output anywhere else on the screen, three rows a notch. The
-  same gap is closed on the automations list, the New automation steps, the workspace screen, an
-  automation's or a run's folder, `/status`, `/mcp` and `/resources` (the rows of `/status` and
-  `/mcp` past their window were out of reach before: their arrow and page keys now scroll them
-  too), the file preview, and the entities roster and card.
+### Changed
 
-### Changed (terminal)
+- **One automation reads as panels.** The header panel (the Active switch,
+  the schedule with the last and next run, what runs now and what waits for
+  you) sits beside the Details panel (runs and revision, context, tools,
+  workflow, folder). Below, the runs are a table, newest first under the waits
+  that need you (#, status in its colour, when, tick), and the selected row has
+  its own panel: the run's output as Markdown, its artifacts folded to
+  "5 artifacts — l lists them", then its task. `PgUp`/`PgDn`/`Home`/`End`
+  scroll that panel; every other key works as before. The key hints are two
+  rows: the automation's keys, then the selected row's. Narrow and short
+  terminals stack the panels without frames and put the details at the end of
+  the output.
+- **AbstractTUI 0.8.0** (was 0.7.1). The mouse wheel scrolls a dialog's content
+  wherever the pointer is, and a click in a text field moves the cursor there.
+  A click outside an ordinary dialog closes it, as before; the tool approval,
+  the agent question and the "Disconnect this terminal?" confirmation stay open
+  until you answer them (`Esc` still sets an approval or a question aside), and
+  the wheel over them never scrolls the conversation behind.
+- A conversation without a known first message is called "Untitled
+  conversation", never "Conversation" followed by part of its session ID.
 
-- **One automation reads as panels.** The header panel (the Active switch, the schedule with the
-  last and next run, what runs now and what waits for you) sits beside the Details panel (runs and
-  revision, context, tools, workflow, folder as labelled rows). Below, the runs are a table, newest
-  first under the waits that need you (#, status in its colour, when, tick), and the selected row
-  has its own panel: the run's output as Markdown (paragraphs, headings, bullets), its artifacts
-  folded to "5 artifacts — l lists them" (`l` lists their names, again folds them), then its task.
-  PgUp/PgDn/Home/End scroll that panel; every other key works as before. The key hints are two rows:
-  the automation's keys, then the selected row's. Phone-width and short terminals stack the
-  panels without frames and put the details at the end of the output.
+### Fixed
+
+- **The mouse wheel scrolls one automation, and every screen that windows its
+  content.** Over the runs it scrolls the runs, anywhere else the selected
+  run's output, three rows a notch, so a long reply can be read to its end. The
+  automations list, the New automation steps, the workspace screen, an
+  automation's or a run's folder, `/status`, `/mcp` and `/resources`, the file
+  preview, and the entities roster and card scroll with the wheel too; the rows
+  of `/status` and `/mcp` past their window are reachable with the arrow and
+  page keys.
+- `/sessions` and `--resume` leave AbstractNote's own work out: a session whose
+  first turn runs an AbstractNote workflow (a note captured from the watch or
+  the web) is no longer listed or reopened, and AbstractNote's automations
+  ("Process my notes", "Reflect on my notes", "Consolidate my notes") leave the
+  automations list and its counts.
 
 ## [web 0.15.21] - 2026-11-08 (local build, not published)
 

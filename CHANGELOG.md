@@ -70,97 +70,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a chip picked while a send is in flight stays, Enter waits while the `@` list loads, a picked name is not
   offered again, and the list spans the box on a phone.
 
-### Added (terminal, ships with the next terminal release)
+## [terminal 0.15.0] - 2026-11-10
 
-- **`@` mentions an entity from the conversation, and every answer says who wrote it** (operator
-  2026-11-08; needs the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway
-  main f32c8ca9 + 06e9968c/0997ce4a with AbstractRuntime 6706188 + 1abcc26/cd65610; built on
-  AbstractTUI main b06ba9a through a temporary `[patch.crates-io]` that goes when AbstractTUI 0.8.0
-  is published). Typing `@` lists the entities
-  this account may see; a pick is one chip, which Backspace removes whole. A typed `@name` that was
-  not picked is plain text, sent as typed (a leading `@name` used to be read out of the text and
-  route the message). Before the first message that names an entity in a conversation, the line
-  above the box says "Castor will read this conversation's history." A message that is only one chip
-  opens that entity's conversation, as `@name` did. Any other message is sent as before, then each
-  picked entity is asked in order, the next once the previous answered, and each answer appears as
-  "● Castor · entity" with the mark in the entity's own colour. Each call names the turn the same
-  words started (`repeat_of`), so a reopened conversation shows those words once, with each
-  mention's answer right after that turn, the answers in the order they came. "Castor is in another
-  conversation.", "Castor cannot be mentioned here." and the gateway's other refusals are shown and
-  the next entity is asked; "Castor cannot answer: …" is shown and the message goes back into the
-  box. A gateway without the route says "This gateway does not offer mentions yet." once, and `@`
-  then offers nothing. Under an entity's focus, or inside a slash command, the chips ask no one,
-  and a notice says so.
-- **The answer rule names its author** when the gateway gives one: "✦ basic-agent · agent" for the
-  agent's turn (on the streaming reply as it arrives, on the answer when the turn ends, and from the
-  history on reopen), "● Castor · entity" for an entity. Without one (an older gateway) the rule is the plain "assistant" as before. The Markdown
-  export uses the same name, and the SFT export never takes an entity's reply as the agent's answer.
-- **The agent leaves what you ask an entity to that entity.** A message with `@` chips now starts its
-  turn with the entities it mentions (`mentions` on `POST /runs/start`, in chip order, each once). The
-  agent answers only the part meant for it, or says nothing: the turn then ends with your words and
-  the entities' answers, without "the run completed without a readable final answer". An answer that
-  arrives late still shows. Needs AbstractGateway main c26d38a2 or later, and an agent that accepts an
-  empty reply (AbstractAgent still asks again today); an older gateway ignores the key.
+Built on AbstractTUI 0.8.0. `@` mentions and the answer's author need
+AbstractGateway 0.21.0; with an older gateway `@` says "This gateway does not
+offer mentions yet." once and every answer reads "assistant" as before.
 
-### Fixed (terminal, ships with the next terminal release)
+### Added
 
-- **A click outside a tool approval or an agent question no longer makes it disappear undecided.**
-  Built against AbstractTUI main (0.8.0, not published), where a click outside any dialog closes it,
-  such a click removed the approval or question from the screen without approving, denying or
-  setting it aside: the run kept waiting, the keys meant for it went to the message box, and the
-  prompt did not come back on its own (only Enter on an empty message box reopened it). The
-  approval, the question and the "Disconnect this terminal?" confirmation now ignore a click
-  outside them and stay answerable; Esc still sets an approval or question aside, and the mouse
-  wheel over them never scrolls the conversation behind. Every other dialog still closes on a
-  click outside, as before.
+- **`@` mentions an entity from the conversation.** Typing `@` lists the
+  entities this account may see; a pick is one chip, which Backspace removes
+  whole, and a typed `@name` that was not picked is plain text, sent as typed.
+  Before the first message that names an entity in a conversation, the line
+  above the box says "Castor will read this conversation's history." A message
+  that is only one chip opens that entity's conversation (a visit). Any other
+  message starts the agent's turn, then each picked entity is asked in order,
+  the next once the previous answered; an entity picked twice is asked once,
+  and a conversation asks one message's entities at a time. Each answer is a
+  turn of the conversation, so a reopened conversation shows your words once
+  with each answer after them. "Castor is in another conversation.", "Castor
+  cannot be mentioned here." and the gateway's other refusals are shown and the
+  next entity is asked. "Castor cannot answer: …" or a failed call stops the
+  asking and puts the message back in the box with only the entities not
+  answered as chips; Enter on it unchanged asks only those, without starting a
+  new turn. Each mention carries its own id, so an entity whose answer was lost
+  on the way is never asked twice: the gateway returns the answer it already
+  gave. Under an entity's focus, or inside a slash command, the chips ask no
+  one and a notice says so.
+- **The agent leaves what you ask an entity to that entity.** A message with
+  `@` chips starts its turn with the entities it mentions (`mentions` on
+  `POST /runs/start`, in chip order, each once), so the agent answers only the
+  part meant for it, or says nothing: the turn then ends with your words and
+  the entities' answers, with no "without a readable final answer" line. An
+  answer that arrives late still shows. The agent can stay silent with an
+  AbstractAgent newer than 0.6.0; an older gateway ignores the key.
+- **Every answer names its author** when the gateway gives one: the answer rule
+  reads `✦ basic-agent · agent` for the agent (on the streaming reply, on the
+  final answer and from the history on reopen) and `● Castor · entity` for an
+  entity, the mark in the entity's own colour. The Markdown export uses the
+  same name, and the SFT export never takes an entity's reply as the agent's
+  answer.
 
-- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
-  message's turn, the entity, its place in the message). If an answer was lost on the way back and
-  you press Enter on the message again, the gateway returns the answer the entity already gave
-  instead of asking it twice; a new message is asked as new. Needs an AbstractGateway that keeps
-  mention ids (main f0f23bb0 or later).
-- **Mentions, client review 2026-11-09.** "Castor cannot answer: …" (503) or a failed call now stops the asking
-  (the next entity was asked anyway), and the message comes back with only the entities not answered left as chips
-  (an answered one reads as its plain name). Enter on it unchanged asks only those, with the words as first sent,
-  the same `repeat_of` and their first `mention_index`: no new turn, and an entity that answered is never asked
-  again. An entity picked twice is asked once. One conversation runs one message's mentions at a time: the next
-  message's wait for them, in order. An uncoded 405 means "This gateway does not offer mentions yet." like an
-  uncoded 404.
+### Changed
 
-- **`/sessions` and `--resume` leave AbstractNote's own work out.** A session whose first turn runs
-  an AbstractNote workflow (a note captured from the watch or the web) is not a conversation: it is
-  no longer listed, and `--resume` never reopens it. AbstractNote's automations ("Process my notes",
-  "Reflect on my notes", "Consolidate my notes") leave the automations list and its counts.
-- **A conversation without a known first message is called "Untitled conversation"**, never
-  "Conversation" followed by part of its session ID.
-- **The mouse wheel scrolls one automation, and every screen that windows its content.** One
-  automation's screen painted its runs as a window that only followed the ↑↓ cursor, so the wheel
-  did nothing and a long reply could never be read past the window. The wheel now scrolls the runs
-  over the runs and the selected run's output anywhere else on the screen, three rows a notch. The
-  same gap is closed on the automations list, the New automation steps, the workspace screen, an
-  automation's or a run's folder, `/status`, `/mcp` and `/resources` (the rows of `/status` and
-  `/mcp` past their window were out of reach before: their arrow and page keys now scroll them
-  too), the file preview, and the entities roster and card.
+- **One automation reads as panels.** The header panel (the Active switch,
+  the schedule with the last and next run, what runs now and what waits for
+  you) sits beside the Details panel (runs and revision, context, tools,
+  workflow, folder). Below, the runs are a table, newest first under the waits
+  that need you (#, status in its colour, when, tick), and the selected row has
+  its own panel: the run's output as Markdown, its artifacts folded to
+  "5 artifacts — l lists them", then its task. `PgUp`/`PgDn`/`Home`/`End`
+  scroll that panel; every other key works as before. The key hints are two
+  rows: the automation's keys, then the selected row's. Narrow and short
+  terminals stack the panels without frames and put the details at the end of
+  the output.
+- **AbstractTUI 0.8.0** (was 0.7.1). The mouse wheel scrolls a dialog's content
+  wherever the pointer is, and a click in a text field moves the cursor there.
+  A click outside an ordinary dialog closes it, as before; the tool approval,
+  the agent question and the "Disconnect this terminal?" confirmation stay open
+  until you answer them (`Esc` still sets an approval or a question aside), and
+  the wheel over them never scrolls the conversation behind.
+- A conversation without a known first message is called "Untitled
+  conversation", never "Conversation" followed by part of its session ID.
 
-### Changed (terminal)
+### Fixed
 
-- **Built on AbstractTUI 0.8.0 from crates.io** (was 0.7.1; the temporary path override to a local
-  AbstractTUI checkout is gone, so `cargo install` and every build resolve the published engine). 0.8.0
-  brings the `@` mention chips and the author on chat rows, and makes a click outside a dialog close it:
-  the tool approval, the agent question and the "Disconnect this terminal?" confirmation opt out of that
-  and stay open until answered (342da9b, see Fixed above); every other dialog closes on a click
-  outside, as before. Its other visible changes: the mouse wheel scrolls a dialog's content wherever
-  the pointer is, and a click in a text field moves the cursor there.
-
-- **One automation reads as panels.** The header panel (the Active switch, the schedule with the
-  last and next run, what runs now and what waits for you) sits beside the Details panel (runs and
-  revision, context, tools, workflow, folder as labelled rows). Below, the runs are a table, newest
-  first under the waits that need you (#, status in its colour, when, tick), and the selected row
-  has its own panel: the run's output as Markdown (paragraphs, headings, bullets), its artifacts
-  folded to "5 artifacts — l lists them" (`l` lists their names, again folds them), then its task.
-  PgUp/PgDn/Home/End scroll that panel; every other key works as before. The key hints are two rows:
-  the automation's keys, then the selected row's. Phone-width and short terminals stack the
-  panels without frames and put the details at the end of the output.
+- **The mouse wheel scrolls one automation, and every screen that windows its
+  content.** Over the runs it scrolls the runs, anywhere else the selected
+  run's output, three rows a notch, so a long reply can be read to its end. The
+  automations list, the New automation steps, the workspace screen, an
+  automation's or a run's folder, `/status`, `/mcp` and `/resources`, the file
+  preview, and the entities roster and card scroll with the wheel too; the rows
+  of `/status` and `/mcp` past their window are reachable with the arrow and
+  page keys.
+- `/sessions` and `--resume` leave AbstractNote's own work out: a session whose
+  first turn runs an AbstractNote workflow (a note captured from the watch or
+  the web) is no longer listed or reopened, and AbstractNote's automations
+  ("Process my notes", "Reflect on my notes", "Consolidate my notes") leave the
+  automations list and its counts.
 
 ## [web 0.15.21] - 2026-11-08 (local build, not published)
 

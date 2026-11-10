@@ -154,7 +154,8 @@ or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
 after `@` without picking it stays ordinary text. The first time you name an entity
 in a conversation, a line tells you "Castor will read this conversation's history."
 
-When you send, your message goes to the agent as usual. Then each entity you picked
+When you send, your message starts the agent's turn, and the agent answers only the
+part meant for it, or says nothing. Then each entity you picked
 is asked in turn, in the order you picked them, each once the previous one has
 answered, so a later entity reads the earlier answers. An entity picked twice is
 asked once. Every reply says who wrote it: in the browser, the bubble shows the

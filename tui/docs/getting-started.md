@@ -130,9 +130,11 @@ that is only that chip opens a durable **visit** (`/entities` lists the
 roster with identity cards; `Enter` there does the same). The visit gets its
 own transcript and a header chip; `Alt+E` cycles focus between the agent and
 open visits, and everything you submit under entity focus is that visit's
-next turn. A chip among other words is a **mention**: your message goes to
-the agent as usual, then each mentioned entity answers in the conversation,
-in order, under its own name (`● Castor · entity`).
+next turn. A chip among other words is a **mention**: your message starts
+the agent's turn, and the agent answers only the part meant for it (or says
+nothing); then each mentioned entity answers in the conversation, in order,
+under its own name (`● Castor · entity`), and the agent's answer reads
+`✦ basic-agent · agent`. Mentions need AbstractGateway 0.21.0.
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
 and stream **no mid-turn progress** (both server-side boundaries — the app
@@ -259,8 +261,11 @@ Assistant, the browser and this terminal (first choice **Gateway default
 under **Archived · N**, where `u` brings it back). In `/automations` each
 card reads the gateway's words, `↻ Every 24 hours (UTC) · last 3 h ago`, and `next in 20 h` with its
 **Active** switch; `g` Run now, `x` Stop, `e` Edit (the same panels, bound to
-the automation: each change is saved as a new revision), `a` Archive; inside
-one, `Ctrl+P` reads the selected run's reply aloud. When an automation waits
+the automation: each change is saved as a new revision), `a` Archive. Inside
+one, a header panel and a Details panel sit above its runs, shown as a table
+beside the selected run's output (Markdown; `l` lists its artifacts;
+`PgUp`/`PgDn` and the mouse wheel scroll it), and `Ctrl+P` reads the selected
+run's reply aloud. When an automation waits
 for you (an approval, a question, a result you have not seen), the status
 line says so (**1 waiting for you**, **Automations · 2 new**, from your event
 stream on the gateway; **Automations · N waiting** on an older gateway);

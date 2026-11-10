@@ -10,7 +10,7 @@ checksum = "945d0ab9a2257b26468e01567a01bc56dc7d8459f0ddccce93c7cc88e4b890e8"
 
 [[package]]
 name = "abstractcode"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "abstracttui",
  "libc",
