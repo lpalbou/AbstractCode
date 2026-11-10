@@ -1890,11 +1890,28 @@ impl Runner {
         };
         // The message mentioned entities: they answer for themselves, and the
         // agent may say nothing (no "without a readable final answer" line).
-        let entities_answer = !opts.mentions.is_empty();
+        let entities_answer = crate::mention::names_an_entity(&opts.mentions);
         match self
             .client
             .start_run(&flow_id, bundle, Some(&session_id), input, &opts.mentions)
         {
+            Ok(started) if !started.agent_addressed => {
+                // The chips named entities and not the agent (`agent:
+                // "not_addressed"`): no agent run started. `turn_id` is the
+                // person's turn the gateway recorded, which the mentions name
+                // as `repeat_of`; nothing streams, nothing is bound.
+                self.last_start = Some((session_id.clone(), started.turn().to_string()));
+                let tx = self.tx.clone();
+                let started_session = session_id.clone();
+                let sent = attachments.clone();
+                self.post(move || {
+                    let current = store.session_id.with_untracked(|s| s == &started_session);
+                    apply_unaddressed_start(&store, &started_session);
+                    if current && !sent.is_empty() {
+                        clear_sent_attachments(&store, &tx, &sent);
+                    }
+                });
+            }
             Ok(started) => {
                 let run_id = started.run_id;
                 self.last_start = Some((session_id.clone(), run_id.clone()));
@@ -2153,7 +2170,15 @@ impl Runner {
                             "failed" | "cancelled"
                         );
                         let from = fold.items.len();
-                        if rehydrate_run_into(&mut fold, rid, &bundle, failed, &mut effects) {
+                        let unaddressed = agent_not_addressed(Some(run));
+                        if rehydrate_turn_into(
+                            &mut fold,
+                            rid,
+                            &bundle,
+                            failed,
+                            unaddressed,
+                            &mut effects,
+                        ) {
                             replayed += 1;
                         }
                         restore_mention_reply(&mut fold, run, &snaps, from);
@@ -2384,7 +2409,15 @@ impl Runner {
                         "failed" | "cancelled"
                     );
                     let from = scratch.items.len();
-                    if rehydrate_run_into(&mut scratch, rid, &bundle, run_failed, &mut effects) {
+                    let unaddressed = agent_not_addressed(Some(run));
+                    if rehydrate_turn_into(
+                        &mut scratch,
+                        rid,
+                        &bundle,
+                        run_failed,
+                        unaddressed,
+                        &mut effects,
+                    ) {
                         streamed += 1;
                     }
                     restore_mention_reply(&mut scratch, run, &snaps, from);
@@ -3129,6 +3162,26 @@ pub(crate) fn apply_start_binding(
             f.entities_answer_this_turn();
         }
     });
+    store.conn.set_if_changed(Conn::Ok);
+}
+
+/// UI-thread half of a start whose message named entities and not the
+/// agent (`agent: "not_addressed"`, operator 2026-11-10): the gateway
+/// recorded the person's turn and started no agent run. The words already
+/// show (`send_start`); the phase leaves Starting for Idle at once (no
+/// spinner, no run to bind, so no "without a readable final answer" line)
+/// and the entities' answers follow through the mention lane. The turn is
+/// done for the queue, as a completed run is. Session-guarded like
+/// `apply_start_binding`: an answer for the previous session changes
+/// nothing in this one.
+pub fn apply_unaddressed_start(store: &Store, started_session: &str) {
+    if store.session_id.with_untracked(|s| s != started_session) {
+        return;
+    }
+    // Outcome BEFORE phase (the queue-drain ordering contract).
+    store.last_outcome.set(crate::store::RunOutcome::Success);
+    store.run_started.set(None);
+    store.phase.set(Phase::Idle);
     store.conn.set_if_changed(Conn::Ok);
 }
 
@@ -4295,6 +4348,17 @@ pub(crate) fn restore_mention_reply(
 /// render). Terminal-run hygiene: an old run must never leave a pending
 /// prompt behind, and an answerless failed run says so.
 /// Returns true when the turn contributed anything.
+/// A turn the agent was not asked to answer (mentions routing, operator
+/// 2026-11-10): the person's turn the gateway recorded for a message whose
+/// chips named entities and not the agent. The marker is the gateway's,
+/// `agent_addressed: false` on the turn's row (`GET /runs`, the run, the
+/// history); absent or true is an ordinary turn.
+pub(crate) fn agent_not_addressed(row: Option<&Value>) -> bool {
+    row.and_then(|r| r.get("agent_addressed"))
+        .and_then(Value::as_bool)
+        == Some(false)
+}
+
 pub fn rehydrate_run_into(
     fold: &mut crate::transcript::Fold,
     root_run_id: &str,
@@ -4302,6 +4366,23 @@ pub fn rehydrate_run_into(
     failed: bool,
     effects_out: &mut Vec<FoldEffect>,
 ) -> bool {
+    rehydrate_turn_into(fold, root_run_id, bundle, failed, false, effects_out)
+}
+
+/// [`rehydrate_run_into`] for one listed turn. `unaddressed`: its list row
+/// says the agent was not addressed ([`agent_not_addressed`]; the bundle's
+/// own `run` row is read too). Such a turn restores as it showed live: the
+/// person's words, no "without a readable final answer" line, no "(this
+/// turn ended without an answer)"; the entities' answers follow it.
+pub(crate) fn rehydrate_turn_into(
+    fold: &mut crate::transcript::Fold,
+    root_run_id: &str,
+    bundle: &Value,
+    failed: bool,
+    unaddressed: bool,
+    effects_out: &mut Vec<FoldEffect>,
+) -> bool {
+    let unaddressed = unaddressed || agent_not_addressed(bundle.get("run"));
     let before = fold.items.len();
     let prompt = bundle
         .get("input_data")
@@ -4325,6 +4406,9 @@ pub fn rehydrate_run_into(
     }
     push_attachments_line(fold, bundle, effects_out);
     fold.begin_run(root_run_id);
+    if unaddressed {
+        fold.entities_answer_this_turn();
+    }
     // Replay: done summaries keep their ledger-true facts but omit
     // elapsed (fold-time instants are not turn durations).
     fold.replay = true;
@@ -4346,7 +4430,7 @@ pub fn rehydrate_run_into(
             }
         )
     });
-    if !has_answer && failed {
+    if !has_answer && failed && !unaddressed {
         fold.push_item(Item::Error {
             text: "(this turn ended without an answer)".into(),
         });
@@ -6815,7 +6899,13 @@ mod tests {
             let store = Store::create(cx);
             store.session_id.set("s1".into());
             let mut runner = runner_for(&url, store);
-            for mentions in [vec!["castor".to_string(), "hypnos".to_string()], Vec::new()] {
+            // (mentions, the agent may say nothing): the agent's chip alone
+            // is a plain agent turn, which says when it ended without an answer.
+            for (mentions, quiet_turn) in [
+                (vec!["castor".to_string(), "hypnos".to_string()], true),
+                (vec!["agent".to_string()], false),
+                (Vec::new(), false),
+            ] {
                 runner.start_run(
                     "@Castor and @Hypnos, hi".into(),
                     "agent".into(),
@@ -6840,7 +6930,7 @@ mod tests {
                 if mentions.is_empty() {
                     assert!(body.get("mentions").is_none(), "{body}");
                 } else {
-                    assert_eq!(body["mentions"], json!(["castor", "hypnos"]));
+                    assert_eq!(body["mentions"], json!(mentions));
                     assert!(body["input_data"].get("mentions").is_none(), "{body}");
                 }
                 // The binding the start posted marks the turn from the same opts.
@@ -6851,7 +6941,7 @@ mod tests {
                         .iter()
                         .any(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer")))
                 });
-                assert_eq!(quiet, !mentions.is_empty(), "{mentions:?}");
+                assert_eq!(quiet, quiet_turn, "{mentions:?}");
                 store.fold.update(|f| f.items.clear());
             }
         });
@@ -6881,6 +6971,150 @@ mod tests {
             );
         });
         root.dispose();
+    }
+
+    /// Mentions routing (operator 2026-11-10): a start answered `agent:
+    /// "not_addressed"` (the chips named entities and not the agent) binds
+    /// and streams nothing: its run id is the person's recorded turn, which
+    /// the message's mentions then name as `repeat_of`; the phase leaves
+    /// Starting at once and no "without a readable final answer" line
+    /// shows. The same start answered `started` streams its run as before.
+    #[test]
+    fn a_start_the_agent_was_not_addressed_in_runs_nothing_and_names_the_turn() {
+        let line = |store: &Store| {
+            store.fold.with_untracked(|f| {
+                f.items
+                    .iter()
+                    .any(|i| matches!(i, Item::Info { text } if text.contains("without a readable final answer")))
+            })
+        };
+        for (answer, addressed) in [
+            (
+                json!({"run_id": "run9", "turn_id": "turn1", "agent": "not_addressed"}),
+                false,
+            ),
+            (json!({"run_id": "turn1", "agent": "started"}), true),
+        ] {
+            let (url, seen) = recording_gateway(vec![("/runs/start", answer.to_string())]);
+            let (root, ()) = abstracttui::reactive::create_root(|cx| {
+                let store = Store::create(cx);
+                store.session_id.set("s1".into());
+                store.phase.set(Phase::Starting);
+                let mut runner = runner_for(&url, store);
+                runner.start_run(
+                    "@Castor is it ready?".into(),
+                    "agent".into(),
+                    "basic-agent".into(),
+                    "s1".into(),
+                    StartOpts {
+                        mentions: vec!["castor".to_string()],
+                        ..Default::default()
+                    },
+                    Vec::new(),
+                    0,
+                );
+                assert_eq!(
+                    repeat_of_turn(&runner.last_start, "s1", true).as_deref(),
+                    Some("turn1"),
+                    "the mentions repeat the recorded turn (turn_id) or the agent's run"
+                );
+                abstracttui::reactive::drain_posted();
+                let ran = seen.lock().unwrap().iter().any(|(path, _)| {
+                    path.starts_with("/runs/turn1") || path.starts_with("/runs/run9")
+                });
+                runner.stop_streams();
+                if addressed {
+                    assert_eq!(store.run_id.get_untracked(), "turn1");
+                    assert_eq!(store.phase.get_untracked(), Phase::Running);
+                } else {
+                    assert!(!ran, "nothing reads or streams the person's turn");
+                    assert_eq!(store.phase.get_untracked(), Phase::Idle, "no spinner");
+                    assert_eq!(
+                        store.last_outcome.get_untracked(),
+                        crate::store::RunOutcome::Success
+                    );
+                    assert!(store.run_id.get_untracked().is_empty(), "no run is bound");
+                    assert!(!line(&store));
+                }
+            });
+            root.dispose();
+        }
+        // The UI-thread half is session-guarded: a late answer for the
+        // previous session leaves this one's phase alone.
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = Store::create(cx);
+            store.session_id.set("s2".into());
+            store.phase.set(Phase::Starting);
+            apply_unaddressed_start(&store, "s1");
+            assert_eq!(store.phase.get_untracked(), Phase::Starting);
+        });
+        root.dispose();
+    }
+
+    /// A restored turn whose row says `agent_addressed: false` restores as
+    /// it showed live: the person's words, no "without a readable final
+    /// answer" line (even over a ledger that ended without one) and no
+    /// "(this turn ended without an answer)". The marker on the list row
+    /// or on the bundle's own run row; an ordinary turn keeps both lines.
+    #[test]
+    fn a_restored_turn_the_agent_was_not_addressed_in_reads_as_it_did_live() {
+        let bundle = |run: Value| {
+            json!({
+                "input_data": {"prompt": "@Castor is it ready?"},
+                "run": run,
+                "ledgers": {"turn1": {"items": [
+                    {"run_id": "turn1", "node_id": "done", "status": "completed",
+                     "result": {"completed": true}}
+                ]}}
+            })
+        };
+        let restored = |bundle: &Value, row: &Value, failed: bool| {
+            let mut fold = crate::transcript::Fold::new();
+            let mut fx = Vec::new();
+            rehydrate_turn_into(
+                &mut fold,
+                "turn1",
+                bundle,
+                failed,
+                agent_not_addressed(Some(row)),
+                &mut fx,
+            );
+            fold.items
+        };
+        let lines = |items: &[Item]| {
+            items
+                .iter()
+                .filter(|i| match i {
+                    Item::Info { text } => text.contains("without a readable final answer"),
+                    Item::Error { text } => text.contains("ended without an answer"),
+                    _ => false,
+                })
+                .count()
+        };
+        let skipped = json!({"run_id": "turn1", "agent_addressed": false});
+        let plain = json!({"run_id": "turn1"});
+        for failed in [false, true] {
+            for items in [
+                restored(&bundle(plain.clone()), &skipped, failed),
+                restored(&bundle(skipped.clone()), &plain, failed),
+            ] {
+                assert!(
+                    matches!(items.first(), Some(Item::User { text }) if text == "@Castor is it ready?"),
+                    "{items:?}"
+                );
+                assert_eq!(lines(&items), 0, "{items:?}");
+            }
+            let ordinary = restored(&bundle(plain.clone()), &plain, failed);
+            assert!(
+                lines(&ordinary) > 0,
+                "an ordinary turn says so: {ordinary:?}"
+            );
+        }
+        assert!(!agent_not_addressed(Some(
+            &json!({"agent_addressed": true})
+        )));
+        assert!(!agent_not_addressed(Some(&json!({}))));
+        assert!(!agent_not_addressed(None));
     }
 
     /// `@entity` mentions (2026-11-08): the run snapshot read at the end

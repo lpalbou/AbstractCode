@@ -1057,7 +1057,12 @@ fn submit(
             let retry = entity_actions::take_mention_retry(store, draft);
             let agent_focus = matches!(store.focus.get_untracked(), crate::convo::Focus::Agent);
             if let Some(held) = retry.filter(|_| agent_focus) {
-                entity_actions::resend_mentions(store, ctx, held, crate::mention::chips(value));
+                entity_actions::resend_mentions(
+                    store,
+                    ctx,
+                    held,
+                    crate::mention::draft_chips(value),
+                );
                 return;
             }
             let calls = match crate::mention::route(value) {
@@ -1095,10 +1100,13 @@ fn submit(
                 // The ONE call site that carries pending attachments
                 // (explicit plain-prompt send): goal starts and queue
                 // drains go through `start_run` and stay chip-free.
-                // The chips' entities ride the start (`mentions`): the agent
-                // is told they answer for themselves.
+                // The chips ride the start (`mentions`, the agent's chip as
+                // "agent"): entities without the agent start no agent run;
+                // with it, the agent is told they answer for themselves.
                 Phase::Idle => {
-                    start_run_attaching(store, ctx, &text, crate::mention::start_mentions(&calls));
+                    let mentions =
+                        crate::mention::start_mentions(&crate::mention::draft_chips(value));
+                    start_run_attaching(store, ctx, &text, mentions);
                     started = store.phase.get_untracked() == Phase::Starting;
                 }
             }
@@ -1109,7 +1117,7 @@ fn submit(
                 ctx,
                 &text,
                 draft,
-                crate::mention::chips(value),
+                crate::mention::draft_chips(value),
                 started,
                 calls,
             );
@@ -3220,9 +3228,12 @@ mod tests {
         let src = include_str!("mod.rs");
         // Needles are joined at run time: this test's own text never matches.
         let has = |parts: &[&str]| src.contains(&parts.concat());
+        // Every chip rides the start, the agent's as "agent" (mentions
+        // routing, operator 2026-11-10).
         assert!(has(&[
-            "start_run_attaching(store, ctx, &text, ",
-            "crate::mention::start_mentions(&calls));"
+            "crate::mention::start_mentions(",
+            "&crate::mention::draft_chips(value));\n",
+            "                    start_run_attaching(store, ctx, &text, mentions);"
         ]));
         assert!(has(&[
             "start_run_inner(store, ctx, prompt, ",

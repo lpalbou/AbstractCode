@@ -20,7 +20,8 @@ steers the agent mid-run, and keeps a durable session with server-side history.
 
 Status: **0.15.0**, pre-alpha. What's new in 0.15.0: `@` mentions an entity from
 the conversation and every answer names its author (`✦ basic-agent · agent`,
-`● Castor · entity`); the agent leaves what you ask an entity to that entity; one
+`● Castor · entity`); the agent leaves what you ask an entity to that entity, and
+a message to entities only does not reach it (`@` lists the agent first); one
 automation reads as panels, with its runs as a table and the selected run's output
 you can scroll with the wheel; built on AbstractTUI 0.8.0
 ([CHANGELOG.md](CHANGELOG.md#0150---2026-11-10)).
@@ -78,9 +79,11 @@ you can scroll with the wheel; built on AbstractTUI 0.8.0
   says so and starts nothing.
 - **Summoned entities**: type `@` and pick an entity (`/entities` lists
   the roster with identity cards). A message that is only that chip opens
-  a durable visit with it; a chip among other words mentions it: your
-  message starts the agent's turn, which leaves the entity's part to it,
-  then the entity answers in the conversation as `● Castor · entity`
+  a durable visit with it; a chip among other words mentions it: with
+  entity chips only the agent stays out ("The agent stays out of this
+  message."), with the agent's chip too (listed first) your message starts
+  the agent's turn, which leaves the entity's part to it; then the entity
+  answers in the conversation as `● Castor · entity`
   (AbstractGateway 0.21.0). Each visit gets its own transcript
   and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
@@ -553,11 +556,16 @@ that is only that chip opens a durable **visit** (`/entities` lists the
 roster with identity cards; `Enter` there does the same). The visit gets its
 own transcript and a header chip; `Alt+E` cycles focus between the agent and
 open visits, and everything you submit under entity focus is that visit's
-next turn. A chip among other words is a **mention**: your message starts
-the agent's turn, and the agent answers only the part meant for it (or says
-nothing); then each mentioned entity answers in the conversation, in order,
+next turn. A chip among other words is a **mention**. The `@` list starts
+with the conversation's agent, under its workflow's name: with entity chips
+only, the agent stays out of the message (the line above the box says "The
+agent stays out of this message.", no agent run starts and the status line
+shows no spinner); pick the agent too and your message starts the agent's
+turn, and the agent answers only the part meant for it (or says nothing).
+Either way each mentioned entity then answers in the conversation, in order,
 under its own name (`● Castor · entity`), and the agent's answer reads
-`✦ basic-agent · agent`. Mentions need AbstractGateway 0.21.0.
+`✦ basic-agent · agent`. While a reply runs, a message steers it, chips or
+not. Mentions need AbstractGateway 0.21.0.
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
 and stream **no mid-turn progress** (both server-side boundaries — the app
@@ -936,7 +944,7 @@ when the gateway advertises live replies. See
 | `src/voice.rs`, `src/voice_host.rs`, `src/ui/voice_view.rs` | Voice: the gateway's voice routes (`/voice/defaults`, `/runs/{id}/voice/tts/stream`, `/runs/{id}/audio/transcribe`), the host-audio bridge (`assets/voice_bridge.py`, AbstractVoice in Python over JSON lines), the `/voice` screen and the status line. Every gateway call and bridge wait runs on a named voice thread; results come back as posted closures. |
 | `src/rail.rs`, `src/conversations.rs`, `src/gateway/rail.rs` | The settings panels and the conversations board (R7.3), pure rules first: an automation definition's run settings read from / written to its `input_data` with the keys a conversation turn writes, the revision line, the Activity groups (one per model step, one per automation run), the conversation card's `Oct 2 · 2 turns · 7 tools`. The lane runs the same routes as Code web on one short-lived thread per action: `/workspace/policy`, `/runs/{id}/ledger`, `/runs?root_only=true&archived_only=true`, `POST /sessions/{id}/archive\|unarchive`, `PATCH /automations/{id}`. |
 | `src/ui/rail_view.rs`, `src/ui/conversations_view.rs`, `src/ui/cards.rs` | `/settings` (the eight panels bound to the conversation or an automation), `/sessions` (the board, Archive / Unarchive), and the wrapping card list both share with `/automations` (nothing cut; a switch's state inked; the selected card kept in view). |
-| `src/mention.rs` | `@entity` mentions, pure rules: the composer's `@` roster, what a submitted message with chips means (a lone chip opens a visit; otherwise the turn starts with `mentions`, then one `POST /sessions/{id}/mentions` call per chip, in order), `mention_id`, the gateway's refusals, and the `author` every turn surface carries. |
+| `src/mention.rs` | `@entity` mentions, pure rules: the composer's `@` roster (the conversation's agent first, sent as `agent`), what a submitted message with chips means (a lone entity chip opens a visit; otherwise the turn starts with `mentions`, then one `POST /sessions/{id}/mentions` call per entity chip, in order), the line above the box ("The agent stays out of this message." for entities without the agent), `mention_id`, the gateway's refusals, and the `author` every turn surface carries. |
 | `src/automations.rs`, `src/ui/automations_view.rs`, `src/ui/automation_detail.rs` | Automations: the wire shapes and the labels every client prints (pure), `/automations` and `/automation`, and one automation's screen built from AbstractTUI parts (`Block` panels, the engine `List` for the runs, a `Scroll` over a `MarkdownView` for the selected run's output). |
 | `src/runner.rs` | Worker thread: commands, per-run stream threads, terminal detection. |
 | `src/store.rs` | The signal store (UI-thread owned). |
@@ -1127,7 +1135,7 @@ abstractcode --help | --version
 | `/gpu` | Toggle the gateway-host GPU meter in the footer |
 | `/stance [line\|figure\|off]` | How the turn is going, from mechanical facts (effort, calls, verify-shaped share of calls); floats bottom-right over the transcript, `Ctrl+G` folds it (`/conduct` too) |
 | `/redraw` | Force a full-screen repaint (`Ctrl+L`) — recovery from an external terminal clear (Cmd+K), which damage-tracked rendering cannot detect |
-| `@` + pick | Mention an entity. `@` opens a list of the entities this account may see (the cached roster); a pick is one chip in the box (Backspace removes it whole), and a typed `@name` that was not picked is plain text. A message that is only one chip opens (or focuses) that entity's durable visit. Any other message starts the agent's turn with the entities it mentions (`mentions` on `POST /api/gateway/runs/start`, in chip order, each once: the agent answers only the part meant for it, or says nothing, and an empty reply adds no line), then each picked entity is asked in order through `POST /api/gateway/sessions/{id}/mentions`, the next once the previous answered; each answer appears as `● Castor · entity`. Needs AbstractGateway 0.21.0. An entity picked twice is asked once, and a message's entities are asked after those of the previous message in the same conversation. "Castor is in another conversation." and the gateway's other refusals are shown and the next entity is asked; "Castor cannot answer: …" (or a failed call) stops the asking and puts the message back in the box, with only the entities not answered left as chips: Enter on it unchanged asks only those, starting no new turn; each mention carries its own id, so an entity whose answer was lost on the way is never asked twice (the gateway gives back its first answer). A gateway without the route says "This gateway does not offer mentions yet." once and `@` then offers nothing. Under an entity's focus the chips ask no one (a notice says so) |
+| `@` + pick | Mention an entity. `@` opens a list of the entities this account may see (the cached roster); a pick is one chip in the box (Backspace removes it whole), and a typed `@name` that was not picked is plain text. The list starts with the conversation's agent, under its workflow's name (its chip is sent as `agent`). A message that is only one entity chip opens (or focuses) that entity's durable visit. Any other message starts its turn with the chips it holds (`mentions` on `POST /api/gateway/runs/start`, in chip order, each once). Entities without the agent: the gateway answers `agent: "not_addressed"` with the recorded turn's `turn_id`, no agent run starts, nothing streams, no spinner or "without a readable final answer" line shows, and the line above the box said "The agent stays out of this message." before the send; a restored turn marked `agent_addressed: false` reads the same. With the agent's chip: the agent answers only the part meant for it, or says nothing, and an empty reply adds no line. Then each picked entity is asked in order through `POST /api/gateway/sessions/{id}/mentions`, the next once the previous answered; each answer appears as `● Castor · entity`. Needs AbstractGateway 0.21.0. An entity picked twice is asked once, and a message's entities are asked after those of the previous message in the same conversation. "Castor is in another conversation." and the gateway's other refusals are shown and the next entity is asked; "Castor cannot answer: …" (or a failed call) stops the asking and puts the message back in the box, with only the entities not answered left as chips: Enter on it unchanged asks only those, starting no new turn; each mention carries its own id, so an entity whose answer was lost on the way is never asked twice (the gateway gives back its first answer). A gateway without the route says "This gateway does not offer mentions yet." once and `@` then offers nothing. Under an entity's focus the chips ask no one (a notice says so) |
 | `/entities [name]` | Entity roster + identity cards (opens instantly on the cached roster, refreshes async — the live fetch can be slow behind the gateway's drives fold). `[name]` deep-links to that card |
 | `/brain <name>` | FLOW-BRAIN conversation with an entity: each message is one summon of the `entity-chat` VisualFlow through the entity door (poll to terminal; the structured `degraded`/`moment_error` contract renders as warn lines). Continuity rides the entity's own memory graph under one client-minted session id; the view is session-local, and `/end` closes it locally (no server visit exists). One conversation per entity: a live visit refuses with "/end first"; bare `/brain` reports the focused conversation's brain |
 | `/task <name> <title>` | Leave a task on the entity's desk — durable, no visit needed, works while the entity sleeps. Pickup happens at the entity's own boundary (day end, wake check, or visit close), never "immediately" |
@@ -2907,12 +2915,25 @@ offer mentions yet." once and every answer reads "assistant" as before.
   gave. Under an entity's focus, or inside a slash command, the chips ask no
   one and a notice says so.
 - **The agent leaves what you ask an entity to that entity.** A message with
-  `@` chips starts its turn with the entities it mentions (`mentions` on
-  `POST /runs/start`, in chip order, each once), so the agent answers only the
-  part meant for it, or says nothing: the turn then ends with your words and
-  the entities' answers, with no "without a readable final answer" line. An
-  answer that arrives late still shows. The agent can stay silent with an
-  AbstractAgent newer than 0.6.0; an older gateway ignores the key.
+  `@` chips starts its turn with the names it holds (`mentions` on
+  `POST /runs/start`, in chip order, each once). When the agent is among them,
+  it answers only the part meant for it, or says nothing: the turn then ends
+  with your words and the entities' answers, with no "without a readable final
+  answer" line. An answer that arrives late still shows. The agent can stay
+  silent with an AbstractAgent newer than 0.6.0; an older gateway ignores the
+  key.
+- **A message to entities only does not reach the agent; `@` names the agent
+  too.** The `@` list starts with the conversation's agent, under its
+  workflow's name. A message whose chips name entities and not the agent
+  starts no agent run: the gateway records your words as a turn of the
+  conversation, the line above the box says "The agent stays out of this
+  message." before you send, the status line shows no spinner and no "without
+  a readable final answer" line follows; the entities answer as before, and a
+  reopened conversation reads the same. Pick the agent's chip as well to ask
+  the agent too; a message without chips goes to the agent as before. While a
+  reply is running, a message still steers it, so the line does not show then.
+  The agent's chip is sent as `agent` in `mentions`, in chip order; it needs
+  an AbstractGateway 0.21.0 that routes mentions this way.
 - **Every answer names its author** when the gateway gives one: the answer rule
   reads `✦ basic-agent · agent` for the agent (on the streaming reply, on the
   final answer and from the history on reopen) and `● Castor · entity` for an

@@ -13,6 +13,14 @@
 //! that entity's conversation, as the leading `@name` always did. Any
 //! other message with chips is the person's turn, sent as before, then one
 //! mention call per chip, in order (the runner's `Cmd::Mentions`).
+//!
+//! Who the message is for (operator 2026-11-10): the popup also offers the
+//! conversation's own agent ([`agent_candidate`], sent as the reserved slug
+//! [`AGENT_SLUG`] in the start's `mentions`). A message whose chips name
+//! entities and not the agent does not reach the agent: the gateway records
+//! the person's turn and starts no agent run (`agent: "not_addressed"` on
+//! the start's answer); the entities answer as before. With the agent chip,
+//! or with no chip, the agent answers as before.
 
 use abstracttui::widgets::{
     AuthorAvatar, AuthorKind, ChatAuthor, ComposerSubmission, MentionCandidate, MentionKind,
@@ -24,13 +32,34 @@ use crate::entities::EntityInfo;
 /// The one sentence for a gateway without the mention route.
 pub const NOT_OFFERED: &str = "This gateway does not offer mentions yet";
 
-/// The `@` popup's rows: every readable home on the cached roster
-/// (`GET /entities`, the entities this account may see), in roster order.
-/// `id` is the slug (what the mention call names), `name` the display
-/// name (what the chip shows), `hint` the state word and pending tasks.
-/// Broken-home rows are never offered.
-pub fn candidates(roster: &[EntityInfo]) -> Vec<MentionCandidate> {
-    roster
+/// The reserved slug that names the conversation's own agent in the
+/// start's `mentions` (no entity can be called `agent`: the gateway
+/// refuses that slug).
+pub const AGENT_SLUG: &str = "agent";
+
+/// The line above the box while the draft's chips name entities and not
+/// the agent: the message will not reach the agent.
+pub const AGENT_STAYS_OUT: &str = "The agent stays out of this message.";
+
+/// The popup's row for the conversation's agent: the workflow's display
+/// name (`label`, e.g. "Basic agent"; "Agent" when it has none), kind
+/// agent, id [`AGENT_SLUG`].
+pub fn agent_candidate(label: &str) -> MentionCandidate {
+    let name = match label.trim() {
+        "" => "Agent",
+        named => named,
+    };
+    MentionCandidate::new(AGENT_SLUG, name, MentionKind::Agent)
+}
+
+/// The `@` popup's rows: the conversation's agent first
+/// ([`agent_candidate`], named `agent_label`), then every readable home on
+/// the cached roster (`GET /entities`, the entities this account may see),
+/// in roster order. `id` is the slug (what the mention call names), `name`
+/// the display name (what the chip shows), `hint` the state word and
+/// pending tasks. Broken-home rows are never offered.
+pub fn candidates(roster: &[EntityInfo], agent_label: &str) -> Vec<MentionCandidate> {
+    let entities = roster
         .iter()
         .filter(|e| e.error.is_empty() && !e.slug.is_empty())
         .map(|e| {
@@ -52,7 +81,9 @@ pub fn candidates(roster: &[EntityInfo]) -> Vec<MentionCandidate> {
             } else {
                 c.hint(hint)
             }
-        })
+        });
+    std::iter::once(agent_candidate(agent_label))
+        .chain(entities)
         .collect()
 }
 
@@ -91,6 +122,43 @@ pub fn chips(value: &ComposerSubmission) -> Vec<MentionCall> {
         .collect()
 }
 
+/// Every chip of a submission in text order, the agent's included (as
+/// [`AGENT_SLUG`]): one per marker of its raw draft, what
+/// [`restore_draft`] walks and what [`start_mentions`] orders.
+pub fn draft_chips(value: &ComposerSubmission) -> Vec<MentionCall> {
+    value
+        .mentions
+        .iter()
+        .map(|m| MentionCall {
+            entity: match m.kind {
+                MentionKind::Entity => m.id.clone(),
+                MentionKind::Agent => AGENT_SLUG.to_string(),
+            },
+            name: m.name.clone(),
+            index: m.index,
+        })
+        .collect()
+}
+
+/// The line above the box about the agent: [`AGENT_STAYS_OUT`] while the
+/// draft's chips name an entity and not the agent; empty with the agent
+/// chip or with no chip.
+pub fn agent_hint(value: &ComposerSubmission) -> &'static str {
+    let has = |kind: MentionKind| value.mentions.iter().any(|m| m.kind == kind);
+    if has(MentionKind::Entity) && !has(MentionKind::Agent) {
+        AGENT_STAYS_OUT
+    } else {
+        ""
+    }
+}
+
+/// The start's `mentions` name an entity (the agent's own slug aside): the
+/// entities answer for themselves, and an agent asked alongside them may
+/// say nothing.
+pub fn names_an_entity(mentions: &[String]) -> bool {
+    mentions.iter().any(|m| m != AGENT_SLUG)
+}
+
 /// Route a submission by its chips (never by its text). An entity picked
 /// twice is asked once: its first chip keeps its index.
 pub fn route(value: &ComposerSubmission) -> Route {
@@ -110,12 +178,14 @@ pub fn route(value: &ComposerSubmission) -> Route {
 }
 
 /// `mentions` of `POST /runs/start` (AbstractGateway c26d38a2): the
-/// entities the message mentions, by the slug the mention call names, in
-/// chip order (`index`), each once. With it the gateway tells the
-/// conversation's agent that the mentioned entities answer for themselves:
-/// it answers only the part addressed to it, or says nothing (an empty
-/// reply, which the gateway serves as no answer). Empty when the message
-/// mentions no entity: the start then carries no `mentions` key.
+/// chips the message holds ([`draft_chips`]), by the slug the mention call
+/// names ([`AGENT_SLUG`] for the agent's), in chip order (`index`), each
+/// once. Entities without the agent: the gateway starts no agent run
+/// (`agent: "not_addressed"`). The agent with entities: the agent is told
+/// the entities answer for themselves, and answers only the part addressed
+/// to it, or says nothing (an empty reply, which the gateway serves as no
+/// answer). Empty when the message holds no chip: the start then carries
+/// no `mentions` key.
 pub fn start_mentions(calls: &[MentionCall]) -> Vec<String> {
     let mut ordered: Vec<&MentionCall> = calls.iter().collect();
     ordered.sort_by_key(|c| c.index);
@@ -160,10 +230,12 @@ const CHIP_LAST: u32 = 0xF_FFFD;
 
 /// The draft a stopped chain puts back into the composer: `raw` (the
 /// buffer the message was sent from, one marker per chip, `chips` in the
-/// same order) with the chips of the entities in `keep` left as chips and
-/// every other chip spelled as its plain name (no `@`: it asks no one, the
-/// words still read). The marker scalars are AbstractTUI's: the
-/// `mentions_ui` test round-trips this through the real composer.
+/// same order, [`draft_chips`]) with the chips of the entities in `keep`
+/// and the agent's chip left as chips (a resend asks only entities, and
+/// the agent's chip keeps the line above the box honest) and every other
+/// chip spelled as its plain name (no `@`: it asks no one, the words still
+/// read). The marker scalars are AbstractTUI's: the `mentions_ui` test
+/// round-trips this through the real composer.
 pub fn restore_draft(raw: &str, chips: &[MentionCall], keep: &[MentionCall]) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut ordinal = 0usize;
@@ -173,7 +245,11 @@ pub fn restore_draft(raw: &str, chips: &[MentionCall], keep: &[MentionCall]) -> 
             continue;
         }
         match chips.get(ordinal) {
-            Some(chip) if !keep.iter().any(|k| k.entity == chip.entity) => out.push_str(&chip.name),
+            Some(chip)
+                if chip.entity != AGENT_SLUG && !keep.iter().any(|k| k.entity == chip.entity) =>
+            {
+                out.push_str(&chip.name)
+            }
             _ => out.push(ch),
         }
         ordinal += 1;
@@ -424,14 +500,122 @@ mod tests {
 
     #[test]
     fn candidates_offer_readable_homes_with_their_state() {
-        let c = candidates(&roster());
+        let all = candidates(&roster(), "Basic agent");
+        let c = &all[1..];
         assert_eq!(c.len(), 2, "broken homes are never offered");
         assert_eq!((c[0].id.as_str(), c[0].name.as_str()), ("castor", "Castor"));
         assert_eq!(c[0].hint.as_deref(), Some("asleep"));
         assert_eq!(c[0].kind, MentionKind::Entity);
         assert_eq!(c[1].name, "doorcheck", "a nameless row shows its slug");
         assert_eq!(c[1].hint.as_deref(), Some("awake · 2 task(s) pending"));
-        assert!(candidates(&[]).is_empty());
+        assert_eq!(candidates(&[], "Basic agent").len(), 1, "the agent alone");
+    }
+
+    /// Mentions routing (operator 2026-11-10): the popup's first row is the
+    /// conversation's agent, named as its workflow ("Agent" without a
+    /// name), kind agent, sent as the reserved slug `agent`.
+    #[test]
+    fn the_popup_offers_the_agent_first_named_as_its_workflow() {
+        let c = candidates(&roster(), "Basic agent");
+        assert_eq!(
+            (c[0].id.as_str(), c[0].name.as_str(), c[0].kind),
+            (AGENT_SLUG, "Basic agent", MentionKind::Agent)
+        );
+        assert_eq!(AGENT_SLUG, "agent");
+        assert_eq!(agent_candidate("  ").name, "Agent");
+        assert_eq!(
+            candidates(&roster(), "")
+                .iter()
+                .filter(|c| c.kind == MentionKind::Agent)
+                .count(),
+            1
+        );
+    }
+
+    fn agent_chip(index: usize) -> Mention {
+        Mention {
+            id: AGENT_SLUG.into(),
+            name: "Basic agent".into(),
+            kind: MentionKind::Agent,
+            index,
+        }
+    }
+
+    /// The start's `mentions` hold every chip by slug in pick order, the
+    /// agent's as `agent`, each once; the mention calls ask only the
+    /// entities; only the agent's chip is no mention call and opens nothing.
+    #[test]
+    fn the_agent_chip_rides_the_start_in_pick_order_and_is_never_asked() {
+        let both = ComposerSubmission {
+            text: "@Castor and @Basic agent, does it hold?".into(),
+            mentions: vec![chip("castor", "Castor", 0), agent_chip(1)],
+        };
+        assert_eq!(start_mentions(&draft_chips(&both)), vec!["castor", "agent"]);
+        let first = ComposerSubmission {
+            text: "@Basic agent and @Castor".into(),
+            mentions: vec![agent_chip(0), chip("castor", "Castor", 1)],
+        };
+        assert_eq!(
+            start_mentions(&draft_chips(&first)),
+            vec!["agent", "castor"]
+        );
+        let Route::Mentions(calls) = route(&both) else {
+            panic!("chips with words are mentions")
+        };
+        assert_eq!(calls.len(), 1, "the agent is no mention call: {calls:?}");
+        assert_eq!(calls[0].entity, "castor");
+        let only = ComposerSubmission {
+            text: "@Basic agent ".into(),
+            mentions: vec![agent_chip(0)],
+        };
+        assert_eq!(route(&only), Route::Plain, "the agent's chip opens nothing");
+        assert_eq!(start_mentions(&draft_chips(&only)), vec!["agent"]);
+        assert!(names_an_entity(&start_mentions(&draft_chips(&both))));
+        assert!(!names_an_entity(&["agent".to_string()]));
+        assert!(!names_an_entity(&[]));
+    }
+
+    /// "The agent stays out of this message." while the chips name entities
+    /// and not the agent; never with the agent's chip, never without chips.
+    #[test]
+    fn the_agent_hint_shows_only_for_entities_without_the_agent() {
+        let with = |mentions: Vec<Mention>| ComposerSubmission {
+            text: "hi".into(),
+            mentions,
+        };
+        assert_eq!(
+            agent_hint(&with(vec![chip("castor", "Castor", 0)])),
+            AGENT_STAYS_OUT
+        );
+        assert_eq!(AGENT_STAYS_OUT, "The agent stays out of this message.");
+        assert_eq!(
+            agent_hint(&with(vec![chip("castor", "Castor", 0), agent_chip(1)])),
+            ""
+        );
+        assert_eq!(agent_hint(&with(vec![agent_chip(0)])), "");
+        assert_eq!(agent_hint(&with(vec![])), "");
+    }
+
+    /// A stopped chain's draft keeps the agent's chip a chip (its marker
+    /// is walked in order, so the entities after it stay aligned).
+    #[test]
+    fn a_restored_draft_keeps_the_agent_chip_and_its_order() {
+        let m = |k: u32| char::from_u32(CHIP_FIRST + k).unwrap();
+        let raw = format!("{} {} and {} hold?", m(0), m(1), m(2));
+        let value = ComposerSubmission {
+            text: String::new(),
+            mentions: vec![
+                chip("castor", "Castor", 0),
+                agent_chip(1),
+                chip("pollux", "Pollux", 2),
+            ],
+        };
+        let chips = draft_chips(&value);
+        assert_eq!(
+            restore_draft(&raw, &chips, &chips[2..]),
+            format!("Castor {} and {} hold?", m(1), m(2)),
+            "Castor answered: text; the agent and Pollux stay chips"
+        );
     }
 
     /// AbstractGateway c26d38a2: the run start names the message's

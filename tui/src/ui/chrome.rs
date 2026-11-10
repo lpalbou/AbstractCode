@@ -1042,25 +1042,42 @@ impl ComposerAnchor {
     }
 }
 
-/// The `@entity` hint above the composer (2026-11-08): "<name> will read
-/// this conversation's history." while the draft holds a chip whose entity
-/// this session has not been told about (once per session per entity; the
-/// told set grows when the mention is sent). Agent focus only — under an
-/// entity's focus chips ask no one. Absent (zero rows) otherwise, like the
-/// attachment chips row.
+/// The `@entity` hints above the composer, one row each: "<name> will
+/// read this conversation's history." while the draft holds a chip whose
+/// entity this session has not been told about (2026-11-08; once per
+/// session per entity; the told set grows when the mention is sent), and
+/// "The agent stays out of this message." while its chips name entities
+/// and not the agent and the message would start a turn (operator
+/// 2026-11-10, `mention::agent_hint`; while a reply runs the words steer
+/// it, so the line would not be true). Agent
+/// focus only — under an entity's focus chips ask no one. Absent (zero
+/// rows) otherwise, like the attachment chips row.
 pub fn mention_hint_row(store: Store, composer: abstracttui::widgets::TextAreaState) -> View {
     abstracttui::ui::dyn_view_scoped(LayoutStyle::default().shrink(0.0), move |_| {
         let _ = composer.value().get();
         let agent_focus = matches!(store.focus.get(), crate::convo::Focus::Agent);
-        let line = if agent_focus && !store.mentions_off.get() {
+        let lines: Vec<String> = if agent_focus && !store.mentions_off.get() {
             let session = store.session_id.get();
-            store
+            let value = composer.submission();
+            let history = store
                 .mention_told
-                .with(|told| crate::mention::history_hint(&composer.submission(), &session, told))
+                .with(|told| crate::mention::history_hint(&value, &session, told));
+            // Only a message that starts a turn can leave the agent out:
+            // while a reply runs, the words steer it (unchanged).
+            let starts = store.phase.get() == Phase::Idle;
+            let agent = if starts {
+                crate::mention::agent_hint(&value)
+            } else {
+                ""
+            };
+            [history, agent.to_string()]
+                .into_iter()
+                .filter(|line| !line.is_empty())
+                .collect()
         } else {
-            String::new()
+            Vec::new()
         };
-        if line.is_empty() {
+        if lines.is_empty() {
             return Element::new().build();
         }
         let ink = abstracttui::app::current_theme().tokens.text_muted;
@@ -1068,18 +1085,20 @@ pub fn mention_hint_row(store: Store, composer: abstracttui::widgets::TextAreaSt
             .style(
                 LayoutStyle::row()
                     .width(Dimension::Percent(1.0))
-                    .height(Dimension::Cells(1))
+                    .height(Dimension::Cells(lines.len() as i32))
                     .shrink(0.0),
             )
-            .access_label(line.clone())
+            .access_label(lines.join(" "))
             .draw(move |canvas, rect| {
-                let shown = text::truncate_ellipsis(&line, (rect.w - 2).max(1));
-                canvas.print(
-                    Point::new(rect.x + 2, rect.y),
-                    &shown,
-                    ink,
-                    Rgba::TRANSPARENT,
-                );
+                for (row, line) in lines.iter().enumerate() {
+                    let shown = text::truncate_ellipsis(line, (rect.w - 2).max(1));
+                    canvas.print(
+                        Point::new(rect.x + 2, rect.y + row as i32),
+                        &shown,
+                        ink,
+                        Rgba::TRANSPARENT,
+                    );
+                }
             })
             .build()
     })
@@ -1243,9 +1262,11 @@ pub fn composer(
             if store.mentions_off.get() {
                 return Vec::new();
             }
+            // The conversation's agent first, named as its workflow is.
+            let agent = store.workflow.with(|w| w.name.clone());
             store
                 .entities
-                .with(|roster| crate::mention::candidates(roster))
+                .with(|roster| crate::mention::candidates(roster, &agent))
         })
         .attach(cx, overlays, state, area);
     // No outer border: the TextArea draws its own `▐ ▌` side strokes —

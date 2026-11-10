@@ -130,11 +130,16 @@ that is only that chip opens a durable **visit** (`/entities` lists the
 roster with identity cards; `Enter` there does the same). The visit gets its
 own transcript and a header chip; `Alt+E` cycles focus between the agent and
 open visits, and everything you submit under entity focus is that visit's
-next turn. A chip among other words is a **mention**: your message starts
-the agent's turn, and the agent answers only the part meant for it (or says
-nothing); then each mentioned entity answers in the conversation, in order,
+next turn. A chip among other words is a **mention**. The `@` list starts
+with the conversation's agent, under its workflow's name: with entity chips
+only, the agent stays out of the message (the line above the box says "The
+agent stays out of this message.", no agent run starts and the status line
+shows no spinner); pick the agent too and your message starts the agent's
+turn, and the agent answers only the part meant for it (or says nothing).
+Either way each mentioned entity then answers in the conversation, in order,
 under its own name (`● Castor · entity`), and the agent's answer reads
-`✦ basic-agent · agent`. Mentions need AbstractGateway 0.21.0.
+`✦ basic-agent · agent`. While a reply runs, a message steers it, chips or
+not. Mentions need AbstractGateway 0.21.0.
 
 Two honesty rules to know up front: entity turns are **non-interruptible**
 and stream **no mid-turn progress** (both server-side boundaries — the app

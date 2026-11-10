@@ -1215,6 +1215,28 @@ pub fn mint_command_id() -> String {
 pub struct StartedRun {
     pub run_id: String,
     pub resolved: Option<ResolvedWorkflow>,
+    /// False when the answer says `agent: "not_addressed"` (the message's
+    /// `mentions` named entities and not the agent): no agent run started
+    /// and nothing streams. True otherwise (`agent: "started"`, or an
+    /// older gateway without the field).
+    pub agent_addressed: bool,
+    /// The person's turn the gateway recorded for a message the agent was
+    /// not addressed in (`turn_id`, required then): the message's mention
+    /// calls name it as `repeat_of`. Empty for a started agent run (its
+    /// `run_id` is the turn).
+    pub turn_id: String,
+}
+
+impl StartedRun {
+    /// The turn the message's words are: what its mention calls name as
+    /// `repeat_of` (the recorded turn, else the agent's run).
+    pub fn turn(&self) -> &str {
+        if self.agent_addressed {
+            &self.run_id
+        } else {
+            &self.turn_id
+        }
+    }
 }
 
 /// `StartRunResponse.resolved_workflow` (§D).
@@ -1301,17 +1323,33 @@ pub fn start_run_body(
     body
 }
 
-/// Parse a `/runs/start` answer (pure; test-pinned).
+/// Parse a `/runs/start` answer (pure; test-pinned). A started run needs
+/// its `run_id`; a message the agent was not addressed in (`agent:
+/// "not_addressed"`) needs the recorded turn's `turn_id` (its `run_id`, if
+/// any, is not read).
 pub fn started_run_from_response(resp: &Value) -> GwResult<StartedRun> {
-    let run_id = resp
-        .get("run_id")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if run_id.is_empty() {
+    let field = |key: &str| {
+        resp.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let agent_addressed = resp.get("agent").and_then(Value::as_str) != Some("not_addressed");
+    let run_id = field("run_id");
+    let turn_id = if agent_addressed {
+        String::new()
+    } else {
+        field("turn_id")
+    };
+    if agent_addressed && run_id.is_empty() {
         return Err(GwError::transport(format!(
             "runs/start: missing run_id in {resp}"
+        )));
+    }
+    if !agent_addressed && turn_id.is_empty() {
+        return Err(GwError::transport(format!(
+            "runs/start: the agent was not addressed but no turn_id names the recorded turn in {resp}"
         )));
     }
     let resolved = resp
@@ -1335,7 +1373,12 @@ pub fn started_run_from_response(resp: &Value) -> GwResult<StartedRun> {
             }
         })
         .filter(|r| !r.flow_id.is_empty());
-    Ok(StartedRun { run_id, resolved })
+    Ok(StartedRun {
+        run_id,
+        resolved,
+        agent_addressed,
+        turn_id,
+    })
 }
 
 pub fn url_encode(s: &str) -> String {
@@ -1555,6 +1598,39 @@ mod tests {
         let old = started_run_from_response(&json!({"run_id": "r2"})).unwrap();
         assert_eq!(old.resolved, None);
         assert!(started_run_from_response(&json!({})).is_err());
+    }
+
+    /// Mentions routing (operator 2026-11-10): `agent: "not_addressed"` is
+    /// a start that ran no agent; its `turn_id` is the person's recorded
+    /// turn, the one the mentions repeat (`turn()`). `started`, an older
+    /// gateway (no field) or any other word: the agent's run started, and
+    /// its run id is the turn, as before.
+    #[test]
+    fn start_response_says_when_the_agent_was_not_addressed() {
+        let skipped = started_run_from_response(
+            &json!({"run_id": "run9", "turn_id": "turn1", "agent": "not_addressed"}),
+        )
+        .unwrap();
+        assert!(!skipped.agent_addressed);
+        assert_eq!(skipped.turn(), "turn1", "the turn id, never the run id");
+        let no_run =
+            started_run_from_response(&json!({"turn_id": "turn1", "agent": "not_addressed"}))
+                .unwrap();
+        assert_eq!(no_run.turn(), "turn1");
+        for answer in [
+            json!({"run_id": "r1", "agent": "started"}),
+            json!({"run_id": "r1"}),
+            json!({"run_id": "r1", "agent": null}),
+        ] {
+            let started = started_run_from_response(&answer).unwrap();
+            assert!(started.agent_addressed, "{answer}");
+            assert_eq!(started.turn(), "r1");
+        }
+        assert!(
+            started_run_from_response(&json!({"run_id": "run9", "agent": "not_addressed"}))
+                .is_err(),
+            "no turn_id names the recorded turn: an error, never a guess"
+        );
     }
 
     /// The session board's query is PINNED, param by param.

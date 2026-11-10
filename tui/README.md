@@ -9,7 +9,8 @@ steers the agent mid-run, and keeps a durable session with server-side history.
 
 Status: **0.15.0**, pre-alpha. What's new in 0.15.0: `@` mentions an entity from
 the conversation and every answer names its author (`✦ basic-agent · agent`,
-`● Castor · entity`); the agent leaves what you ask an entity to that entity; one
+`● Castor · entity`); the agent leaves what you ask an entity to that entity, and
+a message to entities only does not reach it (`@` lists the agent first); one
 automation reads as panels, with its runs as a table and the selected run's output
 you can scroll with the wheel; built on AbstractTUI 0.8.0
 ([CHANGELOG.md](CHANGELOG.md#0150---2026-11-10)).
@@ -67,9 +68,11 @@ you can scroll with the wheel; built on AbstractTUI 0.8.0
   says so and starts nothing.
 - **Summoned entities**: type `@` and pick an entity (`/entities` lists
   the roster with identity cards). A message that is only that chip opens
-  a durable visit with it; a chip among other words mentions it: your
-  message starts the agent's turn, which leaves the entity's part to it,
-  then the entity answers in the conversation as `● Castor · entity`
+  a durable visit with it; a chip among other words mentions it: with
+  entity chips only the agent stays out ("The agent stays out of this
+  message."), with the agent's chip too (listed first) your message starts
+  the agent's turn, which leaves the entity's part to it; then the entity
+  answers in the conversation as `● Castor · entity`
   (AbstractGateway 0.21.0). Each visit gets its own transcript
   and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are

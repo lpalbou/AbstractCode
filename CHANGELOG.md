@@ -35,12 +35,25 @@ offer mentions yet." once and every answer reads "assistant" as before.
   gave. Under an entity's focus, or inside a slash command, the chips ask no
   one and a notice says so.
 - **The agent leaves what you ask an entity to that entity.** A message with
-  `@` chips starts its turn with the entities it mentions (`mentions` on
-  `POST /runs/start`, in chip order, each once), so the agent answers only the
-  part meant for it, or says nothing: the turn then ends with your words and
-  the entities' answers, with no "without a readable final answer" line. An
-  answer that arrives late still shows. The agent can stay silent with an
-  AbstractAgent newer than 0.6.0; an older gateway ignores the key.
+  `@` chips starts its turn with the names it holds (`mentions` on
+  `POST /runs/start`, in chip order, each once). When the agent is among them,
+  it answers only the part meant for it, or says nothing: the turn then ends
+  with your words and the entities' answers, with no "without a readable final
+  answer" line. An answer that arrives late still shows. The agent can stay
+  silent with an AbstractAgent newer than 0.6.0; an older gateway ignores the
+  key.
+- **A message to entities only does not reach the agent; `@` names the agent
+  too.** The `@` list starts with the conversation's agent, under its
+  workflow's name. A message whose chips name entities and not the agent
+  starts no agent run: the gateway records your words as a turn of the
+  conversation, the line above the box says "The agent stays out of this
+  message." before you send, the status line shows no spinner and no "without
+  a readable final answer" line follows; the entities answer as before, and a
+  reopened conversation reads the same. Pick the agent's chip as well to ask
+  the agent too; a message without chips goes to the agent as before. While a
+  reply is running, a message still steers it, so the line does not show then.
+  The agent's chip is sent as `agent` in `mentions`, in chip order; it needs
+  an AbstractGateway 0.21.0 that routes mentions this way.
 - **Every answer names its author** when the gateway gives one: the answer rule
   reads `✦ basic-agent · agent` for the agent (on the streaming reply, on the
   final answer and from the history on reopen) and `● Castor · entity` for an

@@ -768,3 +768,108 @@ fn chips_inside_a_command_ask_no_one_and_say_so() {
             );
     assert!(queued_or_started, "the command still ran with the text");
 }
+
+/// Mentions routing (operator 2026-11-10): the popup offers the
+/// conversation's agent, named as its workflow; with entity chips and no
+/// agent chip the line above the box says the agent stays out; the agent's
+/// chip (or no chip) takes the line away.
+#[test]
+fn the_popup_offers_the_agent_and_the_line_says_when_it_stays_out() {
+    let mut h = harness();
+    let open = h.keys(b"@");
+    assert!(open.contains("@basic-agent"), "the agent's row:\n{open}");
+    h.keys(&[0x7f]);
+    let screen = h.pick("cas");
+    let hint = "The agent stays out of this message.";
+    assert!(screen.contains(hint), "{screen}");
+    let screen = h.pick("bas");
+    assert!(
+        screen.contains("@basic-agent"),
+        "the agent's chip:\n{screen}"
+    );
+    assert!(!screen.contains(hint), "with the agent's chip:\n{screen}");
+    // The agent's chip removed (the trailing space, then the chip): the
+    // line is back.
+    h.keys(&[0x7f]);
+    let screen = h.keys(&[0x7f]);
+    assert!(screen.contains(hint), "{screen}");
+    // No chip at all: no line.
+    h.keys(&[0x7f]);
+    let screen = h.keys(&[0x7f]);
+    assert!(!screen.contains(hint), "{screen}");
+    // While a reply runs the words steer it: the line would not be true.
+    h.store.phase.set(Phase::Running);
+    let screen = h.pick("cas");
+    assert!(!screen.contains(hint), "{screen}");
+}
+
+/// The chips ride the start in pick order, the agent's as `agent`.
+#[test]
+fn the_start_names_every_chip_in_pick_order_the_agent_as_agent() {
+    let sent = |h: &mut Harness| {
+        h.keys(b"\r");
+        h.cmds()
+            .into_iter()
+            .find_map(|c| match c {
+                Cmd::Start { opts, .. } => Some(opts.mentions.clone()),
+                _ => None,
+            })
+            .expect("a start")
+    };
+    let mut h = harness();
+    h.pick("cas");
+    h.keys(b"is it ready?");
+    assert_eq!(sent(&mut h), vec!["castor"]);
+    let mut h = harness();
+    h.pick("cas");
+    h.keys(b"and ");
+    h.pick("bas");
+    h.keys(b"is it ready?");
+    assert_eq!(sent(&mut h), vec!["castor", "agent"]);
+    let mut h = harness();
+    h.pick("bas");
+    h.keys(b"is it ready?");
+    assert_eq!(sent(&mut h), vec!["agent"], "the agent alone");
+}
+
+/// A message to Castor alone: the start's answer says the agent was not
+/// addressed (the runner posts `apply_unaddressed_start`). The person's
+/// words stay, the spinner goes at once, no "without a readable final
+/// answer" line ever shows, and Castor's answer renders as before.
+#[test]
+fn a_message_the_agent_was_not_addressed_in_shows_no_spinner_and_the_answer() {
+    let mut h = harness();
+    h.pick("cas");
+    h.keys(b"is it ready?");
+    h.keys(b"\r");
+    let msg = lane_message(h.cmds());
+    assert_eq!(h.store.phase.get_untracked(), Phase::Starting);
+    abstractcode::runner::apply_unaddressed_start(&h.store, SESSION);
+    h.turn();
+    let screen = h.turn();
+    assert_eq!(h.store.phase.get_untracked(), Phase::Idle);
+    assert!(!screen.contains("starting run"), "no spinner:\n{screen}");
+    assert!(screen.contains("❯ @Castor is it ready?"), "{screen}");
+    apply(
+        h.store,
+        SESSION,
+        &msg.calls[0],
+        Outcome::Answered {
+            reply: "It is ready.".into(),
+            author: Some(entity_author("Castor", "#39a5d0")),
+        },
+        None,
+    );
+    h.turn();
+    let screen = h.capture("120x40-agent-not-addressed");
+    assert!(screen.contains("══ ● Castor · entity ═"), "{screen}");
+    assert!(screen.contains("It is ready."), "{screen}");
+    assert!(
+        !screen.contains("without a readable final answer"),
+        "{screen}"
+    );
+    assert!(
+        !screen.contains("· agent ═"),
+        "the agent said nothing:\n{screen}"
+    );
+}

@@ -27,7 +27,8 @@
 > session whose history the gateway replays server-side. It also talks
 > with gateway-hosted summoned entities (`@` + pick: a chip alone opens a
 > visit, a chip in a message mentions the entity, which answers under its
-> own name). One crate, three
+> own name; a message to entities only does not reach the agent, whose own
+> chip `@` lists first). One crate, three
 > dependencies (abstracttui, ureq, serde_json). MIT licensed.
 
 Selected assistant prose, tables and code can be quoted into the coding draft
@@ -80,7 +81,7 @@ through Explain, Use as context or Change; review and send explicitly. See the
 ## Project
 
 - [Changelog](CHANGELOG.md): Release history, from 0.1.0 (the first
-  application built on AbstractTUI) through 0.15.0 (`@` mentions an entity and every answer names its author; the agent leaves an entity's part to it; one automation as panels with a scrollable run output; AbstractTUI 0.8.0; 0.14.0: side questions read the 50,000-token history window, never a shortened message; paused automations under `Paused · N`; `/sessions` lists conversations only; 0.13.1: prebuilt binaries for every platform; 0.13.0: six shared companion designs, the larger Skills picker, speech that stops at session boundaries; 0.12.0: the clickable chrome: workflow, model, gateway, workspace, session and theme widgets; 0.11.0: the attention chip from your event stream; 0.10.0: turns as cards and folded cycle panels, hold Space to talk,
+  application built on AbstractTUI) through 0.15.0 (`@` mentions an entity and every answer names its author; the agent leaves an entity's part to it, and a message to entities only does not reach it; one automation as panels with a scrollable run output; AbstractTUI 0.8.0; 0.14.0: side questions read the 50,000-token history window, never a shortened message; paused automations under `Paused · N`; `/sessions` lists conversations only; 0.13.1: prebuilt binaries for every platform; 0.13.0: six shared companion designs, the larger Skills picker, speech that stops at session boundaries; 0.12.0: the clickable chrome: workflow, model, gateway, workspace, session and theme widgets; 0.11.0: the attention chip from your event stream; 0.10.0: turns as cards and folded cycle panels, hold Space to talk,
   the theme dropdown, pause / resume and per-message read-aloud, sessions and the queue off `prefs.json`, calendar
   schedules and the seven-step New automation; 0.9.1: the workspace chooser per conversation and automation, the
   command-sandbox line per command; 0.9.0: settings panels, Archive / Unarchive, voice through the gateway's routes).
