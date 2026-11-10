@@ -153,6 +153,11 @@ once and replies carry no author.
   installed from npm. The conversation, the session cards and the Docs drawer stay vendored under
   `web/src/vendor/`, now built from those published versions, and `npm run build` refuses a snapshot whose
   recorded sources differ from the installed packages.
+- **The first screen shows each part as soon as its own answers are in.** The conversations appear when their
+  list arrives and the automations when the gateway's capabilities do; the workflows still wait for every answer
+  a turn's start reads (policy, tools, model default, capabilities). The `Archived · N` count is read after the
+  list is on screen, without turn metrics; the event stream's first catch-up no longer reads the conversation
+  list a second time; and a list reload no longer shows "Discovering your workflows…" (load profile 2026-11-10).
 
 ### Fixed
 

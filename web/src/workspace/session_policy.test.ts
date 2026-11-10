@@ -10,7 +10,8 @@ const settingsSource = readFileSync(new URL("./settings_panel.tsx", import.meta.
 
 describe("chat tool policy", () => {
   it("reads the capability the kit's way from GET discovery/capabilities", () => {
-    expect(catalogSource).toContain("sessionToolPolicy: sessionToolPolicyCapability(value(4))");
+    expect(catalogSource).toContain("sessionToolPolicy: sessionToolPolicyCapability(value)");
+    expect(catalogSource).toContain('request("discovery/capabilities").then(');
     expect(sessionToolPolicyCapability({ capabilities: { session_tool_policy: { supported: true, version: 1 } } })?.supported).toBe(true);
     expect(sessionToolPolicyCapability({ capabilities: {} })).toBeNull();
   });

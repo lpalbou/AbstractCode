@@ -14,6 +14,8 @@ import { conversationMetaLine, conversationTitle } from "./sidebar_cards";
 import { LoadingStatus } from "./loading_status";
 
 export const ARCHIVED_RUNS_PATH = "runs?root_only=true&archived_only=true&include_ledger_len=false&include_metrics=true&limit=200";
+/** The same listing for the `Archived · N` count: it reads only the sessions, so no turn metrics. */
+export const ARCHIVED_COUNT_PATH = "runs?root_only=true&archived_only=true&include_ledger_len=false&limit=200";
 export const archiveSessionPath = (sessionId: string) => `sessions/${encodeURIComponent(sessionId)}/archive`;
 export const unarchiveSessionPath = (sessionId: string) => `sessions/${encodeURIComponent(sessionId)}/unarchive`;
 
@@ -54,7 +56,7 @@ export async function archivedConversationCount(
   const served = archivedSessionCount(runs);
   if (!served) return 0;
   try {
-    const archived = await request(gatewayApiPath(ARCHIVED_RUNS_PATH), { signal });
+    const archived = await request(gatewayApiPath(ARCHIVED_COUNT_PATH), { signal });
     return Math.max(0, served - normalizeSessionSummaries(archived, {}, { purpose: "notes" }).length);
   } catch (reason) {
     if (signal?.aborted) throw reason;

@@ -70,7 +70,10 @@ type CatalogState = {
   streaming: StreamingCapability;
   /** The gateway iteration default (`capabilities.agent_limits.max_iterations`); null = not served. */
   iterationLimit: IterationLimitDefault | null;
+  /** The workflows, and every answer a turn's start reads (policy, tools, model default, capabilities), are being read. */
   loading: boolean;
+  /** The conversation list is being read (the first read, a refresh, "Load more"). */
+  sessionsLoading: boolean;
   sessionsLoaded: boolean;
   errors: string[];
   hasMore: boolean;
@@ -101,6 +104,7 @@ const empty: CatalogState = {
   streaming: STREAMING_LOADING,
   iterationLimit: null,
   loading: false,
+  sessionsLoading: false,
   sessionsLoaded: false,
   errors: [],
   hasMore: false,
@@ -112,6 +116,18 @@ export function capabilityContracts(value: any): Record<string, any> {
   return contracts && typeof contracts === "object" && !Array.isArray(contracts)
     ? contracts
     : {};
+}
+
+/** The catalog's fields from `GET discovery/capabilities`, or from why that read failed. */
+function capabilityFields(value: any, failure?: string) {
+  return {
+    capabilities: capabilityContracts(value),
+    capabilitiesLoading: false,
+    sessionToolPolicy: sessionToolPolicyCapability(value),
+    capabilitiesError: failure ? `Could not read the gateway's capabilities: ${failure}` : "",
+    streaming: streamingCapability(value, failure),
+    iterationLimit: iterationLimitDefaultFrom(value),
+  };
 }
 
 export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
@@ -174,6 +190,51 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     },
     [onAuthError],
   );
+  /**
+   * The conversation list, shown as soon as it lands; then its `Archived · N` count (one more
+   * listing, read once the list is on screen) and the shown conversations' labels.
+   */
+  const listConversations = useCallback(
+    async (listGen: number, signal: AbortSignal) => {
+      let runs: any;
+      try {
+        runs = await fetchRuns(signal);
+      } catch (reason: any) {
+        if (signal.aborted || listGeneration.current !== listGen) return;
+        if (reason?.status === 401) onAuthError();
+        setState((s) => ({
+          ...s,
+          sessionsLoading: false,
+          errors: [...s.errors.filter((e) => !e.startsWith("Conversations: ")), `Conversations: ${formatError(reason)}`],
+        }));
+        return;
+      }
+      if (listGeneration.current !== listGen) return;
+      const page = pageOf(runs);
+      setState((s) => ({
+        ...s,
+        sessionsLoading: false,
+        sessions: page.sessions,
+        notesSessions: normalizeSessionSummaries(runs, {}, { purpose: "notes" }),
+        sessionActivity: sessionActivityFromRuns(withoutNotesSessions(runs)),
+        sessionsLoaded: true,
+        hasMore: page.hasMore,
+        errors: s.errors.filter((e) => !e.startsWith("Conversations: ")),
+      }));
+      await Promise.all([
+        archivedConversationCount(runs, gatewayRequest, signal).then(
+          (archivedSessions) => {
+            if (listGeneration.current === listGen) setState((s) => ({ ...s, archivedSessions }));
+          },
+          () => {
+            /* aborted: the newer list reads its own count */
+          },
+        ),
+        hydrateLabels(runs, listGen, signal),
+      ]);
+    },
+    [fetchRuns, hydrateLabels, onAuthError],
+  );
   /** "Load more": refetches the conversation list only (the rest of the catalog stays on screen). */
   const loadConversations = useCallback(async () => {
     if (!identity) return;
@@ -181,34 +242,9 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     listPending.current?.abort();
     const abort = new AbortController();
     listPending.current = abort;
-    setState((s) => ({ ...s, loading: true }));
-    try {
-      const runs = await fetchRuns(abort.signal);
-      const archivedSessions = await archivedConversationCount(runs, gatewayRequest, abort.signal);
-      if (listGeneration.current !== listGen) return;
-      const page = pageOf(runs);
-      setState((s) => ({
-        ...s,
-        loading: false,
-        sessions: page.sessions,
-        notesSessions: normalizeSessionSummaries(runs, {}, { purpose: "notes" }),
-        sessionActivity: sessionActivityFromRuns(withoutNotesSessions(runs)),
-        sessionsLoaded: true,
-        hasMore: page.hasMore,
-        archivedSessions,
-        errors: s.errors.filter((e) => !e.startsWith("Conversations: ")),
-      }));
-      await hydrateLabels(runs, listGen, abort.signal);
-    } catch (reason: any) {
-      if (abort.signal.aborted || listGeneration.current !== listGen) return;
-      if (reason?.status === 401) onAuthError();
-      setState((s) => ({
-        ...s,
-        loading: false,
-        errors: [...s.errors.filter((e) => !e.startsWith("Conversations: ")), `Conversations: ${formatError(reason)}`],
-      }));
-    }
-  }, [identity, fetchRuns, hydrateLabels, onAuthError]);
+    setState((s) => ({ ...s, sessionsLoading: true }));
+    await listConversations(listGen, abort.signal);
+  }, [identity, listConversations]);
   const refresh = useCallback(async () => {
     const gen = ++generation.current;
     const listGen = ++listGeneration.current;
@@ -222,15 +258,33 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       setState(empty);
       return;
     }
-    setState((s) => ({ ...s, loading: true, capabilitiesLoading: true, errors: [], executable: { ...s.executable, status: "loading", error: "" } }));
+    setState((s) => ({ ...s, loading: true, sessionsLoading: true, capabilitiesLoading: true, errors: [], executable: { ...s.executable, status: "loading", error: "" } }));
     const request = (path: string) =>
       gatewayRequest(gatewayApiPath(path), { signal: abort.signal });
+    // Each part is shown once its own answers are in (CODE-WEB-LOAD-PROFILE 2026-11-10, §4): the
+    // conversations and the capabilities (the automations) wait for nothing else. The workflows,
+    // the picker and the gateway default wait for every answer a turn's start reads (policy, tools,
+    // model default, capabilities): a turn sent before those would go without the person's tool
+    // choices.
+    const listed = listConversations(listGen, abort.signal);
+    const show = (fields: ReturnType<typeof capabilityFields>) => {
+      if (generation.current === gen) setState((s) => ({ ...s, ...fields }));
+    };
+    const capabilities = request("discovery/capabilities").then(
+      (value) => {
+        show(capabilityFields(value));
+        return value;
+      },
+      (reason) => {
+        show(capabilityFields(undefined, formatError(reason)));
+        throw reason;
+      },
+    );
     const result = await Promise.allSettled([
       request("bundles?all_versions=true&include_drafts=false"),
       request("workspace/policy"),
       request("discovery/tools"),
-      fetchRuns(abort.signal),
-      request("discovery/capabilities"),
+      capabilities,
       request("workflow-catalog?scope=tenant"),
       request("config/capability-defaults"),
       request(executableWorkflowsPath(CODE_AGENT_INTERFACE)),
@@ -244,11 +298,11 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     result.forEach((item, index) => {
       if (item.status !== "rejected") return;
       if (item.reason?.status === 401) onAuthError();
-      if (index === 5 && [403, 404, 501].includes(item.reason?.status)) return;
+      if (index === 4 && [403, 404, 501].includes(item.reason?.status)) return;
       // The picker says its own error (next to the control).
-      if (index === 7) return;
+      if (index === 6) return;
       errors.push(
-        `${["Workflows", "Workspace policy", "Tools", "Conversations", "Capabilities", "Shared workflows", "Gateway defaults"][index]}: ${formatError(item.reason)}`,
+        `${["Workflows", "Workspace policy", "Tools", "Capabilities", "Shared workflows", "Gateway defaults"][index]}: ${formatError(item.reason)}`,
       );
     });
     let toolCatalog: ToolCatalogItem[] = [];
@@ -259,53 +313,33 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         errors.push(`Tools: ${formatError(reason)}`);
       }
     }
-    const archivedSessions = value(3) ? await archivedConversationCount(value(3), gatewayRequest, abort.signal).catch(() => 0) : 0;
-    if (generation.current !== gen) return;
-    // A "Load more" started while this refresh was in flight owns the list now.
-    const listCurrent = listGeneration.current === listGen;
-    const page = pageOf(value(3));
     let executable: CatalogState["executable"];
-    if (result[7].status === "rejected")
-      executable = { status: "error", data: null, error: `Workflows for this app: ${formatError((result[7] as PromiseRejectedResult).reason)}` };
+    if (result[6].status === "rejected")
+      executable = { status: "error", data: null, error: `Workflows for this app: ${formatError((result[6] as PromiseRejectedResult).reason)}` };
     else {
       try {
-        executable = { status: "ready", data: withoutNotesEntries(parseExecutableWorkflows(value(7), CODE_AGENT_INTERFACE)), error: "" };
+        executable = { status: "ready", data: withoutNotesEntries(parseExecutableWorkflows(value(6), CODE_AGENT_INTERFACE)), error: "" };
       } catch (reason: any) {
         // A gateway that does not filter per app is said, never papered over.
         executable = { status: "error", data: null, error: String(reason?.message || reason) };
       }
     }
     setState((previous) => ({
+      ...previous,
       executable,
-      workflows: normalizeWorkflowCatalog(value(0), value(5)),
+      workflows: normalizeWorkflowCatalog(value(0), value(4)),
       policy: value(1) ? normalizeWorkspacePolicy(value(1)) : null,
       tools: normalizeToolCatalog(value(2)),
-      sessions: listCurrent && value(3) ? page.sessions : previous.sessions,
-      notesSessions: listCurrent && value(3) ? normalizeSessionSummaries(value(3), {}, { purpose: "notes" }) : previous.notesSessions,
-      sessionActivity: listCurrent && value(3) ? sessionActivityFromRuns(withoutNotesSessions(value(3))) : previous.sessionActivity,
-      sessionsLoaded: previous.sessionsLoaded || Boolean(listCurrent && value(3)),
-      capabilities: capabilityContracts(value(4)),
-      capabilitiesLoading: false,
-      sessionToolPolicy: sessionToolPolicyCapability(value(4)),
       toolCatalog,
       toolWarnings: toolCatalogWarnings(value(2)),
-      capabilitiesError: result[4].status === "rejected" ? `Could not read the gateway's capabilities: ${formatError((result[4] as PromiseRejectedResult).reason)}` : "",
-      streaming: streamingCapability(
-        value(4),
-        result[4].status === "rejected"
-          ? formatError((result[4] as PromiseRejectedResult).reason)
-          : undefined,
-      ),
-      iterationLimit: iterationLimitDefaultFrom(value(4)),
-      defaultModel: defaultTextRoute(value(6)),
+      defaultModel: defaultTextRoute(value(5)),
       gatewayDefault: gatewayDefaultFromEnvelope(value(0)),
       loading: false,
-      errors,
-      hasMore: listCurrent && value(3) ? page.hasMore : previous.hasMore,
-      archivedSessions: listCurrent && value(3) ? archivedSessions : previous.archivedSessions,
+      // The conversation list says its own error whenever it lands (listConversations).
+      errors: [...errors, ...previous.errors.filter((e) => e.startsWith("Conversations: "))],
     }));
-    if (listCurrent && value(3)) await hydrateLabels(value(3), listGen, abort.signal);
-  }, [identity, onAuthError, fetchRuns, hydrateLabels]);
+    await listed;
+  }, [identity, onAuthError, listConversations]);
   useEffect(() => {
     // A new identity starts again at one page of conversations.
     visible.current = CONVERSATIONS_PAGE;
@@ -332,6 +366,34 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     void loadConversations();
   }, [loadConversations]);
   return { ...state, refresh, refreshSessions: loadConversations, loadMore, forgetSession };
+}
+
+/**
+ * Calls `refresh` (the conversation list and the read marks) 500 ms after the person's event
+ * stream moves (backlog 1047). The stream's first catch-up after sign-in replays the history up to now,
+ * which the catalog's startup list, asked at the same moment, already shows: the cursor that
+ * catch-up ends on is the baseline, and only a move past it reads the list again
+ * (CODE-WEB-LOAD-PROFILE 2026-11-10, §3.3: reading it again for the catch-up cost one more runs
+ * listing, archived listing and session-reads read on every load, and threw the startup list
+ * away while it was in flight). An event the gateway records between its read of the startup
+ * list and the end of that catch-up shows at the next move.
+ */
+export function useRefreshOnEvents(identity: string, cursor: number, following: boolean, refresh: () => void): void {
+  const listed = useRef<{ identity: string; cursor: number | null }>({ identity, cursor: null });
+  useEffect(() => {
+    if (listed.current.identity !== identity) listed.current = { identity, cursor: null };
+    const seen = listed.current;
+    if (seen.cursor === null) {
+      if (following) seen.cursor = cursor;
+      return;
+    }
+    if (cursor <= seen.cursor) return;
+    const timer = setTimeout(() => {
+      seen.cursor = cursor;
+      refresh();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [identity, cursor, following, refresh]);
 }
 
 export async function fetchWorkflowSchema(

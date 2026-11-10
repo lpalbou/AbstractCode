@@ -76,6 +76,7 @@ import {
 import { conversationRestore } from "./conversation_restore";
 import {
   fetchWorkflowSchema,
+  useRefreshOnEvents,
   useWorkspaceCatalog,
 } from "./use_workspace_catalog";
 import { gateway, gatewayRequest, formatError, newId, csrfHeaders } from "./transport";
@@ -392,11 +393,8 @@ export function CodeWorkspace() {
   // The person's event stream (backlog 1047): the badge and the list refresh follow it.
   const meEvents = useMeEvents(identity, connection.connected);
   const eventsFollowing = meEvents.state === "following";
-  useEffect(() => {
-    if (!meEvents.fold.cursor) return;
-    const timer = setTimeout(() => { void catalog.refreshSessions(); void sessionReads.refresh(); }, 500);
-    return () => clearTimeout(timer);
-  }, [meEvents.fold.cursor, catalog.refreshSessions, sessionReads.refresh]);
+  const refreshOnEvents = useCallback(() => { void catalog.refreshSessions(); void sessionReads.refresh(); }, [catalog.refreshSessions, sessionReads.refresh]);
+  useRefreshOnEvents(identity, meEvents.fold.cursor, eventsFollowing, refreshOnEvents);
   const { ctl: automations, state: automationsState, nowMs: automationNowMs } = useAutomations(
     identity,
     connection.connected && automationsAvailable.available,
@@ -2100,7 +2098,7 @@ export function CodeWorkspace() {
           {/* One notice per page: while the banner says the gateway cannot be reached, a read marker
               that could not be saved is part of it; otherwise it reads like the banner. */}
           {sessionReads.error && !snapshot.unreachable ? <p className="code-alert code-alert--inline" role="status"><Icon name="warning" size={14} /><span>{sessionReads.error}</span></p> : null}
-          {catalog.loading && !catalog.sessionsLoaded ? (
+          {catalog.sessionsLoading && !catalog.sessionsLoaded ? (
             <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}
           {catalog.hasMore ? (

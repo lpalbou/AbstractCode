@@ -99,7 +99,7 @@ describe("workspace toolbar and queue", () => {
     expect(appSource).toContain('<div className="code-workflow-select" aria-busy={schemaLoading || undefined}>');
     expect(appSource).not.toMatch(/<select\s+aria-label="Workflow"/);
     expect(catalogSource).toContain("request(executableWorkflowsPath(CODE_AGENT_INTERFACE))");
-    expect(catalogSource).toContain("parseExecutableWorkflows(value(7), CODE_AGENT_INTERFACE)");
+    expect(catalogSource).toContain("parseExecutableWorkflows(value(6), CODE_AGENT_INTERFACE)");
     expect(catalogSource).not.toMatch(/publishedWorkflowChoices/);
   });
 
