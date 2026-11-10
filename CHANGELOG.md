@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (web)
 
+- Relocked on the published kit: `@abstractframework/ui-kit` ^0.9.28 and `@abstractframework/panel-chat` ^0.9.12 from npm; the `src/vendor` snapshots re-synced from them (`check_vendor_sources` passes on the registry install).
 - **An `@` mention is a chip inside the sentence** (operator, second test round 2026-11-10): picking a
   name puts it where the typed `@cas` was ("Hi @Castor how are you doing ?"), with the entity's orb or
   the agent's mark, no ×; deleting it in the text removes the mention; the line "The agent stays out
