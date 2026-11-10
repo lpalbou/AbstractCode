@@ -31,7 +31,7 @@
   ],
   "scripts": {
     "dev": "vite --host --port 3002",
-    "build": "node scripts/sync_conversation.mjs --check && node scripts/sync_sessions.mjs --check && node scripts/sync_docs_assistant.mjs --check && tsc && vite build && node scripts/check_relative_urls.mjs --dist",
+    "build": "node scripts/sync_conversation.mjs --check && node scripts/sync_sessions.mjs --check && node scripts/sync_docs_assistant.mjs --check && node scripts/check_vendor_sources.mjs && tsc && vite build && node scripts/check_relative_urls.mjs --dist",
     "preview": "vite preview",
     "start": "node ./bin/cli.js",
     "test": "vitest run",
@@ -48,8 +48,8 @@
   "devDependencies": {
     "@abstractframework/monitor-flow": "^0.1.10",
     "@abstractframework/monitor-gpu": "^0.1.10",
-    "@abstractframework/panel-chat": "^0.9.9",
-    "@abstractframework/ui-kit": "^0.9.26",
+    "@abstractframework/panel-chat": "^0.9.11",
+    "@abstractframework/ui-kit": "^0.9.27",
     "@monaco-editor/react": "^4.6.0",
     "@playwright/test": "^1.63.0",
     "@types/react": "^18.2.48",
