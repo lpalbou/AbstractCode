@@ -144,6 +144,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (terminal)
 
+- **Built on AbstractTUI 0.8.0 from crates.io** (was 0.7.1; the temporary path override to a local
+  AbstractTUI checkout is gone, so `cargo install` and every build resolve the published engine). 0.8.0
+  brings the `@` mention chips and the author on chat rows, and makes a click outside a dialog close it:
+  the tool approval, the agent question and the "Disconnect this terminal?" confirmation opt out of that
+  and stay open until answered (342da9b, see Fixed above); every other dialog closes on a click
+  outside, as before. Its other visible changes: the mouse wheel scrolls a dialog's content wherever
+  the pointer is, and a click in a text field moves the cursor there.
+
 - **One automation reads as panels.** The header panel (the Active switch, the schedule with the
   last and next run, what runs now and what waits for you) sits beside the Details panel (runs and
   revision, context, tools, workflow, folder as labelled rows). Below, the runs are a table, newest

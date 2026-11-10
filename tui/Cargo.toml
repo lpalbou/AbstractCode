@@ -3,7 +3,7 @@ name = "abstractcode"
 version = "0.14.0"
 edition = "2021"
 license = "MIT"
-# MSRV floor comes from the locked dependency set (abstracttui 0.6.0
+# MSRV floor comes from the locked dependency set (abstracttui 0.8.0
 # declares 1.87 — unchanged since 0.3.3; ureq 2.12 declares 1.71).
 rust-version = "1.87"
 authors = ["Laurent-Philippe Albou <contact@abstractframework.ai>"]
@@ -111,7 +111,16 @@ path = "src/main.rs"
 # header's workflow/model/gateway widgets and the status bar's
 # workspace/session/theme widgets are action spans: the engine hit-tests
 # them, so the chrome stores no cell coordinate.
-abstracttui = { version = "0.7.1", features = ["avatar"] }
+#
+# 0.8.0 (2026-11-10): the MENTION floor. `@` mention chips in the
+# composer (`Completion::mentions`, `TextAreaState::submission`) and
+# the turn author on chat rows (`ChatMessage::authored_by`). Its
+# behaviour break reached us: a press outside a `Modal` now closes it,
+# so the three blocking prompts (approval, ask, disconnect confirm)
+# opt out with `Modal::set_close_on_outside(false)` (342da9b); the
+# other modals keep the app's own outside hook. The `authored_by`
+# field break never touched us (no exhaustive `ChatMessage` literal).
+abstracttui = { version = "0.8.0", features = ["avatar"] }
 # HTTP client (blocking, small): gateway calls + SSE ledger streaming.
 # The explicit feature set = ureq's defaults, pinned deliberately: "tls" is
 # rustls (remote HTTPS gateways work with zero system OpenSSL — the
