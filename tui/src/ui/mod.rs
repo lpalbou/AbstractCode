@@ -929,10 +929,9 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
                     // reserved blank; CHROME_ROWS estimates deliberately
                     // exclude this sometimes-present row).
                     .child(attachments::chips_row(cx, store, &ctx))
-                    // "<name> will read this conversation's history." while
-                    // the draft names an entity this session has not been
-                    // told about (sometimes-present, like the chips row).
-                    .child(chrome::mention_hint_row(store, composer.clone()))
+                    // No informational mention line above the box (operator
+                    // 2026-11-10 23:02: "do not add the text above… remove
+                    // that"): refusals and outcomes reach the notice line.
                     // Voice status (only while speaking / recording /
                     // transcribing — no reserved blank, like the chips row).
                     .child(voice_view::status_row(store))

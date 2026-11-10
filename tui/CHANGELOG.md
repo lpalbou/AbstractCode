@@ -17,9 +17,7 @@ offer mentions yet." once and every answer reads "assistant" as before.
 - **`@` mentions an entity from the conversation.** Typing `@` lists the
   entities this account may see; a pick is one chip, which Backspace removes
   whole, and a typed `@name` that was not picked is plain text, sent as typed.
-  Before the first message that names an entity in a conversation, the line
-  above the box says "Castor will read this conversation's history." A message
-  that is only one chip opens that entity's conversation (a visit). Any other
+  A message that is only one chip opens that entity's conversation (a visit). Any other
   message starts the agent's turn, then each picked entity is asked in order,
   the next once the previous answered; an entity picked twice is asked once,
   and a conversation asks one message's entities at a time. Each answer is a
@@ -45,12 +43,10 @@ offer mentions yet." once and every answer reads "assistant" as before.
   too.** The `@` list starts with the conversation's agent, under its
   workflow's name. A message whose chips name entities and not the agent
   starts no agent run: the gateway records your words as a turn of the
-  conversation, the line above the box says "The agent stays out of this
-  message." before you send, the status line shows no spinner and no "without
-  a readable final answer" line follows; the entities answer as before, and a
+  conversation, the status line shows no spinner and no "without a readable
+  final answer" line follows; the entities answer as before, and a
   reopened conversation reads the same. Pick the agent's chip as well to ask
-  the agent too; a message without chips goes to the agent as before. While a
-  reply is running, a message still steers it, so the line does not show then.
+  the agent too; a message without chips goes to the agent as before.
   The agent's chip is sent as `agent` in `mentions`, in chip order; it needs
   an AbstractGateway 0.21.0 that routes mentions this way.
 - **Every answer names its author** when the gateway gives one: the answer rule
@@ -62,6 +58,7 @@ offer mentions yet." once and every answer reads "assistant" as before.
 
 ### Changed
 
+- **No informational line above the box** (operator 2026-11-10 23:02): neither "Castor will read this conversation's history." nor "The agent stays out of this message." shows any more; refusals and outcomes still do, and what they described is unchanged.
 - **One automation reads as panels.** The header panel (the Active switch,
   the schedule with the last and next run, what runs now and what waits for
   you) sits beside the Details panel (runs and revision, context, tools,

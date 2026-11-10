@@ -415,8 +415,8 @@ pub fn entity_placeholder(name: &str) -> String {
 
 /// The `@entity` half of a message with chips (2026-11-08), called right
 /// after the person's own turn was sent: one `Cmd::Mentions` on the runner
-/// channel (so it follows that turn to the gateway), the history hint
-/// recorded as told for this session, and one line naming who is asked.
+/// channel (so it follows that turn to the gateway) and one line naming who
+/// is asked.
 /// No calls: nothing. A gateway that has no mention route: its sentence,
 /// and the message stays the person's turn alone.
 pub fn send_mentions(
@@ -436,14 +436,6 @@ pub fn send_mentions(
         return;
     }
     let session_id = store.session_id.get_untracked();
-    store.mention_told.update(|told| {
-        for c in &calls {
-            let key = (session_id.clone(), c.entity.clone());
-            if !told.contains(&key) {
-                told.push(key);
-            }
-        }
-    });
     store.notify(format!("asking {}", names_of(&calls)));
     ctx.send(Cmd::Mentions {
         session_id,

@@ -1042,68 +1042,6 @@ impl ComposerAnchor {
     }
 }
 
-/// The `@entity` hints above the composer, one row each: "<name> will
-/// read this conversation's history." while the draft holds a chip whose
-/// entity this session has not been told about (2026-11-08; once per
-/// session per entity; the told set grows when the mention is sent), and
-/// "The agent stays out of this message." while its chips name entities
-/// and not the agent and the message would start a turn (operator
-/// 2026-11-10, `mention::agent_hint`; while a reply runs the words steer
-/// it, so the line would not be true). Agent
-/// focus only — under an entity's focus chips ask no one. Absent (zero
-/// rows) otherwise, like the attachment chips row.
-pub fn mention_hint_row(store: Store, composer: abstracttui::widgets::TextAreaState) -> View {
-    abstracttui::ui::dyn_view_scoped(LayoutStyle::default().shrink(0.0), move |_| {
-        let _ = composer.value().get();
-        let agent_focus = matches!(store.focus.get(), crate::convo::Focus::Agent);
-        let lines: Vec<String> = if agent_focus && !store.mentions_off.get() {
-            let session = store.session_id.get();
-            let value = composer.submission();
-            let history = store
-                .mention_told
-                .with(|told| crate::mention::history_hint(&value, &session, told));
-            // Only a message that starts a turn can leave the agent out:
-            // while a reply runs, the words steer it (unchanged).
-            let starts = store.phase.get() == Phase::Idle;
-            let agent = if starts {
-                crate::mention::agent_hint(&value)
-            } else {
-                ""
-            };
-            [history, agent.to_string()]
-                .into_iter()
-                .filter(|line| !line.is_empty())
-                .collect()
-        } else {
-            Vec::new()
-        };
-        if lines.is_empty() {
-            return Element::new().build();
-        }
-        let ink = abstracttui::app::current_theme().tokens.text_muted;
-        Element::new()
-            .style(
-                LayoutStyle::row()
-                    .width(Dimension::Percent(1.0))
-                    .height(Dimension::Cells(lines.len() as i32))
-                    .shrink(0.0),
-            )
-            .access_label(lines.join(" "))
-            .draw(move |canvas, rect| {
-                for (row, line) in lines.iter().enumerate() {
-                    let shown = text::truncate_ellipsis(line, (rect.w - 2).max(1));
-                    canvas.print(
-                        Point::new(rect.x + 2, rect.y + row as i32),
-                        &shown,
-                        ink,
-                        Rgba::TRANSPARENT,
-                    );
-                }
-            })
-            .build()
-    })
-}
-
 /// Composer: multiline `TextArea` (grows 1..4 rows, Enter submits,
 /// Ctrl+J inserts a newline EVERYWHERE — engine-owned since abstracttui
 /// 0.2.2 (our 0295 ask): the edit model consumes the chord under every

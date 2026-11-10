@@ -1320,10 +1320,6 @@ pub struct Store {
     /// `@` popup offers nothing for the rest of this process, and the
     /// person read "This gateway does not offer mentions yet" once.
     pub mentions_off: Signal<bool>,
-    /// `(session_id, entity slug)` pairs already told "<name> will read
-    /// this conversation's history." — the composer's hint shows once per
-    /// session per entity, before the first message that names it.
-    pub mention_told: Signal<Vec<(String, String)>>,
     /// A message whose mention chain stopped (503, failure): the draft put
     /// back with only the unsent chips, and what a resend of that exact
     /// draft asks (client review 2026-11-09 B2). Any other send drops it.
@@ -1457,7 +1453,6 @@ impl Store {
             entity_cards: cx.signal(Vec::new()),
             mcp_info: cx.signal(Default::default()),
             mentions_off: cx.signal(false),
-            mention_told: cx.signal(Vec::new()),
             mention_retry: cx.signal(None),
         }
     }

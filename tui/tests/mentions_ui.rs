@@ -222,9 +222,10 @@ fn the_popup_offers_the_roster_and_a_pick_is_one_chip() {
     h.keys(b"ca");
     let screen = h.keys(b"\r");
     assert!(screen.contains("❯ ▐ @Castor "), "{screen}");
-    // The first-use hint names who will read the history.
+    // No line above the box says who will read the history (operator
+    // 2026-11-10 23:02: "do not add the text above… remove that").
     assert!(
-        screen.contains("Castor will read this conversation's history."),
+        !screen.contains("will read this conversation's history"),
         "{screen}"
     );
     // Backspace twice (the trailing space, then the chip) empties it: the
@@ -246,8 +247,8 @@ fn two_chips_send_the_turn_then_one_mention_call_per_chip_in_order() {
     h.pick("pol");
     let draft = h.keys(b"does the plan hold?");
     assert!(
-        draft.contains("Castor and Pollux will read this conversation's history."),
-        "{draft}"
+        !draft.contains("will read this conversation's history"),
+        "no informational line above the box:\n{draft}"
     );
     h.keys(b"\r");
     let cmds = h.cmds();
@@ -280,7 +281,7 @@ fn two_chips_send_the_turn_then_one_mention_call_per_chip_in_order() {
         calls,
         &vec![call("castor", "Castor", 0), call("pollux", "Pollux", 1)]
     );
-    // Told once per session: the next draft naming Castor shows no hint.
+    // The next draft naming Castor shows no line either.
     let next = h.pick("cas");
     assert!(
         !next.contains("will read this conversation's history"),
@@ -770,36 +771,28 @@ fn chips_inside_a_command_ask_no_one_and_say_so() {
 }
 
 /// Mentions routing (operator 2026-11-10): the popup offers the
-/// conversation's agent, named as its workflow; with entity chips and no
-/// agent chip the line above the box says the agent stays out; the agent's
-/// chip (or no chip) takes the line away.
+/// conversation's agent, named as its workflow. No line above the box says
+/// the agent stays out (operator 2026-11-10 23:02: "do not add the text
+/// above… remove that"): not with entity chips alone, not with the agent's.
 #[test]
-fn the_popup_offers_the_agent_and_the_line_says_when_it_stays_out() {
+fn the_popup_offers_the_agent_and_no_line_says_it_stays_out() {
     let mut h = harness();
     let open = h.keys(b"@");
     assert!(open.contains("@basic-agent"), "the agent's row:\n{open}");
     h.keys(&[0x7f]);
     let screen = h.pick("cas");
-    let hint = "The agent stays out of this message.";
-    assert!(screen.contains(hint), "{screen}");
+    assert!(screen.contains("@Castor"), "the entity's chip:\n{screen}");
+    let hint = "stays out of this message";
+    assert!(!screen.contains(hint), "entity chips alone:\n{screen}");
     let screen = h.pick("bas");
     assert!(
         screen.contains("@basic-agent"),
         "the agent's chip:\n{screen}"
     );
     assert!(!screen.contains(hint), "with the agent's chip:\n{screen}");
-    // The agent's chip removed (the trailing space, then the chip): the
-    // line is back.
+    // The agent's chip removed (the trailing space, then the chip): still no line.
     h.keys(&[0x7f]);
     let screen = h.keys(&[0x7f]);
-    assert!(screen.contains(hint), "{screen}");
-    // No chip at all: no line.
-    h.keys(&[0x7f]);
-    let screen = h.keys(&[0x7f]);
-    assert!(!screen.contains(hint), "{screen}");
-    // While a reply runs the words steer it: the line would not be true.
-    h.store.phase.set(Phase::Running);
-    let screen = h.pick("cas");
     assert!(!screen.contains(hint), "{screen}");
 }
 

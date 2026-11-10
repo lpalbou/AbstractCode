@@ -37,10 +37,6 @@ pub const NOT_OFFERED: &str = "This gateway does not offer mentions yet";
 /// refuses that slug).
 pub const AGENT_SLUG: &str = "agent";
 
-/// The line above the box while the draft's chips name entities and not
-/// the agent: the message will not reach the agent.
-pub const AGENT_STAYS_OUT: &str = "The agent stays out of this message.";
-
 /// The popup's row for the conversation's agent: the workflow's display
 /// name (`label`, e.g. "Basic agent"; "Agent" when it has none), kind
 /// agent, id [`AGENT_SLUG`].
@@ -140,18 +136,6 @@ pub fn draft_chips(value: &ComposerSubmission) -> Vec<MentionCall> {
         .collect()
 }
 
-/// The line above the box about the agent: [`AGENT_STAYS_OUT`] while the
-/// draft's chips name an entity and not the agent; empty with the agent
-/// chip or with no chip.
-pub fn agent_hint(value: &ComposerSubmission) -> &'static str {
-    let has = |kind: MentionKind| value.mentions.iter().any(|m| m.kind == kind);
-    if has(MentionKind::Entity) && !has(MentionKind::Agent) {
-        AGENT_STAYS_OUT
-    } else {
-        ""
-    }
-}
-
 /// The start's `mentions` name an entity (the agent's own slug aside): the
 /// entities answer for themselves, and an agent asked alongside them may
 /// say nothing.
@@ -196,29 +180,6 @@ pub fn start_mentions(calls: &[MentionCall]) -> Vec<String> {
         }
     }
     out
-}
-
-/// The composer's hint before a message that names someone new: "<name>
-/// will read this conversation's history." for every chip in the draft
-/// whose entity this session has not been told about (`told`: `(session,
-/// slug)` pairs, grown on send). Empty when there is nobody new.
-pub fn history_hint(
-    value: &ComposerSubmission,
-    session_id: &str,
-    told: &[(String, String)],
-) -> String {
-    let mut names: Vec<&str> = Vec::new();
-    for m in value
-        .mentions
-        .iter()
-        .filter(|m| m.kind == MentionKind::Entity)
-    {
-        let seen = told.iter().any(|(s, id)| s == session_id && *id == m.id);
-        if !seen && !names.contains(&m.name.as_str()) {
-            names.push(&m.name);
-        }
-    }
-    abstracttui::widgets::history_notice(&names)
 }
 
 /// First code point of the composer's chip markers (AbstractTUI
@@ -575,27 +536,6 @@ mod tests {
         assert!(!names_an_entity(&[]));
     }
 
-    /// "The agent stays out of this message." while the chips name entities
-    /// and not the agent; never with the agent's chip, never without chips.
-    #[test]
-    fn the_agent_hint_shows_only_for_entities_without_the_agent() {
-        let with = |mentions: Vec<Mention>| ComposerSubmission {
-            text: "hi".into(),
-            mentions,
-        };
-        assert_eq!(
-            agent_hint(&with(vec![chip("castor", "Castor", 0)])),
-            AGENT_STAYS_OUT
-        );
-        assert_eq!(AGENT_STAYS_OUT, "The agent stays out of this message.");
-        assert_eq!(
-            agent_hint(&with(vec![chip("castor", "Castor", 0), agent_chip(1)])),
-            ""
-        );
-        assert_eq!(agent_hint(&with(vec![agent_chip(0)])), "");
-        assert_eq!(agent_hint(&with(vec![])), "");
-    }
-
     /// A stopped chain's draft keeps the agent's chip a chip (its marker
     /// is walked in order, so the entities after it stay aligned).
     #[test]
@@ -762,38 +702,6 @@ mod tests {
             restore_draft(&dup, &chips3, &all[..1]),
             format!("{} Pollux {}", m(0), m(0))
         );
-    }
-
-    #[test]
-    fn the_history_hint_names_each_new_entity_once_per_session() {
-        let value = ComposerSubmission {
-            text: "@Castor @Pollux @Castor hi".into(),
-            mentions: vec![
-                chip("castor", "Castor", 0),
-                chip("pollux", "Pollux", 1),
-                chip("castor", "Castor", 2),
-            ],
-        };
-        assert_eq!(
-            history_hint(&value, "s1", &[]),
-            "Castor and Pollux will read this conversation's history."
-        );
-        let told = vec![("s1".to_string(), "castor".to_string())];
-        assert_eq!(
-            history_hint(&value, "s1", &told),
-            "Pollux will read this conversation's history."
-        );
-        assert_eq!(
-            history_hint(&value, "s2", &told),
-            "Castor and Pollux will read this conversation's history.",
-            "told is per session"
-        );
-        let both = vec![
-            ("s1".to_string(), "castor".to_string()),
-            ("s1".to_string(), "pollux".to_string()),
-        ];
-        assert_eq!(history_hint(&value, "s1", &both), "");
-        assert_eq!(history_hint(&ComposerSubmission::default(), "s1", &[]), "");
     }
 
     #[test]
