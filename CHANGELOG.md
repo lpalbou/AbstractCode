@@ -7,18 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed (web)
-
-- Relocked on the published kit: `@abstractframework/ui-kit` ^0.9.28 and `@abstractframework/panel-chat` ^0.9.12 from npm; the `src/vendor` snapshots re-synced from them (`check_vendor_sources` passes on the registry install).
-- **An `@` mention is a chip inside the sentence** (operator, second test round 2026-11-10): picking a
-  name puts it where the typed `@cas` was ("Hi @Castor how are you doing ?"), with the entity's orb or
-  the agent's mark, no ×; deleting it in the text removes the mention; the line "The agent stays out
-  of this message." still reads the chips' markup. The words sent carry each chip as "@Name". Needs
-  `@abstractframework/panel-chat` 0.9.12 (AbstractUIC b1a1957): `src/vendor/abstractchat` and
-  `src/vendor/abstractdocs` are re-synced from that local build, and `node_modules` holds the same
-  build (unpacked over the 0.9.11 install, package.json and the lock unchanged) so
-  `check_vendor_sources` passes; relock to 0.9.12 from npm once it is published, then re-sync.
-
 ## [terminal 0.15.0] - 2026-11-10
 
 Built on AbstractTUI 0.8.0. `@` mentions and the answer's author need
@@ -112,6 +100,11 @@ offer mentions yet." once and every answer reads "assistant" as before.
   automations list and its counts.
 
 ## [web 0.16.0] - 2026-11-10
+
+### Changed (web, relock)
+
+- Relocked on the published kit: `@abstractframework/ui-kit` ^0.9.28 and `@abstractframework/panel-chat` ^0.9.12 from npm; the `src/vendor` snapshots re-synced from them (`check_vendor_sources` passes on the registry install).
+- **An `@` mention is a chip inside the sentence** (operator, second test round 2026-11-10): picking a name puts it where the typed `@cas` was ("Hi @Castor how are you doing ?"), with the entity's orb or the agent's mark, no ×; deleting it in the text removes the mention; the line "The agent stays out of this message." still reads the chips' markup. The words sent carry each chip as "@Name". Needs `@abstractframework/panel-chat` 0.9.12 (published; `src/vendor/abstractchat` and `src/vendor/abstractdocs` are synced from it).
 
 The first npm release since web 0.15.6 (prepared as 0.15.21, released as 0.16.0): it also carries the local
 builds 0.15.7 to 0.15.20 listed below.
