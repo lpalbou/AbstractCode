@@ -183,7 +183,9 @@ impl UiCtx {
         self.open_modal_policy(cx, size, true, build);
     }
 
-    /// Approval/question steps require an explicit decision or deferral.
+    /// Approval/question steps require an explicit decision or deferral:
+    /// an outside press is swallowed and decides nothing (see
+    /// `open_modal_policy`).
     pub fn open_blocking_modal(&self, cx: Scope, size: Size, build: impl FnOnce(Scope) -> View) {
         self.open_modal_policy(cx, size, false, build);
     }
@@ -206,6 +208,8 @@ impl UiCtx {
         }
         let modal = Modal::open(&self.overlays, cx, current_viewport(), size, build);
         if dismiss_outside {
+            // Replaces the engine's default outside-press hook, so the
+            // close runs through `close_modal` (slot, marker, epoch).
             let ctx = self.clone();
             let epoch = self.modal_epoch.get_untracked().wrapping_add(1);
             self.overlays.on_outside_press(modal.layer(), move || {
@@ -213,6 +217,18 @@ impl UiCtx {
                     ctx.close_modal();
                 }
             });
+        } else {
+            // A blocking prompt (tool approval, agent question, disconnect
+            // confirmation) is answered through its own controls only.
+            // Since abstracttui's 2026-11-07 modal defaults an outside
+            // press CLOSES a modal that does not opt out, and the engine's
+            // hook removes the layer without `close_modal`: the approval
+            // vanished undecided (no Resume, no deferral), the slot kept a
+            // dead handle that still read "this wait's prompt is up", so
+            // the prompt never came back on its own. The press is now only
+            // swallowed. Pinned in tests/chrome_width_torture.rs by
+            // approval_and_question_waits_stay_open_on_outside_click_without_any_decision.
+            modal.set_close_on_outside(false);
         }
         *self.modal.borrow_mut() = Some(modal);
         // Select mode stays ON across modals since abstracttui 0.2.8

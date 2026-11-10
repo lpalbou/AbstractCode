@@ -104,6 +104,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (terminal, ships with the next terminal release)
 
+- **A click outside a tool approval or an agent question no longer makes it disappear undecided.**
+  Built against AbstractTUI main (0.8.0, not published), where a click outside any dialog closes it,
+  such a click removed the approval or question from the screen without approving, denying or
+  setting it aside: the run kept waiting, the keys meant for it went to the message box, and the
+  prompt did not come back on its own (only Enter on an empty message box reopened it). The
+  approval, the question and the "Disconnect this terminal?" confirmation now ignore a click
+  outside them and stay answerable; Esc still sets an approval or question aside, and the mouse
+  wheel over them never scrolls the conversation behind. Every other dialog still closes on a
+  click outside, as before.
+
 - **A mention is answered once, even when sent again.** Each mention now carries its own id (your
   message's turn, the entity, its place in the message). If an answer was lost on the way back and
   you press Enter on the message again, the gateway returns the answer the entity already gave

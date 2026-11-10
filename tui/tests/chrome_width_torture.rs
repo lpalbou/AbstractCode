@@ -674,22 +674,71 @@ fn ordinary_modal_closes_outside_without_activating_the_tools_under_it() {
     assert!(screen.contains("preserved typing"));
 }
 
+/// SGR wheel notch (button 64 = up) at a screen cell, one turn per notch.
+fn wheel_up_at(h: &mut SizedHarness, x: i32, y: i32, notches: usize) {
+    for _ in 0..notches {
+        h.term
+            .push_input(format!("\x1b[<64;{};{}M", x + 1, y + 1).as_bytes());
+        h.turn();
+    }
+}
+
+/// A blocking wait prompt (tool approval, agent question) survives an
+/// outside press and the wheel, and only its own controls decide it.
+///
+/// Since abstracttui's 2026-11-07 modal defaults (99b8399) an outside
+/// press CLOSES the top modal unless it opts out. The engine's own hook
+/// removes the layer and disposes the scope WITHOUT going through
+/// `UiCtx::close_modal`, so the slot kept a dead handle: the old
+/// `modal_open()` assertions here stayed green while the approval
+/// vanished from screen, undecided (no Resume, no deferral), its keys
+/// typed into the composer, and the wait-prompt effect never brought it
+/// back (it read "this occurrence's prompt is up"). This test reads the
+/// LAYER and the screen, and answers the prompt after the click to prove
+/// it is still the live, key-owning surface.
+///
+/// The wheel half: while the prompt is up the wheel never scrolls the
+/// transcript behind it; the control at the end shows the same wheel
+/// DOES scroll that transcript once no modal is up (an instrument that
+/// cannot go red is decoration).
 #[test]
 fn approval_and_question_waits_stay_open_on_outside_click_without_any_decision() {
-    use abstractcode::transcript::{PendingWait, WaitKind};
+    use abstractcode::transcript::{Item, PendingWait, WaitKind};
     let mut h = harness_sized(240, 40);
     h.turn();
-    for kind in [
-        WaitKind::Approval {
-            tool_calls: vec![
-                serde_json::json!({"name":"write_file","arguments":{"path":"note.txt","content":"x"}}),
-            ],
-        },
-        WaitKind::Ask {
-            prompt: "Which project?".into(),
-            gate: String::new(),
-        },
-    ] {
+    // A transcript long enough to scroll behind the modal.
+    h.store.fold.update(|f| {
+        for i in 0..120 {
+            f.push_item(Item::User {
+                text: format!("transcript line {i:03}"),
+            });
+        }
+    });
+    for _ in 0..3 {
+        h.turn();
+    }
+    // Outside every prompt panel (centered, at most 76 wide), over the
+    // transcript.
+    let (out_x, out_y) = (2, 12);
+    let cases: [(WaitKind, &str); 2] = [
+        (
+            WaitKind::Approval {
+                tool_calls: vec![
+                    serde_json::json!({"name":"write_file","arguments":{"path":"note.txt","content":"x"}}),
+                ],
+            },
+            "approve (a)",
+        ),
+        (
+            WaitKind::Ask {
+                prompt: "Which project?".into(),
+                gate: String::new(),
+            },
+            "Which project?",
+        ),
+    ];
+    for (kind, marker) in cases {
+        let is_approval = matches!(kind, WaitKind::Approval { .. });
         h.store.phase.set(abstractcode::store::Phase::Running);
         h.store.fold.update(|f| {
             f.pending_wait = Some(PendingWait {
@@ -700,18 +749,80 @@ fn approval_and_question_waits_stay_open_on_outside_click_without_any_decision()
             })
         });
         h.turn();
-        assert!(h.ctx.modal_open());
+        let layer_alive = |h: &SizedHarness| {
+            h.ctx
+                .modal
+                .borrow()
+                .as_ref()
+                .is_some_and(|m| m.layer().is_alive())
+        };
+        assert!(layer_alive(&h), "{marker}: the prompt opened");
+        assert!(h.turn().contains(marker), "{marker}: the prompt is drawn");
         let _ = h._rx.try_iter().count();
-        click_cell(&mut h, 1, 1);
-        assert!(h.ctx.modal_open());
+
+        click_cell(&mut h, out_x, out_y);
+        let settled = h.turn();
+        assert!(layer_alive(&h), "{marker}: an outside press left the layer");
+        assert!(
+            settled.contains(marker),
+            "{marker}: still on screen after the outside press:\n{settled}"
+        );
+        assert_eq!(
+            h.ctx.wait_modal_for.borrow().as_deref(),
+            Some("step"),
+            "{marker}: still the wait's prompt"
+        );
+        assert!(
+            h.ctx.dismissed_wait.borrow().is_none(),
+            "{marker}: an outside press is not a deferral"
+        );
         assert!(h.store.fold.with_untracked(|f| f.pending_wait.is_some()));
-        assert!(!h
-            ._rx
-            .try_iter()
-            .any(|cmd| matches!(cmd, Cmd::Resume { .. } | Cmd::Cancel { .. })));
+        assert!(
+            !h._rx
+                .try_iter()
+                .any(|cmd| matches!(cmd, Cmd::Resume { .. } | Cmd::Cancel { .. })),
+            "{marker}: an outside press decides nothing"
+        );
+
+        // The wheel over the transcript behind the prompt moves nothing.
+        wheel_up_at(&mut h, out_x, out_y, 6);
+        let after_wheel = h.turn();
+        assert_eq!(
+            settled, after_wheel,
+            "{marker}: the wheel scrolled something behind the open prompt"
+        );
+        assert!(layer_alive(&h), "{marker}: the wheel left the layer");
+
+        // Still the key-owning surface: its own control decides.
+        if is_approval {
+            h.term.push_input(b"a");
+        } else {
+            h.term.push_input(b"alpha\r");
+        }
+        h.turn();
+        match h._rx.try_iter().find(|c| matches!(c, Cmd::Resume { .. })) {
+            Some(Cmd::Resume { approved, .. }) => {
+                if is_approval {
+                    assert_eq!(approved, Some(true), "{marker}: `a` approves");
+                }
+            }
+            _ => panic!("{marker}: the prompt's own control did not answer after the press"),
+        }
         h.store.fold.update(|f| f.pending_wait = None);
         h.turn();
+        let _ = h._rx.try_iter().count();
     }
+
+    // Control: with no modal up, the same wheel scrolls the transcript.
+    h.close_all();
+    assert!(!h.ctx.modal_open());
+    let before = h.turn();
+    wheel_up_at(&mut h, out_x, out_y, 6);
+    let after = h.turn();
+    assert_ne!(
+        before, after,
+        "control: the wheel at ({out_x},{out_y}) must scroll the transcript when no modal is up"
+    );
 }
 
 #[test]
