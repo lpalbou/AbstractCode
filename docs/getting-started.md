@@ -152,22 +152,22 @@ If your gateway hosts entities (AbstractGateway 0.21.0), you can bring one into 
 conversation by name, in either client. Type `@` in the message box: a list shows the entities your account
 can see. Type more of a name to narrow it, then pick one (arrow keys to move, Enter
 or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
-after `@` without picking it stays ordinary text. The first time you name an entity
-in a conversation, a line tells you "Castor will read this conversation's history."
+after `@` without picking it stays ordinary text. An entity you name reads the
+conversation's history before it answers. In the browser, a named entity also shows
+as a chip in the message you sent, with its card on hover.
 
 The list starts with the conversation's agent, under its workflow's name (for example
 "Basic agent"). A message is for the names it carries:
 
-- **Entities only:** the agent stays out. Before you send, a line says "The agent
-  stays out of this message."; the gateway keeps your words as a turn of the
-  conversation, no agent reply starts (no spinner, nothing to wait for), and only
+- **Entities only:** the agent stays out. The gateway keeps your words as a turn
+  of the conversation, no agent reply starts (no spinner, nothing to wait for), and only
   the entities answer.
 - **Entities and the agent:** your message starts the agent's turn, and the agent
   answers only the part meant for it, or says nothing.
 - **No chip:** the agent answers, as always.
 
 While the agent is working on a reply, a message you send guides that reply, so the
-agent reads it whatever its chips; the line does not show then.
+agent reads it whatever its chips.
 
 Then each entity you picked is asked in turn, in the order you picked them, each once the previous one has
 answered, so a later entity reads the earlier answers. An entity picked twice is

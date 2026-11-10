@@ -69,8 +69,8 @@ you can scroll with the wheel; built on AbstractTUI 0.8.0
 - **Summoned entities**: type `@` and pick an entity (`/entities` lists
   the roster with identity cards). A message that is only that chip opens
   a durable visit with it; a chip among other words mentions it: with
-  entity chips only the agent stays out ("The agent stays out of this
-  message."), with the agent's chip too (listed first) your message starts
+  entity chips only the agent stays out (no agent run starts), with the
+  agent's chip too (listed first) your message starts
   the agent's turn, which leaves the entity's part to it; then the entity
   answers in the conversation as `● Castor · entity`
   (AbstractGateway 0.21.0). Each visit gets its own transcript

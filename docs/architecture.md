@@ -111,6 +111,10 @@ sequenceDiagram
   them.
 - **An automation event re-reads the automation list**, so the terminal chip's
   Enter opens the automation that waits and the browser's list stays current.
+- **The browser's conversation list follows the stream.** Half a second after
+  the stream moves, the browser reads its conversation list again. The first
+  catch-up after sign-in does not count as a move: the list read at startup
+  already shows that history.
 - **A gateway without the stream** (HTTP 404) keeps the automation list's sum
   (`pending_waits + unseen_count`): the terminal reads it every 15 seconds while
   something can change it, the browser every 30 seconds while its tab is

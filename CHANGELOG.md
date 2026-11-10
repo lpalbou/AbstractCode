@@ -101,7 +101,8 @@ offer mentions yet." once and every answer reads "assistant" as before.
 ### Changed (web, relock)
 
 - Relocked on the published kit: `@abstractframework/ui-kit` ^0.9.28 and `@abstractframework/panel-chat` ^0.9.12 from npm; the `src/vendor` snapshots re-synced from them (`check_vendor_sources` passes on the registry install).
-- **An `@` mention is a chip inside the sentence** (operator, second test round 2026-11-10): picking a name puts it where the typed `@cas` was ("Hi @Castor how are you doing ?"), with the entity's orb or the agent's mark, no ×; deleting it in the text removes the mention; the line "The agent stays out of this message." still reads the chips' markup. The words sent carry each chip as "@Name". Needs `@abstractframework/panel-chat` 0.9.12 (published; `src/vendor/abstractchat` and `src/vendor/abstractdocs` are synced from it).
+- **An `@` mention is a chip inside the sentence** (operator, second test round 2026-11-10): picking a name puts it where the typed `@cas` was ("Hi @Castor how are you doing ?"), with the entity's orb or the agent's mark, no ×; deleting it in the text removes the mention. The words sent carry each chip as "@Name". Needs `@abstractframework/panel-chat` 0.9.12 (published; `src/vendor/abstractchat` and `src/vendor/abstractdocs` are synced from it).
+- **A sent message keeps its chips**: a named entity shows as a chip in the message, with its card on hover (its orb, its name and what it is doing: "Castor is in a conversation.", "Pollux is asleep."). The agent's chip has no card, and a turn reopened later shows the plain words. Needs `@abstractframework/panel-chat` 0.9.13 (`src/vendor/abstractchat` and `src/vendor/abstractdocs` are synced from it).
 
 The first npm release since web 0.15.6 (prepared as 0.15.21, released as 0.16.0): it also carries the local
 builds 0.15.7 to 0.15.20 listed below.
@@ -113,8 +114,8 @@ once and replies carry no author.
 ### Added
 
 - **`@` mentions an entity from Code's chat.** Typing `@` lists the entities this account may see; a pick is a
-  chip (a typed `@name` that was not picked stays plain text), and the first pick in a conversation says "Castor
-  will read this conversation's history." On send, the message starts its turn as before, then each picked entity
+  chip (a typed `@name` that was not picked stays plain text), and an entity you name reads the conversation's
+  history before it answers. On send, the message starts its turn as before, then each picked entity
   is asked in order, the next once the previous answered ("Castor is answering…" above the box); an entity picked
   twice is asked once. Each answer is a turn of the conversation, so it reads the same after a reload; it appears
   once the current reply has ended. "Castor is in another conversation." and an entity this account cannot
@@ -134,10 +135,9 @@ once and replies carry no author.
 - **A message to entities only does not reach the agent; `@` names the agent too.** The `@` list starts with the
   conversation's agent, under its workflow's name (for example "Basic agent"). A message whose chips name
   entities and not the agent starts no agent run: the gateway records your words as a turn of the conversation,
-  the line above the box says "The agent stays out of this message." before you send, and there is no spinner
-  and no reply to wait for; the entities answer as before, and the conversation reads the same after a reload.
+  and there is no spinner and no reply to wait for; the entities answer as before, and the conversation reads the same after a reload.
   Pick `@Basic agent` as well to ask the agent too; a message without chips goes to the agent as before. While a
-  reply is running, a message still guides it, so the line does not show then. The agent's chip is sent as
+  reply is running, a message still guides it. No line above the box announces any of this. The agent's chip is sent as
   `agent` in `mentions`, in the order picked; it needs an AbstractGateway 0.21.0 that routes mentions this way.
 
 ### Changed

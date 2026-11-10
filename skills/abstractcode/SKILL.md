@@ -52,8 +52,8 @@ type `@` and pick an entity: the pick is a chip, and a typed `@name` that was
 not picked is plain text. The list starts with the conversation's agent (sent
 as `agent` in the start's `mentions`). In the terminal, a message that is only
 one entity chip opens that entity's visit. A message whose chips name entities
-and not the agent does not reach the agent: no agent run starts ("The agent
-stays out of this message." above the box). With the agent's chip too, the
+and not the agent does not reach the agent: no agent run starts. With the
+agent's chip too, the
 message starts the agent's turn, which answers only the part meant for it or
 says nothing. Either way each picked entity then answers in
 order under its own name (`● Castor · entity` in the terminal; the entity's
