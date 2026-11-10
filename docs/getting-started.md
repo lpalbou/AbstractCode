@@ -13,7 +13,8 @@ abstractgateway serve            # binds 0.0.0.0:8080 by default
 Use AbstractGateway 0.13.0 or later to archive conversations and to see the
 gateway's default voice routes in the clients. The browser client 0.15.0 needs
 AbstractGateway 0.20.0 or later for shared unread markers, the Avatar view's live
-line and Findings, and the `Paused · N` automation section.
+line and Findings, and the `Paused · N` automation section. `@` mentions and the
+reply's author (terminal 0.15.0, browser 0.15.21) need AbstractGateway 0.21.0.
 
 The gateway ships working agent bundles out of the box. Its default agent
 workflow is the shipped `basic-agent` until its operator chooses another, and
@@ -139,16 +140,16 @@ choice is remembered in `~/.abstractcode/prefs.json`. `--workflow default`
 selects the gateway's default workflow explicitly; see
 [`workflows.md`](workflows.md#the-gateway-default).
 
-In the browser, open the rail's **Workflow** panel. Its picker starts with
-**Gateway default**; the **Model** panel holds model, reasoning, MTP and
-**Stream replies** choices. These panels apply to the conversation (or the
+In the browser, open the rail's **Agent** panel. Its **Workflow** picker starts
+with **Gateway default**; the **Model** panel holds model, reasoning, MTP,
+**Stream replies** and **Iteration limit** choices. These panels apply to the conversation (or the
 automation) selected in the sidebar; see [`web.md`](web.md#working-in-the-interface).
 In the terminal, `/settings` opens the same panels.
 
 ## Mentioning an entity
 
-If your gateway hosts entities, you can bring one into a conversation by name, in
-either client. Type `@` in the message box: a list shows the entities your account
+If your gateway hosts entities (AbstractGateway 0.21.0), you can bring one into a
+conversation by name, in either client. Type `@` in the message box: a list shows the entities your account
 can see. Type more of a name to narrow it, then pick one (arrow keys to move, Enter
 or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
 after `@` without picking it stays ordinary text. The first time you name an entity

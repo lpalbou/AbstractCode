@@ -27,7 +27,8 @@ Status: **pre-alpha.** Interfaces and UX may change.
 What's new: terminal 0.15.0 mentions an entity with `@` (the agent leaves the
 entity's part to it, and every answer names its author), shows one automation as
 panels with a runs table and a scrollable run output, and is built on AbstractTUI
-0.8.0. Browser 0.15.4 never sends a reasoning level or MTP setting the model cannot use
+0.8.0. Browser 0.15.21 mentions an entity with `@` too, names every reply's author
+and moves the iteration limit to Model → Limits & streaming. Browser 0.15.4 never sends a reasoning level or MTP setting the model cannot use
 (changing the model puts both back on the gateway default) and always opens on the Conversation
 view. Browser 0.15.3 no longer lists AbstractNote's own work (note captures and the
 "Process / Reflect / Consolidate my notes" automations) among your conversations and automations,
@@ -66,8 +67,8 @@ Archiving conversations, the **Archived · N** lists and the gateway's default
 voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
 (shared unread markers, the Avatar view's live line and Findings, the `Paused · N`
 section) needs 0.20.0 or later; with an older gateway every update shows as progress
-and automations are listed without sections. The terminal client 0.15.0's `@`
-mentions and answer authors need 0.21.0 or later.
+and automations are listed without sections. `@` mentions and answer authors
+(terminal 0.15.0, browser 0.15.21) need 0.21.0 or later.
 
 Then start whichever client you prefer:
 
@@ -178,7 +179,8 @@ abstractgateway serve            # binds 0.0.0.0:8080 by default
 Use AbstractGateway 0.13.0 or later to archive conversations and to see the
 gateway's default voice routes in the clients. The browser client 0.15.0 needs
 AbstractGateway 0.20.0 or later for shared unread markers, the Avatar view's live
-line and Findings, and the `Paused · N` automation section.
+line and Findings, and the `Paused · N` automation section. `@` mentions and the
+reply's author (terminal 0.15.0, browser 0.15.21) need AbstractGateway 0.21.0.
 
 The gateway ships working agent bundles out of the box. Its default agent
 workflow is the shipped `basic-agent` until its operator chooses another, and
@@ -304,16 +306,16 @@ choice is remembered in `~/.abstractcode/prefs.json`. `--workflow default`
 selects the gateway's default workflow explicitly; see
 [`workflows.md`](workflows.md#the-gateway-default).
 
-In the browser, open the rail's **Workflow** panel. Its picker starts with
-**Gateway default**; the **Model** panel holds model, reasoning, MTP and
-**Stream replies** choices. These panels apply to the conversation (or the
+In the browser, open the rail's **Agent** panel. Its **Workflow** picker starts
+with **Gateway default**; the **Model** panel holds model, reasoning, MTP,
+**Stream replies** and **Iteration limit** choices. These panels apply to the conversation (or the
 automation) selected in the sidebar; see [`web.md`](web.md#working-in-the-interface).
 In the terminal, `/settings` opens the same panels.
 
 ## Mentioning an entity
 
-If your gateway hosts entities, you can bring one into a conversation by name, in
-either client. Type `@` in the message box: a list shows the entities your account
+If your gateway hosts entities (AbstractGateway 0.21.0), you can bring one into a
+conversation by name, in either client. Type `@` in the message box: a list shows the entities your account
 can see. Type more of a name to narrow it, then pick one (arrow keys to move, Enter
 or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
 after `@` without picking it stays ordinary text. The first time you name an entity
@@ -553,7 +555,8 @@ client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
   automation cards, and the Docs assistant drawer are AbstractUIC's exported
   builds vendored under `web/src/vendor/`; each folder's `provenance.json` records
   the source hashes, and `npm run build` refuses a vendored file that differs
-  from its recorded hash.
+  from its recorded hash, or a snapshot whose recorded sources differ from the
+  installed (published) package.
 
 ## Browser ownership
 
@@ -638,7 +641,7 @@ The terminal client also builds as a Rust library:
 
 ```toml
 [dependencies]
-abstractcode = "0.9"
+abstractcode = "0.15"
 ```
 
 ```rust
@@ -656,7 +659,7 @@ Both clients use the same endpoints. This is the integration contract:
 
 | Purpose | Shape |
 |---|---|
-| Start a run | `POST` a run request with the workflow (or `@default` plus the agent interface), prompt, and options; the response names the resolved workflow |
+| Start a run | `POST` a run request with the workflow (or `@default` plus the agent interface), prompt, and options; the response names the resolved workflow and, from AbstractGateway 0.21.0, the iteration limit it applied (`limits`) |
 | Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`); with streaming on, `llm.delta` / `llm.delta_end` frames carry live reply text |
 | Resolve a wait | `POST` a durable command — approve, reject, or answer |
 | Steer a run | `POST` a guidance command against the live run |
@@ -1606,7 +1609,7 @@ AbstractCode Web is a gateway-authenticated workspace for coding agents and regi
 
 Start with [getting started](getting-started.md). For hosting and authentication, see [web deployment](deployment-web.md).
 
-Archiving a conversation, the **Archived · N** lines and the gateway's default voice routes in **Voice** need AbstractGateway 0.13.0 or later.
+Archiving a conversation, the **Archived · N** lines and the gateway's default voice routes in **Voice** need AbstractGateway 0.13.0 or later. `@` mentions, the author on every reply and the gateway's iteration default need AbstractGateway 0.21.0.
 
 ## Working in the interface
 
@@ -1617,8 +1620,8 @@ Archiving a conversation, the **Archived · N** lines and the gateway's default 
 |---|---|
 | Activity | The run as the transcript shows it — model steps, tool calls, approvals — in foldable groups, one per agent iteration, the newest open. A finished run's answer and the assistant's "message" rows appear whole, rendered like the chat's messages (bold, lists, code, links), folded to about five lines; **Show more** unfolds it and **Show less** folds it back. Expanding a row shows its run ID and raw records. Each command call shows, first in its detail, the sandbox it ran under, from the run ledger: `Sandbox: macOS sandbox-exec · 3 workspaces enforced` (the kind the gateway recorded and the number of workspaces it enforced, listed below with their mode: this run's folder, each allowed workspace Read-only or Read & write, each refused one, and the count of built-in protected folders), or `Sandbox: none — refused` when the host had no sandbox and the command did not run. For an automation: one group per run (newest first, the latest open); opening a group reads that run's steps from the gateway. |
 | Files | The conversation's private workspace: name, size, generated date (relative; the exact time on hover) and a download icon per file. Click a file to preview it. Generated outputs and attachments are listed below, with the same rows. |
-| Model | Compact Provider and Model controls. **Reasoning & speed** keeps reasoning and MTP options on demand; **Limits & streaming** contains context limits and live replies for conversations; background automations show **Limits**. |
-| Agent | The conversation's workflow, folded tool categories with category and individual **Off / Ask / Auto**, skills, and optional instructions/run limits. Unavailable tools have their own disclosure. The default workflow for new chats is separate and stored on the account. For an automation, the same tab edits its definition and settings. |
+| Model | Compact Provider and Model controls. **Reasoning & speed** keeps reasoning and MTP options on demand; **Limits & streaming** holds the context token limit, **Stream replies** (conversations only) and the [**Iteration limit**](#iteration-limit); an automation shows it as **Limits**. |
+| Agent | The conversation's workflow, folded tool categories with category and individual **Off / Ask / Auto**, skills, and optional instructions. Unavailable tools have their own disclosure. The default workflow for new chats is separate and stored on the account. For an automation, the same tab edits its definition and settings. |
 | Workspace | The run folder and a concise shared folder chooser. **Use my default** inherits account workspaces; allowed folders appear once, blocked folders are folded, and permission details are available from the information button. **My default workspaces** opens the account settings. |
 | Voice | Engines, output device and volume, microphone, read aloud and voice latency. |
 
@@ -1725,11 +1728,15 @@ The setting is available only when the gateway advertises live replies. Otherwis
 
 If the gateway sends a live update the app cannot read, the transcript shows one note for that model call, the update is skipped, and the run keeps going: the complete reply still arrives.
 
+## Iteration limit
+
+**Model → Limits & streaming → Iteration limit** caps how many steps the agent may take before it stops. Empty, it names what applies: **Gateway default (N)** when the gateway reports its iteration default (AbstractGateway 0.21.0), **Workflow default** when it reports none and always for an automation, whose scheduled runs never use the gateway default, and plain **Gateway default** on an older gateway. A value that is not a whole number of 1 or more says so; past 200 a warning line shows, never a refusal; **Use default** clears it. A set value is sent as `input_data._limits.max_iterations`. After a start the field says which limit that run got ("Last run: 12 iterations (gateway default).").
+
 ## Running and supervising work
 
 For an agent, type a task and press Enter; Shift+Enter inserts a newline. For a structured workflow, configure its required inputs and select **Run workflow**. Text, structured JSON results, and workflow messages appear in the transcript.
 
-To bring an entity into the conversation, type `@` and pick it from the list of entities your account can see; it becomes a chip. Your message starts its turn as usual, then each picked entity answers in turn, in the order you picked them ("Castor is answering…" above the message box), and its answer appears once the current reply has ended, under its name, its orb and an "entity" tag; the agent's replies carry its workflow name and an "agent" tag. If an entity cannot answer, the message goes back into the box with only the entities that did not answer: send it again unchanged to ask only those. See [Mentioning an entity](getting-started.md#mentioning-an-entity) for every case.
+To bring an entity into the conversation (AbstractGateway 0.21.0), type `@` and pick it from the list of entities your account can see; it becomes a chip. Your message starts its turn as usual, and the agent answers only the part meant for it, or says nothing; then each picked entity answers in turn, in the order you picked them ("Castor is answering…" above the message box), and its answer appears once the current reply has ended, under its name, its orb and an "entity" tag; the agent's replies carry its workflow name and an "agent" tag. If an entity cannot answer, the message goes back into the box with only the entities that did not answer: send it again unchanged to ask only those. See [Mentioning an entity](getting-started.md#mentioning-an-entity) for every case.
 
 Answer questions in their dedicated cards. A tool approval shows what the tool will do (the full arguments are under **Review full tool arguments (JSON)**) and offers three choices: **Deny** refuses the request; **Allow** allows that tool for the rest of this conversation; **Allow All** allows every tool for the rest of this conversation. Both allows are stored on the gateway for this session only (AbstractGateway 0.16.0 or later, `capabilities.session_tool_policy`), so later calls run without asking in every client of the conversation; they never change your tool settings in Agent → Tools. On a gateway without the session tool policy, Allow covers the request shown and the card says so. Gateway and workflow policy determine which operations need a decision. Saving the allow before it answers has no time limit: a pending permission is a durable wait, so the card shows "Allowing…" for as long as the gateway takes, and shows a failure line with the reason (and Try again) only when the gateway or the network really refuses.
 
@@ -4557,7 +4564,9 @@ Docs:
 Archiving conversations, **Archived · N** and the gateway's default voice
 routes need AbstractGateway 0.13.0 or later. Shared unread markers need
 AbstractGateway 0.19.0 or later; the Avatar view's live line and Findings and the
-`Paused · N` automation section need AbstractGateway 0.20.0 or later.
+`Paused · N` automation section need AbstractGateway 0.20.0 or later. `@` mentions,
+the author on every reply and the gateway's iteration default need AbstractGateway
+0.21.0.
 
 ## Local dev
 ```bash
@@ -4674,69 +4683,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added (web)
-
-- **`@` mentions an entity from Code's chat, and every reply says who wrote it** (operator 2026-11-08; needs
-  the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway main f32c8ca9 with
-  AbstractRuntime 6706188). Typing `@` lists the entities `GET /entities` offers this account; a pick is a chip
-  (the text is never searched for `@`), and the first pick in a conversation says "Castor will read this
-  conversation's history." On send, the message starts its turn as before, then each picked entity is asked in
-  order, the next once the previous answered ("Castor is answering…" above the box). Each answer is a turn of the
-  conversation the gateway records, so it reads the same after a reload; it appears once the current reply has
-  ended. "Castor is in another conversation." (409) and an entity this account cannot mention (404, then no
-  longer offered) are said and the next one is asked; "Castor cannot answer: …" (503) or any other failure is
-  said and the message stays in the box. A gateway without the route says "This gateway does not offer mentions
-  yet." once and `@` then shows that sentence instead of names. A guided message asks its names once the
-  guidance is in; a queued message carries them to its turn.
-- **The left bubble names its author**: the agent's workflow name with an "agent" tag, or the entity's name, its
-  orb and an "entity" tag, from the turn's `author`. Without one (an older gateway) the bubble is unchanged.
-- A conversation that opens on an entity's answer continues with its newest agent turn's workflow (an answer is
-  never taken for the conversation's workflow, which said "no longer available").
-- On the vendored panel-chat of AbstractUIC main aab7240 (local 0.9.9, not published; `npm run sync:conversation`).
-- **The agent leaves what you ask an entity to that entity.** A message with `@` chips now starts its turn with
-  the entities it mentions (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message
-  too). The agent answers only the part meant for it, or says nothing: the conversation then shows your words
-  and the entities' answers, with no empty reply. Needs AbstractGateway main c26d38a2 or later, and an agent that
-  accepts an empty reply (AbstractAgent still asks again today); an older gateway ignores the key.
-
-- **"Iteration limit" moved to Model → Limits & streaming, as the shared kit control** (AbstractUIC ui-kit 0.9.26
-  `IterationLimitField`, operator 2026-11-08). It is the third row after "Context token limit" and "Stream replies"
-  (automations: "Limits"), and was the only row of Agent → "Instructions & limits" → "Run limits", now just
-  "Instructions". Empty, it names what applies: "Gateway default (12)" when the gateway stores
-  `agents.max_iterations` (read from `capabilities.agent_limits.max_iterations`), "Workflow default" otherwise and
-  always for an automation (the gateway default never applies to scheduled runs). A value that is not a whole number
-  of 1 or more says so; past 200 a warning line; "Use default" clears it. A set value is still sent as
-  `input_data._limits.max_iterations`; after a start the field says which limit that run got, from the gateway's
-  `limits` receipt ("Last run: 12 iterations (gateway default)."). Needs the local ui-kit 0.9.26 pack, installed
-  `--no-save` (the lockfile follows the kit publish).
-- `web/package.json` declares the kit versions the web app needs: `@abstractframework/ui-kit` ^0.9.26 (was ^0.9.18,
-  which has no `IterationLimitField`) and `@abstractframework/panel-chat` ^0.9.9 (was ^0.9.1, which has no
-  `chatAuthorOf` / `ChatAuthor`, imported for the reply's author). Neither is published yet: `package-lock.json` is
-  relocked when they are, and `npm run check:lock` fails until then.
-
-### Fixed (web)
-
-- **A mention sent with guidance is answered.** A message sent while a run is working ("Guide this
-  run", or the Avatar view's message to the running turn) was refused with "That earlier message is
-  not one of your own turns in this conversation": its mentions named the running turn, whose words
-  are an earlier message. Guidance starts no turn, so its mentions now name none, and the entity is
-  asked your words. A message that starts a turn, sent or queued, still names it.
-- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
-  message's turn, the entity, its place in the message). If the answer was lost on the way back (a
-  timeout, a dropped connection) and you send the same words again, the gateway returns the answer
-  the entity already gave instead of asking it twice; a new message is asked as new. Needs an
-  AbstractGateway that keeps mention ids (main f0f23bb0 or later).
-- **Mentions, client review 2026-11-09.** Resending after an entity could not answer (503) no longer asks again
-  the entity that already answered, nor starts the person's turn again: the box keeps the words and only the chips
-  not answered, and sending the same words again asks only those, with the same `repeat_of` and their first
-  `mention_index` (a guided message the same way). Other words are a new message. An entity picked twice is asked
-  once. The person's words fold under their own turn only while that turn is on screen (a mention turn shown alone
-  keeps its question). An uncoded 405 means "This gateway does not offer mentions yet." like an uncoded 404. Stop
-  during the mentions says who was not asked ("Stopped before asking Hypnos."). Kit fixes from AbstractUIC
-  9aad042 + aca0b07 (vendored copy re-synced; `node_modules` panel-chat 0.9.9 + ui-kit 0.9.26 local packs, `--no-save`):
-  a chip picked while a send is in flight stays, Enter waits while the `@` list loads, a picked name is not
-  offered again, and the list spans the box on a phone.
-
 ## [terminal 0.15.0] - 2026-11-10
 
 Built on AbstractTUI 0.8.0. `@` mentions and the answer's author need
@@ -4816,9 +4762,63 @@ offer mentions yet." once and every answer reads "assistant" as before.
   ("Process my notes", "Reflect on my notes", "Consolidate my notes") leave the
   automations list and its counts.
 
-## [web 0.15.21] - 2026-11-08 (local build, not published)
+## [web 0.15.21] - 2026-11-10
 
-- Mentions: the person's words are folded by `repeat_of`; `entity_not_found` told apart from a missing route; the author rides live replies from the first frame; the 422 sentence shown (Entity session, 177ae6e).
+The first npm release since web 0.15.6: it also carries the local builds 0.15.7 to 0.15.20 listed below.
+Built on the published AbstractUIC kit, `@abstractframework/ui-kit` 0.9.27 and `@abstractframework/panel-chat`
+0.9.11. `@` mentions, the reply's author, the agent leaving an entity's part to it and the gateway's iteration
+default need AbstractGateway 0.21.0; with an older gateway `@` says "This gateway does not offer mentions yet."
+once and replies carry no author.
+
+### Added
+
+- **`@` mentions an entity from Code's chat.** Typing `@` lists the entities this account may see; a pick is a
+  chip (a typed `@name` that was not picked stays plain text), and the first pick in a conversation says "Castor
+  will read this conversation's history." On send, the message starts its turn as before, then each picked entity
+  is asked in order, the next once the previous answered ("Castor is answering…" above the box); an entity picked
+  twice is asked once. Each answer is a turn of the conversation, so it reads the same after a reload; it appears
+  once the current reply has ended. "Castor is in another conversation." and an entity this account cannot
+  mention ("cannot be mentioned here", then no longer offered) are said and the next one is asked; when an entity
+  cannot answer, the asking stops and the message goes back into the box with only the entities that did not
+  answer: sending the same words again asks only those, starts no new turn, and never asks an entity twice. Stop
+  during the mentions says who was not asked ("Stopped before asking Hypnos."). A guided message asks its names
+  once the guidance is in; a queued message carries them to its turn.
+- **Every reply names its author.** The left bubble shows the agent's workflow name with an "agent" tag, or the
+  entity's name, its orb and an "entity" tag, from the first words of a live reply on. Without an author (an
+  older gateway) the bubble is unchanged.
+- **The agent leaves what you ask an entity to that entity.** A message with `@` chips starts its turn with the
+  entities it mentions (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message too).
+  The agent answers only the part meant for it, or says nothing: the conversation then shows your words and the
+  entities' answers, with no empty reply. The agent can stay silent with an AbstractAgent newer than 0.6.0; an
+  older gateway ignores the key.
+
+### Changed
+
+- **"Iteration limit" moved to Model → Limits & streaming**, as the shared kit control. It is the row after
+  "Context token limit" and "Stream replies" (automations: "Limits"); Agent's "Instructions & limits" is now
+  "Instructions". Empty, it names what applies: "Gateway default (N)" when the gateway reports its iteration
+  default (AbstractGateway 0.21.0), "Workflow default" when it reports none and always for an automation
+  (scheduled runs never use the gateway default), "Gateway default" on an older gateway. A value that is not a whole number of 1 or more says so, past 200 a warning line shows, and "Use
+  default" clears it. A set value is still sent as `input_data._limits.max_iterations`; after a start the field
+  says which limit that run got ("Last run: 12 iterations (gateway default).").
+- `web/package.json` requires `@abstractframework/ui-kit` ^0.9.27 and `@abstractframework/panel-chat` ^0.9.11,
+  installed from npm. The conversation, the session cards and the Docs drawer stay vendored under
+  `web/src/vendor/`, now built from those published versions, and `npm run build` refuses a snapshot whose
+  recorded sources differ from the installed packages.
+
+### Fixed
+
+- A conversation that opens on an entity's answer continues with its newest agent turn's workflow, instead of
+  saying its workflow is no longer available.
+- Your words show once when an entity answers them, and only while your own turn is on screen (a mention turn
+  shown alone keeps its question).
+- A mention sent while a run is working (guidance, or the Avatar view's message to the running turn) is
+  answered, instead of being refused with "That earlier message is not one of your own turns in this
+  conversation".
+- A mention is answered once, even when sent again after its answer was lost on the way back (a timeout, a
+  dropped connection): the gateway returns the answer the entity already gave.
+- A chip picked while a send is in flight stays, Enter waits while the `@` list loads, a name already picked is
+  not offered again, and the list spans the box on a phone.
 
 ## [web 0.15.20] - 2026-11-08 (local build, not published)
 
@@ -6561,6 +6561,14 @@ At release time, `npm run check:lock -- --latest` also fails when npm has a newe
 cd web
 npm run check:lock
 ```
+
+The conversation, the session cards and the Docs drawer are AbstractUIC snapshots under
+`web/src/vendor/`. `npm run build` runs `scripts/check_vendor_sources.mjs`, which fails unless
+every source file a snapshot's `provenance.json` records is byte-identical to the installed
+package in `node_modules`. After raising a kit floor, re-sync them from an AbstractUIC checkout
+at the published commit (`npm view @abstractframework/panel-chat@<version> gitHead`) with
+`npm run sync:conversation`, `npm run sync:sessions` and `npm run sync:docs`, and commit them
+with the lock.
 
 ## Releases
 

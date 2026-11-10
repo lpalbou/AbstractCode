@@ -176,7 +176,8 @@ client. See [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
   automation cards, and the Docs assistant drawer are AbstractUIC's exported
   builds vendored under `web/src/vendor/`; each folder's `provenance.json` records
   the source hashes, and `npm run build` refuses a vendored file that differs
-  from its recorded hash.
+  from its recorded hash, or a snapshot whose recorded sources differ from the
+  installed (published) package.
 
 ## Browser ownership
 

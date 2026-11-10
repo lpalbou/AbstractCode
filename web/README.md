@@ -44,7 +44,9 @@ Docs:
 Archiving conversations, **Archived · N** and the gateway's default voice
 routes need AbstractGateway 0.13.0 or later. Shared unread markers need
 AbstractGateway 0.19.0 or later; the Avatar view's live line and Findings and the
-`Paused · N` automation section need AbstractGateway 0.20.0 or later.
+`Paused · N` automation section need AbstractGateway 0.20.0 or later. `@` mentions,
+the author on every reply and the gateway's iteration default need AbstractGateway
+0.21.0.
 
 ## Local dev
 ```bash

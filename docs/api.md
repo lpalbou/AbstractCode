@@ -39,7 +39,7 @@ The terminal client also builds as a Rust library:
 
 ```toml
 [dependencies]
-abstractcode = "0.9"
+abstractcode = "0.15"
 ```
 
 ```rust
@@ -57,7 +57,7 @@ Both clients use the same endpoints. This is the integration contract:
 
 | Purpose | Shape |
 |---|---|
-| Start a run | `POST` a run request with the workflow (or `@default` plus the agent interface), prompt, and options; the response names the resolved workflow |
+| Start a run | `POST` a run request with the workflow (or `@default` plus the agent interface), prompt, and options; the response names the resolved workflow and, from AbstractGateway 0.21.0, the iteration limit it applied (`limits`) |
 | Stream a run | `GET` the run's ledger stream as SSE (`event: step`, terminated by `event: done`); with streaming on, `llm.delta` / `llm.delta_end` frames carry live reply text |
 | Resolve a wait | `POST` a durable command — approve, reject, or answer |
 | Steer a run | `POST` a guidance command against the live run |

@@ -7,69 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added (web)
-
-- **`@` mentions an entity from Code's chat, and every reply says who wrote it** (operator 2026-11-08; needs
-  the gateway's `POST /sessions/{id}/mentions` and turn `author`, AbstractGateway main f32c8ca9 with
-  AbstractRuntime 6706188). Typing `@` lists the entities `GET /entities` offers this account; a pick is a chip
-  (the text is never searched for `@`), and the first pick in a conversation says "Castor will read this
-  conversation's history." On send, the message starts its turn as before, then each picked entity is asked in
-  order, the next once the previous answered ("Castor is answering…" above the box). Each answer is a turn of the
-  conversation the gateway records, so it reads the same after a reload; it appears once the current reply has
-  ended. "Castor is in another conversation." (409) and an entity this account cannot mention (404, then no
-  longer offered) are said and the next one is asked; "Castor cannot answer: …" (503) or any other failure is
-  said and the message stays in the box. A gateway without the route says "This gateway does not offer mentions
-  yet." once and `@` then shows that sentence instead of names. A guided message asks its names once the
-  guidance is in; a queued message carries them to its turn.
-- **The left bubble names its author**: the agent's workflow name with an "agent" tag, or the entity's name, its
-  orb and an "entity" tag, from the turn's `author`. Without one (an older gateway) the bubble is unchanged.
-- A conversation that opens on an entity's answer continues with its newest agent turn's workflow (an answer is
-  never taken for the conversation's workflow, which said "no longer available").
-- On the vendored panel-chat of AbstractUIC main aab7240 (local 0.9.9, not published; `npm run sync:conversation`).
-- **The agent leaves what you ask an entity to that entity.** A message with `@` chips now starts its turn with
-  the entities it mentions (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message
-  too). The agent answers only the part meant for it, or says nothing: the conversation then shows your words
-  and the entities' answers, with no empty reply. Needs AbstractGateway main c26d38a2 or later, and an agent that
-  accepts an empty reply (AbstractAgent still asks again today); an older gateway ignores the key.
-
-- **"Iteration limit" moved to Model → Limits & streaming, as the shared kit control** (AbstractUIC ui-kit 0.9.26
-  `IterationLimitField`, operator 2026-11-08). It is the third row after "Context token limit" and "Stream replies"
-  (automations: "Limits"), and was the only row of Agent → "Instructions & limits" → "Run limits", now just
-  "Instructions". Empty, it names what applies: "Gateway default (12)" when the gateway stores
-  `agents.max_iterations` (read from `capabilities.agent_limits.max_iterations`), "Workflow default" otherwise and
-  always for an automation (the gateway default never applies to scheduled runs). A value that is not a whole number
-  of 1 or more says so; past 200 a warning line; "Use default" clears it. A set value is still sent as
-  `input_data._limits.max_iterations`; after a start the field says which limit that run got, from the gateway's
-  `limits` receipt ("Last run: 12 iterations (gateway default)."). Needs the local ui-kit 0.9.26 pack, installed
-  `--no-save` (the lockfile follows the kit publish).
-- `web/package.json` declares the kit versions the web app needs: `@abstractframework/ui-kit` ^0.9.26 (was ^0.9.18,
-  which has no `IterationLimitField`) and `@abstractframework/panel-chat` ^0.9.9 (was ^0.9.1, which has no
-  `chatAuthorOf` / `ChatAuthor`, imported for the reply's author). Neither is published yet: `package-lock.json` is
-  relocked when they are, and `npm run check:lock` fails until then.
-
-### Fixed (web)
-
-- **A mention sent with guidance is answered.** A message sent while a run is working ("Guide this
-  run", or the Avatar view's message to the running turn) was refused with "That earlier message is
-  not one of your own turns in this conversation": its mentions named the running turn, whose words
-  are an earlier message. Guidance starts no turn, so its mentions now name none, and the entity is
-  asked your words. A message that starts a turn, sent or queued, still names it.
-- **A mention is answered once, even when sent again.** Each mention now carries its own id (your
-  message's turn, the entity, its place in the message). If the answer was lost on the way back (a
-  timeout, a dropped connection) and you send the same words again, the gateway returns the answer
-  the entity already gave instead of asking it twice; a new message is asked as new. Needs an
-  AbstractGateway that keeps mention ids (main f0f23bb0 or later).
-- **Mentions, client review 2026-11-09.** Resending after an entity could not answer (503) no longer asks again
-  the entity that already answered, nor starts the person's turn again: the box keeps the words and only the chips
-  not answered, and sending the same words again asks only those, with the same `repeat_of` and their first
-  `mention_index` (a guided message the same way). Other words are a new message. An entity picked twice is asked
-  once. The person's words fold under their own turn only while that turn is on screen (a mention turn shown alone
-  keeps its question). An uncoded 405 means "This gateway does not offer mentions yet." like an uncoded 404. Stop
-  during the mentions says who was not asked ("Stopped before asking Hypnos."). Kit fixes from AbstractUIC
-  9aad042 + aca0b07 (vendored copy re-synced; `node_modules` panel-chat 0.9.9 + ui-kit 0.9.26 local packs, `--no-save`):
-  a chip picked while a send is in flight stays, Enter waits while the `@` list loads, a picked name is not
-  offered again, and the list spans the box on a phone.
-
 ## [terminal 0.15.0] - 2026-11-10
 
 Built on AbstractTUI 0.8.0. `@` mentions and the answer's author need
@@ -149,9 +86,63 @@ offer mentions yet." once and every answer reads "assistant" as before.
   ("Process my notes", "Reflect on my notes", "Consolidate my notes") leave the
   automations list and its counts.
 
-## [web 0.15.21] - 2026-11-08 (local build, not published)
+## [web 0.15.21] - 2026-11-10
 
-- Mentions: the person's words are folded by `repeat_of`; `entity_not_found` told apart from a missing route; the author rides live replies from the first frame; the 422 sentence shown (Entity session, 177ae6e).
+The first npm release since web 0.15.6: it also carries the local builds 0.15.7 to 0.15.20 listed below.
+Built on the published AbstractUIC kit, `@abstractframework/ui-kit` 0.9.27 and `@abstractframework/panel-chat`
+0.9.11. `@` mentions, the reply's author, the agent leaving an entity's part to it and the gateway's iteration
+default need AbstractGateway 0.21.0; with an older gateway `@` says "This gateway does not offer mentions yet."
+once and replies carry no author.
+
+### Added
+
+- **`@` mentions an entity from Code's chat.** Typing `@` lists the entities this account may see; a pick is a
+  chip (a typed `@name` that was not picked stays plain text), and the first pick in a conversation says "Castor
+  will read this conversation's history." On send, the message starts its turn as before, then each picked entity
+  is asked in order, the next once the previous answered ("Castor is answering…" above the box); an entity picked
+  twice is asked once. Each answer is a turn of the conversation, so it reads the same after a reload; it appears
+  once the current reply has ended. "Castor is in another conversation." and an entity this account cannot
+  mention ("cannot be mentioned here", then no longer offered) are said and the next one is asked; when an entity
+  cannot answer, the asking stops and the message goes back into the box with only the entities that did not
+  answer: sending the same words again asks only those, starts no new turn, and never asks an entity twice. Stop
+  during the mentions says who was not asked ("Stopped before asking Hypnos."). A guided message asks its names
+  once the guidance is in; a queued message carries them to its turn.
+- **Every reply names its author.** The left bubble shows the agent's workflow name with an "agent" tag, or the
+  entity's name, its orb and an "entity" tag, from the first words of a live reply on. Without an author (an
+  older gateway) the bubble is unchanged.
+- **The agent leaves what you ask an entity to that entity.** A message with `@` chips starts its turn with the
+  entities it mentions (`mentions` on `POST /runs/start`, in the order picked, each once; a queued message too).
+  The agent answers only the part meant for it, or says nothing: the conversation then shows your words and the
+  entities' answers, with no empty reply. The agent can stay silent with an AbstractAgent newer than 0.6.0; an
+  older gateway ignores the key.
+
+### Changed
+
+- **"Iteration limit" moved to Model → Limits & streaming**, as the shared kit control. It is the row after
+  "Context token limit" and "Stream replies" (automations: "Limits"); Agent's "Instructions & limits" is now
+  "Instructions". Empty, it names what applies: "Gateway default (N)" when the gateway reports its iteration
+  default (AbstractGateway 0.21.0), "Workflow default" when it reports none and always for an automation
+  (scheduled runs never use the gateway default), "Gateway default" on an older gateway. A value that is not a whole number of 1 or more says so, past 200 a warning line shows, and "Use
+  default" clears it. A set value is still sent as `input_data._limits.max_iterations`; after a start the field
+  says which limit that run got ("Last run: 12 iterations (gateway default).").
+- `web/package.json` requires `@abstractframework/ui-kit` ^0.9.27 and `@abstractframework/panel-chat` ^0.9.11,
+  installed from npm. The conversation, the session cards and the Docs drawer stay vendored under
+  `web/src/vendor/`, now built from those published versions, and `npm run build` refuses a snapshot whose
+  recorded sources differ from the installed packages.
+
+### Fixed
+
+- A conversation that opens on an entity's answer continues with its newest agent turn's workflow, instead of
+  saying its workflow is no longer available.
+- Your words show once when an entity answers them, and only while your own turn is on screen (a mention turn
+  shown alone keeps its question).
+- A mention sent while a run is working (guidance, or the Avatar view's message to the running turn) is
+  answered, instead of being refused with "That earlier message is not one of your own turns in this
+  conversation".
+- A mention is answered once, even when sent again after its answer was lost on the way back (a timeout, a
+  dropped connection): the gateway returns the answer the entity already gave.
+- A chip picked while a send is in flight stays, Enter waits while the `@` list loads, a name already picked is
+  not offered again, and the list spans the box on a phone.
 
 ## [web 0.15.20] - 2026-11-08 (local build, not published)
 

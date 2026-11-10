@@ -89,6 +89,14 @@ cd web
 npm run check:lock
 ```
 
+The conversation, the session cards and the Docs drawer are AbstractUIC snapshots under
+`web/src/vendor/`. `npm run build` runs `scripts/check_vendor_sources.mjs`, which fails unless
+every source file a snapshot's `provenance.json` records is byte-identical to the installed
+package in `node_modules`. After raising a kit floor, re-sync them from an AbstractUIC checkout
+at the published commit (`npm view @abstractframework/panel-chat@<version> gitHead`) with
+`npm run sync:conversation`, `npm run sync:sessions` and `npm run sync:docs`, and commit them
+with the lock.
+
 ## Releases
 
 The two clients version independently, each under its own tag prefix:
