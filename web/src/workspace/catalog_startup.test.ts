@@ -197,6 +197,25 @@ describe("the catalog shows each part as its answers land", () => {
     expect(view.catalog.workflows.length).toBeGreaterThan(0);
   });
 
+  it("a list reload (an event, Load more, an archive) never shows 'Discovering your workflows…'", async () => {
+    // Review 224800e (mutant M6): `catalog.loading` stays false across refreshSessions once the start set is in.
+    const loadingSeen: boolean[] = [];
+    const view = mountCatalog((c) => loadingSeen.push(c.loading));
+    await settle();
+    await release(RUNS, { ...F.runs, archived_sessions: 0 });
+    await release("discovery/capabilities", {});
+    for (const [path, body] of START_SET) await release(path, body);
+    expect(view.catalog.loading).toBe(false);
+    loadingSeen.length = 0;
+    void view.catalog.refreshSessions();
+    await settle();
+    expect(view.catalog.sessionsLoading).toBe(true);
+    await release(RUNS, { ...F.runs, archived_sessions: 0 });
+    expect(view.catalog.sessionsLoading).toBe(false);
+    expect(loadingSeen.length).toBeGreaterThan(0);
+    expect(loadingSeen.every((v) => v === false)).toBe(true);
+  });
+
   it("a failed conversation list is still said, and stays said once the rest lands", async () => {
     const view = mountCatalog();
     await settle();
