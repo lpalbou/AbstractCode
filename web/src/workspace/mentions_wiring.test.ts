@@ -7,13 +7,13 @@ const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
 const chatMount = app.slice(app.indexOf("<WorkflowChat"), app.indexOf("onCancel={cancelCurrentRun}"));
 
 describe("Code's chat offers @ names from the gateway", () => {
-  it("the shared chat gets the names, the first-pick sentence, the conversation key and both sentences", () => {
+  it("the shared chat gets the names, the conversation key and both sentences; no first-pick sentence (operator 2026-11-10 23:02)", () => {
     expect(chatMount).toContain("onSend={send}");
     expect(chatMount).toContain("mentionCandidates={mentionCandidates}");
-    expect(chatMount).toContain("mentionNotice={mentionNoticeFor}");
+    expect(chatMount).not.toContain("mentionNotice=");
     expect(chatMount).toContain("mentionSessionKey={`${identity}:${session.sessionId}`}");
     expect(chatMount).toContain("mentionsUnavailable={mentionsOff === identity ? MENTIONS_UNAVAILABLE : null}");
-    expect(chatMount).toContain("mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : composerAgentHint}");
+    expect(chatMount).toContain("mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : null}");
   });
   it("the names come from GET /entities, without the entities the gateway refused", () => {
     expect(app).toContain('gatewayRequest(gatewayApiPath("entities")).then(entityCandidates)');
@@ -79,10 +79,9 @@ describe("mentions routing (operator 2026-11-10): the agent stays out of a messa
     expect(app).toMatch(/const unaddressedTurn =\s*Boolean\(session\.runId\) &&\s*\(unaddressedTurns\.current\.has\(session\.runId\) \|\|\s*\(String\(snapshot\.run\?\.run_id \|\| ""\) === session\.runId && agentNotAddressed\(snapshot\.run\)\)\);\s*const active =\s*Boolean\(session\.runId\) &&\s*!unaddressedTurn &&/);
     expect(app).toContain("unaddressed: unaddressedTurns.current,");
   });
-  it("the line above the composer reads the composer's chips, only for a message that starts a turn", () => {
-    expect(app).toContain("const chipKinds = useComposerChipKinds(chatRoot);");
-    expect(app).toContain("const composerAgentHint = !active && mentionsOff !== identity ? agentHint(chipKinds) : null;");
-    expect(app).toMatch(/<main\s+className="code-conversation"\s+id="code-conversation"\s+ref=\{setChatRoot\}/);
+  it("no line above the composer says so (operator 2026-11-10 23:02): the composer's chips are not read", () => {
+    expect(app).not.toMatch(/useComposerChipKinds|composerAgentHint|agentHint|setChatRoot/);
+    expect(app).toMatch(/<main\s+className="code-conversation"\s+id="code-conversation"\s+tabIndex=\{-1\}/);
   });
   it("only entities are asked through the mention door; no reply is said to be running without an agent run", () => {
     expect(app).toMatch(/const mentions = entityMentions\(picked\);\s*if \(!mentions\.length\) return;/);

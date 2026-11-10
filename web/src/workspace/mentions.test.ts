@@ -11,7 +11,6 @@ import {
   isMentionTurn,
   mentionId,
   mentionMessageKey,
-  mentionNoticeFor,
   mentionRefusal,
   mentionRequestBody,
   mintMessageId,
@@ -62,8 +61,10 @@ describe("the @ list: GET /entities", () => {
     const all = entityCandidates({ entities: [{ slug: "castor", name: "Castor" }, { slug: "hypnos", name: "Hypnos" }] });
     expect(filterMentionCandidates(all, "", new Set(["castor"])).map((c) => c.id)).toEqual(["hypnos"]);
   });
-  it("says on the first pick that the entity reads the conversation", () => {
-    expect(mentionNoticeFor({ name: "Castor" })).toBe("Castor will read this conversation's history.");
+  it("says nothing on the first pick (operator 2026-11-10 23:02: no text above the typed text)", async () => {
+    const mod = await import("./mentions");
+    expect(mod).not.toHaveProperty("mentionNoticeFor");
+    expect(mod).not.toHaveProperty("AGENT_STAYS_OUT");
   });
 });
 

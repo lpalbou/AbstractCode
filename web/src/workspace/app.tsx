@@ -1,7 +1,6 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
-import { MENTIONS_UNAVAILABLE, agentHint, agentNotAddressed, conversationWorkflowTurn, entityCandidates, entityMentions, filterMentionCandidates, foldRepeatedTurns, isSideTurn, mentionMessageKey, mentionNoticeFor, mentionRepeatOf, mentionRequestBody, mentionRoster, mentionsSummary, sendMentions, startRunMentions, startedTurn, withLiveAuthors, type StartedTurn } from "./mentions";
-import { useComposerChipKinds } from "./mention_chip_kinds";
+import { MENTIONS_UNAVAILABLE, agentNotAddressed, conversationWorkflowTurn, entityCandidates, entityMentions, filterMentionCandidates, foldRepeatedTurns, isSideTurn, mentionMessageKey, mentionRepeatOf, mentionRequestBody, mentionRoster, mentionsSummary, sendMentions, startRunMentions, startedTurn, withLiveAuthors, type StartedTurn } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -335,10 +334,6 @@ export function CodeWorkspace() {
   // (`agent_addressed: false` on its run and its view message), so it reads the same live and after
   // a reload: no reply under way, no working dots.
   const unaddressedTurns = useRef(new Set<string>());
-  // The conversation's element (a callback ref: it mounts again after an automation's view), whose
-  // composer chips decide the line above it (`agentHint`).
-  const [chatRoot, setChatRoot] = useState<HTMLElement | null>(null);
-  const chipKinds = useComposerChipKinds(chatRoot);
   // A send whose mentions stopped partway (a 503, a failure): its words, its `repeat_of` and the
   // mentions not answered. The next send of the same words with chips asks only those (no new turn).
   const pendingResend = useRef<{ sessionId: string; identity: string; epoch: number; message: string; resend: MentionResend } | null>(null);
@@ -586,10 +581,6 @@ export function CodeWorkspace() {
   // a timer or an event, nor while paused. WorkflowChat shows the working dots for it.
   const progressTone = useMemo(() => workflowProgress(snapshot).tone, [snapshot]);
   const working = !paused && (sending || (active && progressTone === "working"));
-  // The line above the composer while its chips name entities and not the agent (operator
-  // 2026-11-10), for a message that starts a turn: while a reply runs the words guide it, so the
-  // line would not be true then.
-  const composerAgentHint = !active && mentionsOff !== identity ? agentHint(chipKinds) : null;
   const interaction = useMemo(
     () =>
       // Deny / Allow (this tool) / Allow All (every tool), the two allows for the rest of this
@@ -2214,7 +2205,6 @@ export function CodeWorkspace() {
           <main
             className="code-conversation"
             id="code-conversation"
-            ref={setChatRoot}
             tabIndex={-1}
           >
             {/* This client's trouble reaching the gateway: the page's one notice (operator 2026-11-08),
@@ -2423,10 +2413,9 @@ export function CodeWorkspace() {
               onDraftChange={setDraft}
               onSend={send}
               mentionCandidates={mentionCandidates}
-              mentionNotice={mentionNoticeFor}
               mentionSessionKey={`${identity}:${session.sessionId}`}
               mentionsUnavailable={mentionsOff === identity ? MENTIONS_UNAVAILABLE : null}
-              mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : composerAgentHint}
+              mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : null}
               busy={locked && !stoppingStart}
               busyLabel={sending ? "Starting…" : paused ? "Paused" : "Working…"}
               working={working}

@@ -39,9 +39,6 @@ export const PERSON_TURN_WORKFLOW_ID = "person-turn";
  * be called `agent`: the gateway refuses that slug). */
 export const AGENT_MENTION_ID = "agent";
 
-/** The line above the composer while the chips name entities and not the agent. */
-export const AGENT_STAYS_OUT = "The agent stays out of this message.";
-
 /** The `@` list's row for the conversation's agent: the workflow's display name (e.g. "Basic agent";
  * "Agent" when it has none), kind agent, id `agent`. */
 export function agentCandidate(label: string | null | undefined): ChatMentionCandidate {
@@ -56,12 +53,6 @@ export function mentionRoster(agentLabel: string | null | undefined, entities: r
 /** The mentions the mention door asks: the entities only (the agent's chip rides the start). */
 export function entityMentions<M extends Pick<ChatMentionSent, "kind">>(mentions: readonly M[]): M[] {
   return mentions.filter((m) => m.kind === "entity");
-}
-
-/** The line above the composer for the chips it holds (their kinds, in order): `AGENT_STAYS_OUT`
- * while they name an entity and not the agent; null with the agent's chip or with no chip. */
-export function agentHint(kinds: readonly string[]): string | null {
-  return kinds.includes("entity") && !kinds.includes("agent") ? AGENT_STAYS_OUT : null;
 }
 
 type Row = Record<string, unknown>;
@@ -106,12 +97,6 @@ export function filterMentionCandidates(
   const starts = (c: ChatMentionCandidate) => c.name.toLowerCase().startsWith(q) || c.id.toLowerCase().startsWith(q);
   const contains = (c: ChatMentionCandidate) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
   return [...offered.filter(starts), ...offered.filter((c) => !starts(c) && contains(c))];
-}
-
-/** The first-pick sentence under an entity's chip (once per conversation); none for the agent's
- * chip (the agent already reads the conversation). */
-export function mentionNoticeFor(candidate: Pick<ChatMentionCandidate, "name"> & { kind?: ChatMentionCandidate["kind"] }): string | null {
-  return candidate.kind === "agent" ? null : `${candidate.name} will read this conversation's history.`;
 }
 
 /** What a refused mention means for the rest of the send. */

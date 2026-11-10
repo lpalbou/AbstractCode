@@ -1,26 +1,24 @@
 // Mentions routing (operator 2026-11-10): the `@` list offers the conversation's agent (`agent`), a
 // message whose chips name entities and not the agent starts no agent run (`agent: "not_addressed"`
-// with the recorded turn's `turn_id`, which its mentions repeat), the line above the composer says
-// so, and such a turn reads the same live and after a reload (`agent_addressed: false`).
+// with the recorded turn's `turn_id`, which its mentions repeat), no line above the composer says so
+// (operator 2026-11-10 23:02: "do not add the text above… remove that"), and such a turn reads the
+// same live and after a reload (`agent_addressed: false`).
+import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatComposer, WorkflowChat } from "../vendor/abstractchat/conversation.js";
+import { WorkflowChat } from "../vendor/abstractchat/conversation.js";
 import { conversationRestore } from "./conversation_restore";
 import { createWorkflowTransport } from "./session_transport";
 import { StreamGate } from "./stream_gate";
-import { MENTION_CHIP_SELECTOR, chipKindsIn } from "./mention_chip_kinds";
 import {
   AGENT_MENTION_ID,
-  AGENT_STAYS_OUT,
   agentCandidate,
-  agentHint,
   agentNotAddressed,
   conversationWorkflowTurn,
   entityMentions,
   filterMentionCandidates,
   isSideTurn,
-  mentionNoticeFor,
   mentionRepeatOf,
   mentionRequestBody,
   mentionRoster,
@@ -52,9 +50,9 @@ describe("the @ list offers the conversation's agent", () => {
     expect(filterMentionCandidates(roster, "bas").map((c) => c.id)).toEqual(["agent"]);
     expect(filterMentionCandidates(roster, "agent").map((c) => c.id)).toEqual(["agent"]);
   });
-  it("the agent's chip has no first-pick sentence (it already reads the conversation)", () => {
-    expect(mentionNoticeFor({ name: "Basic agent", kind: "agent" })).toBeNull();
-    expect(mentionNoticeFor({ name: "Castor", kind: "entity" })).toBe("Castor will read this conversation's history.");
+  it("no chip gets a first-pick sentence, the agent's or an entity's (operator 2026-11-10 23:02)", () => {
+    const lib = readFileSync(new URL("./mentions.ts", import.meta.url), "utf8");
+    expect(lib).not.toMatch(/will read this conversation|stays out of this message|export function (mentionNoticeFor|agentHint)/);
   });
 });
 
@@ -74,41 +72,21 @@ describe("the start names every chip in pick order, the agent's as `agent`", () 
   });
 });
 
-describe("the line above the composer", () => {
-  it("says the agent stays out for entities without the agent; nothing with the agent or no chip", () => {
-    expect(AGENT_STAYS_OUT).toBe("The agent stays out of this message.");
-    expect(agentHint(["entity"])).toBe(AGENT_STAYS_OUT);
-    expect(agentHint(["entity", "entity"])).toBe(AGENT_STAYS_OUT);
-    expect(agentHint(["entity", "agent"])).toBeNull();
-    expect(agentHint(["agent"])).toBeNull();
-    expect(agentHint([])).toBeNull();
+describe("no line above the composer (operator 2026-11-10 23:02: \"remove that\")", () => {
+  const app = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
+  it("the chat gets no first-pick sentence and no agent line; the last send's sentence alone", () => {
+    expect(app).not.toMatch(/mentionNotice=|agentHint|composerAgentHint|useComposerChipKinds/);
+    expect(app).toContain("mentionStatus={mentionStatus?.sessionId === session.sessionId ? mentionStatus.text : null}");
   });
-  it("reads the chips the kit renders (each chip's name carries its kind)", () => {
-    const html = renderToStaticMarkup(
-      <ChatComposer
-        value="@Castor @Basic agent hi"
-        onChange={() => {}}
-        onSend={() => {}}
-        mentionCandidates={async () => []}
-        mentions={[
-          { id: "castor", name: "Castor", kind: "entity", start: 0 },
-          { id: "agent", name: "Basic agent", kind: "agent", start: 8 },
-        ]}
-      />,
+  it("an entities-only message's chips show no row; a send's outcome still shows", () => {
+    const quiet = renderToStaticMarkup(
+      <WorkflowChat draft="@Castor hi" onDraftChange={() => {}} onSend={() => {}} messages={[]} mentionCandidates={async () => []} mentionStatus={null} />,
     );
-    // The selector's contract on the vendored kit: a chip name with its kind, one per chip. The
-    // chips sit in the text (panel-chat 0.9.12): each one's "@Name" at its `start`.
-    expect(MENTION_CHIP_SELECTOR).toBe(".pc-mention-chip__name[data-mention-kind]");
-    expect([...html.matchAll(/class="pc-mention-chip__name" data-mention-kind="(\w+)"/g)].map((m) => m[1])).toEqual(["entity", "agent"]);
-    const root = { querySelectorAll: (selector: string) => (selector === MENTION_CHIP_SELECTOR ? [{ getAttribute: () => "entity" }, { getAttribute: () => "agent" }] : []) };
-    expect(chipKindsIn(root as unknown as ParentNode)).toEqual(["entity", "agent"]);
-    expect(chipKindsIn(null)).toEqual([]);
-  });
-  it("shows as the kit's mention notice above the chips", () => {
-    const html = renderToStaticMarkup(
-      <WorkflowChat draft="" onDraftChange={() => {}} onSend={() => {}} messages={[]} mentionCandidates={async () => []} mentionStatus={AGENT_STAYS_OUT} />,
+    expect(quiet).not.toContain("pc-mention-notice");
+    const outcome = renderToStaticMarkup(
+      <WorkflowChat draft="" onDraftChange={() => {}} onSend={() => {}} messages={[]} mentionCandidates={async () => []} mentionStatus="Castor is in another conversation." />,
     );
-    expect(html).toMatch(/pc-mention-notice pc-mention-notice--status[^>]*>.*The agent stays out of this message\./);
+    expect(outcome).toMatch(/pc-mention-notice pc-mention-notice--status[^>]*>.*Castor is in another conversation\./);
   });
 });
 
