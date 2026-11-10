@@ -91,12 +91,13 @@ describe("the line above the composer", () => {
         onSend={() => {}}
         mentionCandidates={async () => []}
         mentions={[
-          { id: "castor", name: "Castor", kind: "entity" },
-          { id: "agent", name: "Basic agent", kind: "agent" },
+          { id: "castor", name: "Castor", kind: "entity", start: 0 },
+          { id: "agent", name: "Basic agent", kind: "agent", start: 8 },
         ]}
       />,
     );
-    // The selector's contract on the vendored kit: a chip name with its kind, one per chip.
+    // The selector's contract on the vendored kit: a chip name with its kind, one per chip. The
+    // chips sit in the text (panel-chat 0.9.12): each one's "@Name" at its `start`.
     expect(MENTION_CHIP_SELECTOR).toBe(".pc-mention-chip__name[data-mention-kind]");
     expect([...html.matchAll(/class="pc-mention-chip__name" data-mention-kind="(\w+)"/g)].map((m) => m[1])).toEqual(["entity", "agent"]);
     const root = { querySelectorAll: (selector: string) => (selector === MENTION_CHIP_SELECTOR ? [{ getAttribute: () => "entity" }, { getAttribute: () => "agent" }] : []) };

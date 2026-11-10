@@ -1,8 +1,10 @@
 // The kinds of the `@` chips the shared composer holds ("entity", "agent"), for the line above it
 // (`mentions.ts` agentHint, operator 2026-11-10). The kit's WorkflowChat keeps its chips to itself
 // (panel-chat 0.9.11 exposes no chip callback), so Code reads the chips it renders: each one is a
-// `.pc-mention-chip__name` carrying `data-mention-kind` (mention_chip_kinds.test.tsx pins that
-// markup on the vendored kit, so a kit that changes it turns the test red, never the line silent).
+// `.pc-mention-chip__name` carrying `data-mention-kind`; since panel-chat 0.9.12 the chips sit
+// inside the text (drawn by the composer's mirror over its textarea), with that same markup.
+// agent_mention.test.tsx pins it on the vendored kit, so a kit that changes it turns the test red,
+// never the line silent.
 import { useEffect, useState } from "react";
 
 /** The composer's chip names, one per chip, with their kind. */
