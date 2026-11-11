@@ -14,13 +14,15 @@ The backlog was re-seeded on 2026-09-26; the one earlier item (a Python-era prop
 
 | State | Items | IDs |
 |---|---|---|
-| Planned | 3 | 0001, 0002, 0003 |
+| Planned | 4 | 0001, 0002, 0003, 0031 |
 | Proposed | 7 | 0004, 0005, 0010, 0011, 0018, 0019, 0020 |
 | Completed | 20 | 0006, 0007, 0008, 0009, 0012, 0013, 0014, 0015, 0016, 0017, 0021, 0022, 0023, 0024, 0025, 0026, 0027, 0028, 0029, 0030 |
 | Deprecated | 0 |  |
 | Recurrent | 0 |  |
 
 ## Next Recommended Work
+
+- [0031](planned/0031_mention_answers_pending_bubbles_and_words_once.md) built 2026-11-11 (operator round 6): an entity's answer on its way is a bubble with its dots in the thread, never a composer line; the person's words show once before the answers. Waits for the operator's check; panel-chat 0.9.14 can draw the dots itself.
 
 - [0030](completed/0030_web_voice_docs_playback_and_sidebar_polish.md) completed 2026-10-31: compact app-scoped Voice, accurate automation labels, wider sidebar and shared Docs speaker; locally deployed across the apps. Registry release follow-up remains separate.
 

@@ -232,7 +232,7 @@ export type MentionPost = (mention: ChatMentionSent) => Promise<unknown>;
 export async function sendMentions(
   mentions: readonly ChatMentionSent[],
   post: MentionPost,
-  options: { signal?: AbortSignal; onAsking?: (mention: ChatMentionSent) => void } = {},
+  options: { signal?: AbortSignal; onAsking?: (mention: ChatMentionSent) => void; onAnswered?: (mention: ChatMentionSent, runId: string) => void } = {},
 ): Promise<MentionsOutcome> {
   const outcome: MentionsOutcome = { answered: [], skipped: [], stopped: null, unsent: [], aborted: false, unasked: [] };
   const ordered = uniqueMentions(entityMentions(mentions).sort((a, b) => a.index - b.index));
@@ -256,9 +256,44 @@ export async function sendMentions(
       outcome.unsent = ordered.slice(at);
       break;
     }
-    outcome.answered.push({ mention, runId: text(record(answer)?.run_id) });
+    const runId = text(record(answer)?.run_id);
+    outcome.answered.push({ mention, runId });
+    options.onAnswered?.(mention, runId);
   }
   return outcome;
+}
+
+/** An entity's answer on its way (operator round 6, 2026-11-11: "the 3 dancing dots in the chat
+ * itself, where the AI would answer, and with its @entity_name answering"): one per entity of the
+ * message, from the moment the mentions are asked; `runId` once its answer landed (the session turn
+ * the gateway recorded), so the bubble goes when that turn's reply is on screen. */
+export type PendingMention = { key: string; mention: ChatMentionSent; author: ChatAuthor; runId: string | null };
+
+/** The id prefix of a pending answer's bubble (the footer draws the dots for it). */
+export const PENDING_MENTION_ID = "pending-mention:";
+
+/** The pending answers of a message's entity mentions, in the order they are asked, each named as its
+ * final bubble will be (the entity's name and look from the `@` list). */
+export function pendingMentionsFor(message: string, mentions: readonly ChatMentionSent[], lookOf: (m: ChatMentionSent) => ChatAvatarLook | null | undefined): PendingMention[] {
+  return uniqueMentions(entityMentions(mentions).sort((a, b) => a.index - b.index)).map((m) => ({
+    key: `${message}:${m.index}`,
+    mention: m,
+    author: { kind: "entity", name: m.name, entity_id: null, identity_ref: null, avatar: lookOf(m) ?? null },
+    runId: null,
+  }));
+}
+
+/** The conversation with a bubble for each answer still on its way, after everything shown: the
+ * entity as author, the kit's live state ("answering"); none once its answer's turn shows a reply. */
+export function withPendingMentions(messages: ChatMessage[], pending: readonly PendingMention[]): ChatMessage[] {
+  if (!pending.length) return messages;
+  const shown = new Set(messages.filter((m) => m.role === "assistant" && m.runId).map((m) => m.runId as string));
+  const waiting = pending.filter((p) => !(p.runId && shown.has(p.runId)));
+  if (!waiting.length) return messages;
+  return [
+    ...messages,
+    ...waiting.map((p): ChatMessage => ({ id: `${PENDING_MENTION_ID}${p.key}`, role: "assistant", content: "", author: p.author, live: { callId: `${PENDING_MENTION_ID}${p.key}`, reasoning: "", label: "answering" } })),
+  ];
 }
 
 /**
@@ -414,15 +449,25 @@ export function noteRepeatsFrame(frame: { event?: string; data: string }, into: 
 }
 
 /**
- * The conversation without the prompts that repeat a turn SHOWN in it (`repeats`: run id -> the
- * turn it repeats): the person's words show once, on their own turn, and each entity's answer
- * follows. A repeat whose turn is not on screen keeps its words (else the question is gone).
- * The same array when nothing is folded.
+ * The conversation without the prompts that repeat a turn (`repeats`: run id -> the turn it repeats,
+ * the mention's `repeat_of`): the person's words show once and each entity's answer follows, in the
+ * order they came. A repeat whose turn is SHOWN folds; of the repeats of a turn NOT on screen (a
+ * message to entities only: its recorded turn has no run in the conversation), the first keeps the
+ * words and the others fold (operator round 6, 2026-11-11: "my message and then both of their
+ * messages"). The same array when nothing is folded.
  */
 export function foldRepeatedTurns(messages: ChatMessage[], repeats: ReadonlyMap<string, string>): ChatMessage[] {
   if (!repeats.size) return messages;
   const asked = new Set(messages.filter((m) => m.role === "user" && m.runId && !repeats.has(m.runId)).map((m) => m.runId as string));
-  const kept = messages.filter((m) => !(m.role === "user" && m.runId && asked.has(repeats.get(m.runId) ?? "")));
+  const worded = new Set<string>();
+  const kept = messages.filter((m) => {
+    if (m.role !== "user" || !m.runId) return true;
+    const of = repeats.get(m.runId);
+    if (!of) return true;
+    if (asked.has(of) || worded.has(of)) return false;
+    worded.add(of);
+    return true;
+  });
   return kept.length === messages.length ? messages : kept;
 }
 

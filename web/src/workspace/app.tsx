@@ -1,7 +1,7 @@
 import {WorkflowChat, useWorkflowSession, conversationSnapshot, playConversationCue, conversationReply, presentInteraction, mentionResend, mentionsStoppedError, type ChatAuthor, type ChatMentionCandidate, type ChatMentionSent, type ChatMessageMention, type MentionResend} from "../vendor/abstractchat/conversation.js";
 import { useConversationView } from "./conversation_view";
 import { mentionCard } from "./mention_card";
-import { MENTIONS_UNAVAILABLE, agentNotAddressed, conversationWorkflowTurn, entityCandidates, entityMentionCards, entityMentions, filterMentionCandidates, foldRepeatedTurns, isSideTurn, mentionMessageKey, mentionRepeatOf, mentionRequestBody, mentionRoster, mentionsSummary, sendMentions, sentMessageMentions, startRunMentions, startedTurn, withLiveAuthors, withSentMentions, type EntityMentionCard, type StartedTurn } from "./mentions";
+import { MENTIONS_UNAVAILABLE, agentNotAddressed, conversationWorkflowTurn, entityCandidates, entityMentionCards, entityMentions, filterMentionCandidates, foldRepeatedTurns, isSideTurn, mentionMessageKey, mentionRepeatOf, mentionRequestBody, mentionRoster, mentionsSummary, sendMentions, sentMessageMentions, startRunMentions, startedTurn, withLiveAuthors, withPendingMentions, withSentMentions, pendingMentionsFor, PENDING_MENTION_ID, type EntityMentionCard, type PendingMention, type StartedTurn } from "./mentions";
 import { guardedRunInput } from "./model_options_guard";
 import type { ModelOptions } from "@abstractframework/ui-kit";
 import type { IterationLimitApplied } from "@abstractframework/ui-kit";
@@ -147,7 +147,7 @@ import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
 import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
-import { READ_ALOUD_INITIAL, readAloudStep } from "@abstractframework/panel-chat";
+import { READ_ALOUD_INITIAL, readAloudStep, WorkingDots } from "@abstractframework/panel-chat";
 import { codeReadAloudInput } from "./read_aloud_input";
 import { TOOLS_MIGRATION_NOTICE, migrateLegacyTools, toolsMigrationKey } from "./tool_layers";
 import {
@@ -328,6 +328,8 @@ export function CodeWorkspace() {
   // mentions each turn this page started carried, by run (a sent message shows them as chips).
   const entityCards = useRef<{ identity: string; cards: Map<string, EntityMentionCard> } | null>(null);
   const sentMentions = useRef(new Map<string, ChatMessageMention[]>());
+  // The entities' answers on their way, one bubble each in the thread (their dots), by session.
+  const [pendingMentions, setPendingMentions] = useState<{ sessionId: string; entries: PendingMention[] } | null>(null);
   // Who is writing each live reply, from its stream frames (by run): the bubble is labelled before
   // the saved message, which carries its own author, replaces it.
   const liveAuthors = useRef(new Map<string, ChatAuthor>());
@@ -1311,6 +1313,12 @@ export function CodeWorkspace() {
     const askedBy = identityRef.current;
     const epoch = authEpoch.current;
     const here = () => sessionRef.current.sessionId === sessionId && identityRef.current === askedBy && authEpoch.current === epoch;
+    // Each entity's answer shows as a bubble with its dots where it will land, never as a line in
+    // the composer (operator round 6, 2026-11-11).
+    const cards = entityCards.current?.identity === askedBy ? entityCards.current.cards : null;
+    setPendingMentions({ sessionId, entries: pendingMentionsFor(message, mentions, (m) => cards?.get(m.id)?.avatar) });
+    const forThis = (update: (entries: PendingMention[]) => PendingMention[]) =>
+      setPendingMentions((now) => (now && now.sessionId === sessionId ? { sessionId, entries: update(now.entries) } : now));
     setMentioning(true);
     const outcome = await sendMentions(
       mentions,
@@ -1321,9 +1329,11 @@ export function CodeWorkspace() {
         }),
       {
         signal: options.signal,
-        onAsking: (mention) => { if (here()) setMentionStatus({ sessionId, text: `${mention.name} is answering…` }); },
+        onAnswered: (mention, runId) => forThis((entries) => entries.map((e) => (e.mention.id === mention.id && e.mention.index === mention.index ? { ...e, runId } : e))),
       },
     ).finally(() => setMentioning(false));
+    // A refused, stopped or unasked mention has no answer coming: its bubble goes.
+    forThis((entries) => entries.filter((e) => e.runId));
     if (identityRef.current !== askedBy || authEpoch.current !== epoch) return;
     for (const skipped of outcome.skipped) if (skipped.refusal.kind === "not_offerable") refusedEntities.current.add(skipped.mention.id);
     if (outcome.stopped?.refusal.kind === "unavailable") setMentionsOff(askedBy);
@@ -1363,6 +1373,8 @@ export function CodeWorkspace() {
     if (!followTurn) return;
     const done = () => {
       setFollowTurn(null);
+      // The conversation opens on the newest answer: every answered bubble is shown now.
+      setPendingMentions((now) => (now && now.sessionId === followTurn.sessionId ? null : now));
       setMentionStatus((now) => (now?.answered && now.sessionId === followTurn.sessionId ? null : now));
     };
     if (followTurn.sessionId !== session.sessionId || followTurn.identity !== identity || queue.length || session.runId === followTurn.runId) {
@@ -2391,7 +2403,7 @@ export function CodeWorkspace() {
                 attachmentScope={JSON.stringify([identity,session.sessionId])}
                 attachmentRun={{runId:session.runId,output:snapshot.run?.output}}
               streamReplies={streamReplies}
-              messages={
+              messages={withPendingMentions(
                 interaction?.kind === "tool-approval"
                   ? messages.filter(
                       (message) =>
@@ -2401,11 +2413,14 @@ export function CodeWorkspace() {
                             snapshot.interaction?.runId
                         ),
                     )
-                  : messages
-              }
+                  : messages,
+                pendingMentions?.sessionId === session.sessionId ? pendingMentions.entries : [],
+              )}
               messageProps={{
                 renderMentionCard: (mention) => mentionCard(mention, entityCards.current?.identity === identity ? entityCards.current.cards : null),
                 renderFooter: (message) => {
+                  // An answer on its way: its three dots in its bubble.
+                  if (String(message.id || "").startsWith(PENDING_MENTION_ID)) return <WorkingDots label={`${message.author?.name || "The entity"} is answering`} />;
                   const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
                   if (!status) return null;
                   const target = sessionReadTarget(message.kind === "attachments" ? [...messages,message] : messages, message.runId || "", status);
