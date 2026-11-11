@@ -1330,6 +1330,11 @@ export function CodeWorkspace() {
       {
         signal: options.signal,
         onAnswered: (mention, runId) => forThis((entries) => entries.map((e) => (e.mention.id === mention.id && e.mention.index === mention.index ? { ...e, runId } : e))),
+        // Refused but the next ones are still asked: its bubble goes and its sentence shows now.
+        onSkipped: (mention, refusal) => {
+          forThis((entries) => entries.filter((e) => !(e.mention.id === mention.id && e.mention.index === mention.index)));
+          if (here()) setMentionStatus({ sessionId, text: refusal.sentence });
+        },
       },
     ).finally(() => setMentioning(false));
     // A refused, stopped or unasked mention has no answer coming: its bubble goes.

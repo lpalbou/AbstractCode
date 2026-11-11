@@ -232,7 +232,14 @@ export type MentionPost = (mention: ChatMentionSent) => Promise<unknown>;
 export async function sendMentions(
   mentions: readonly ChatMentionSent[],
   post: MentionPost,
-  options: { signal?: AbortSignal; onAsking?: (mention: ChatMentionSent) => void; onAnswered?: (mention: ChatMentionSent, runId: string) => void } = {},
+  options: {
+    signal?: AbortSignal;
+    onAsking?: (mention: ChatMentionSent) => void;
+    onAnswered?: (mention: ChatMentionSent, runId: string) => void;
+    /** A refusal that does not stop the run (409, an entity's 404): said at once, its answer's
+     * bubble goes at once (review round 6 F3: it danced through the next entity's answer). */
+    onSkipped?: (mention: ChatMentionSent, refusal: MentionRefusal) => void;
+  } = {},
 ): Promise<MentionsOutcome> {
   const outcome: MentionsOutcome = { answered: [], skipped: [], stopped: null, unsent: [], aborted: false, unasked: [] };
   const ordered = uniqueMentions(entityMentions(mentions).sort((a, b) => a.index - b.index));
@@ -250,6 +257,7 @@ export async function sendMentions(
       const refusal = mentionRefusal(error, mention.name);
       if (refusal.kind === "elsewhere" || refusal.kind === "not_offerable") {
         outcome.skipped.push({ mention, refusal });
+        options.onSkipped?.(mention, refusal);
         continue;
       }
       outcome.stopped = { mention, refusal };

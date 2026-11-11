@@ -84,6 +84,20 @@ describe("an answer on its way is a bubble with its dots, not a line in the comp
     expect(landed).toEqual(["castor:m1"]);
   });
 
+  it("a refusal that does not stop the run takes its bubble away at once, before the next entity is asked (review F3)", async () => {
+    const events: string[] = [];
+    await sendMentions([castor, nerin], async (m) => {
+      events.push(`ask:${m.id}`);
+      if (m.id === "castor") throw Object.assign(new Error("busy"), { status: 409 });
+      return { run_id: "m2" };
+    }, {
+      onSkipped: (m, refusal) => events.push(`skip:${m.id}:${refusal.kind}`),
+      onAnswered: (m) => events.push(`answer:${m.id}`),
+    });
+    expect(events).toEqual(["ask:castor", "skip:castor:elsewhere", "ask:nerin", "answer:nerin"]);
+    expect(app).toMatch(/onSkipped: \(mention, refusal\) => \{\s*forThis\(\(entries\) => entries\.filter\(\(e\) => !\(e\.mention\.id === mention\.id && e\.mention\.index === mention\.index\)\)\);\s*if \(here\(\)\) setMentionStatus\(\{ sessionId, text: refusal\.sentence \}\);/);
+  });
+
   it("the app: no 'is answering' line, the bubbles in the thread, their dots in the footer, cleared on follow", () => {
     expect(app).not.toContain("is answering…");
     expect(app).toContain("setPendingMentions({ sessionId, entries: pendingMentionsFor(message, mentions, (m) => cards?.get(m.id)?.avatar) });");
