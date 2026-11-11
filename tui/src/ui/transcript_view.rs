@@ -1022,7 +1022,7 @@ pub(crate) enum VoiceIcon {
 /// final answers. `None` for every other item (no icon).
 pub(crate) fn speakable(item: &Item) -> Option<&str> {
     match item {
-        Item::User { text }
+        Item::User { text, .. }
         | Item::Assistant {
             text,
             final_answer: true,
@@ -1109,6 +1109,11 @@ pub(crate) fn user_card_bg(t: &TokenSet) -> Rgba {
 /// every other section delimiter once scrolled.
 struct UserCard {
     body: String,
+    /// The message's chips, byte ranges of `body` ([`chip_ranges`]): drawn in
+    /// the composer's chip style (accent on the raised ground, bold).
+    chips: Vec<(usize, usize)>,
+    chip_ink: Rgba,
+    chip_bg: Rgba,
     cap: usize,
     uncapped: bool,
     icon: VoiceIcon,
@@ -1150,6 +1155,7 @@ impl UserCard {
                     return;
                 }
                 let lines = spec.lines_at(rect.w);
+                let starts = line_starts(&spec.body, &lines);
                 let rows = lines.len().max(1) as i32;
                 let top = rect.y + 1;
                 let card = Rect::new(rect.x, top, rect.w, rows + 2);
@@ -1182,11 +1188,75 @@ impl UserCard {
                     } else {
                         spec.text_ink
                     };
-                    canvas.print(Point::new(rect.x + UserCard::LEFT, y), line, ink, spec.bg);
+                    let mut x = rect.x + UserCard::LEFT;
+                    for (run, chip) in chip_runs(line, starts[i], &spec.chips) {
+                        if chip {
+                            let style = Style::new()
+                                .fg(spec.chip_ink)
+                                .bg(spec.chip_bg)
+                                .attrs(abstracttui::render::Attrs::BOLD);
+                            canvas.print_styled(Point::new(x, y), &run, &style);
+                        } else {
+                            canvas.print(Point::new(x, y), &run, ink, spec.bg);
+                        }
+                        x += text::width(&run);
+                    }
                 }
             },
         ))
     }
+}
+
+/// The byte ranges of a message's chips in its text (operator round 6,
+/// 2026-11-11): each sent mention's `@name` at its `start`, kept only where
+/// the text holds exactly that (the offsets were checked at send).
+fn chip_ranges(body: &str, mentions: &[crate::transcript::SentMention]) -> Vec<(usize, usize)> {
+    mentions
+        .iter()
+        .filter_map(|m| {
+            let end = m.start + m.name.len() + 1;
+            (body.get(m.start..end) == Some(format!("@{}", m.name).as_str()))
+                .then_some((m.start, end))
+        })
+        .collect()
+}
+
+/// Where each wrapped line starts in `body` (byte offsets, in order): the
+/// lines are `body`'s own text, so each is found after the previous one.
+/// `None` for a line that is not `body`'s (the cap's marker line).
+fn line_starts(body: &str, lines: &[String]) -> Vec<Option<usize>> {
+    let mut at = 0usize;
+    lines
+        .iter()
+        .map(|line| {
+            let found = body.get(at..).and_then(|rest| rest.find(line.as_str()));
+            found.map(|off| {
+                at += off + line.len();
+                at - line.len()
+            })
+        })
+        .collect()
+}
+
+/// One wrapped line cut into runs of plain words and chip words (`true`),
+/// in order: a chip may span two lines (a name with a space wraps).
+fn chip_runs(line: &str, start: Option<usize>, chips: &[(usize, usize)]) -> Vec<(String, bool)> {
+    let Some(start) = start.filter(|_| !chips.is_empty()) else {
+        return vec![(line.to_string(), false)];
+    };
+    let mut runs: Vec<(String, bool)> = Vec::new();
+    for (i, ch) in line.char_indices() {
+        let at = start + i;
+        let chip = chips.iter().any(|&(a, b)| at >= a && at < b);
+        match runs.last_mut() {
+            Some((run, c)) if *c == chip => run.push(ch),
+            _ => runs.push((ch.to_string(), chip)),
+        }
+    }
+    if runs.is_empty() {
+        runs.push((String::new(), false));
+    }
+    runs
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,7 +1383,7 @@ pub(crate) fn cycle_slots(items: &[Item], open_keys: &[String], details: bool) -
                     owner[i] = Some(a);
                 }
             }
-            Item::User { text } => {
+            Item::User { text, .. } => {
                 cur = None;
                 turn_user = text;
                 ordinal = 0;
@@ -1646,10 +1716,16 @@ fn render_item(
         // The user's ask opens the turn as a tinted CARD (operator ask
         // 2026-10-10) — the one item findable at a glance while
         // scrolling, which a '═' rule shared with the answer was not.
-        Item::User { text: body } => Some(
+        Item::User {
+            text: body,
+            mentions,
+        } => Some(
             FeedItem::new().block(
                 UserCard {
                     body: body.clone(),
+                    chips: chip_ranges(body, mentions),
+                    chip_ink: t.accent,
+                    chip_bg: t.surface_raised,
                     cap: 200,
                     uncapped: details,
                     icon: voice_icon(&store, item),
@@ -2104,9 +2180,13 @@ fn fingerprint(item: &Item, store: &Store, expanded: bool, slot: &Slot) -> u64 {
         }
     }
     match item {
-        Item::User { text } => {
+        Item::User { text, mentions } => {
             h.byte(1);
             h.body(text);
+            for m in mentions {
+                h.u64(m.start as u64);
+                h.str(&m.name);
+            }
         }
         Item::Steer { text } => {
             h.byte(2);
@@ -2627,7 +2707,40 @@ pub fn live_reasoning_line(reasoning: &str) -> String {
 /// never outlives the turn's final answer or crosses into another run
 /// (the fold's root/finished state gates it, so a reset or a session
 /// switch hides stale bubbles even before the live state is rebound).
-pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
+/// The three dots of an answer on its way: one lit in turn (the kit's
+/// `WorkingDots` wave), a step every third tick of the run ticker (~0.36 s).
+pub fn answering_dots(frame: u64) -> &'static str {
+    ["•··", "·•·", "··•"][((frame / 3) % 3) as usize]
+}
+
+/// A mentioned entity's answer on its way (operator round 6, 2026-11-11):
+/// its bubble at the transcript's end, named as the answer will be (the
+/// entity's mark and name), "answering" and the three dots.
+pub fn pending_mention_item(
+    t: &TokenSet,
+    p: &crate::mention::PendingMention,
+    frame: u64,
+) -> FeedItem {
+    let author = abstracttui::widgets::ChatAuthor::new(
+        abstracttui::widgets::AuthorKind::Entity,
+        p.name.as_str(),
+    );
+    let mut spans = author_label(&author, t);
+    let (glyph, glyph_ink) = if spans.len() == 3 {
+        let (g, i) = spans.remove(0);
+        (g.trim_end().to_string(), i)
+    } else {
+        ("●".to_string(), t.accent)
+    };
+    let caption: String = spans.iter().map(|(s, _)| s.as_str()).collect();
+    let state = format!("answering {}", answering_dots(frame));
+    FeedItem::new().rich_block(RichText::from_lines(vec![
+        RichLine::new(),
+        header_line(&glyph, glyph_ink, &caption, t.text_muted, &state, t.accent),
+    ]))
+}
+
+pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState, spin: Signal<u64>) {
     #[derive(Default)]
     struct LiveSync {
         /// (call_id, content_gen) per rendered bubble, in feed order.
@@ -2636,6 +2749,10 @@ pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
         lens: Vec<usize>,
         /// (header fingerprint, finished) per bubble.
         heads: Vec<(u64, bool)>,
+        /// The pending mention answers drawn after the live bubbles.
+        pending: Vec<crate::mention::PendingMention>,
+        /// Their dots' step, redrawn only when it moves.
+        dots: u64,
         theme: &'static str,
     }
     let state = Rc::new(RefCell::new(LiveSync::default()));
@@ -2654,6 +2771,20 @@ pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
                 Vec::new()
             }
         });
+        // The mentioned entities' answers on their way in this conversation;
+        // the ticker is read only while there is one (its dots move).
+        let session = store.session_id.get();
+        let pending: Vec<crate::mention::PendingMention> = if agent {
+            store.pending_mentions.with(|p| {
+                p.iter()
+                    .filter(|m| m.session_id == session)
+                    .cloned()
+                    .collect()
+            })
+        } else {
+            Vec::new()
+        };
+        let frame = if pending.is_empty() { 0 } else { spin.get() };
         let head_fp = |e: &crate::live::LiveReply| -> (u64, bool) {
             let mut h = Fnv::new();
             h.str(&e.node_id);
@@ -2669,10 +2800,12 @@ pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
             .iter()
             .map(|e| (e.call_id.clone(), e.content_gen))
             .collect();
-        if keys != st.keys || theme.id != st.theme {
+        if keys != st.keys || theme.id != st.theme || pending != st.pending {
             feed.clear();
             st.theme = theme.id;
             st.keys = keys;
+            st.pending = pending.clone();
+            st.dots = frame / 3;
             st.lens.clear();
             st.heads.clear();
             for e in &entries {
@@ -2688,7 +2821,16 @@ pub fn wire_live_feed(cx: Scope, store: Store, live_feed: &FeedState) {
                 st.lens.push(e.content.len());
                 st.heads.push(head_fp(e));
             }
+            for (k, p) in pending.iter().enumerate() {
+                feed.push(format!("p:{k}"), pending_mention_item(&t, p, frame));
+            }
             return;
+        }
+        if frame / 3 != st.dots {
+            st.dots = frame / 3;
+            for (k, p) in pending.iter().enumerate() {
+                feed.update(&format!("p:{k}"), pending_mention_item(&t, p, frame));
+            }
         }
         for (i, e) in entries.iter().enumerate() {
             let sk = format!("s:{}", e.call_id);
@@ -3779,7 +3921,7 @@ mod tests {
                 sandbox: None,
             };
             let items = vec![
-                Item::User { text: "q".into() },
+                Item::user("q".into()),
                 Item::Steer { text: "s".into() },
                 Item::Thinking {
                     iteration: 1,
@@ -3957,7 +4099,7 @@ mod tests {
     #[test]
     fn cycle_slots_group_calls_under_their_cycle_and_stop_at_turn_boundaries() {
         let items = vec![
-            Item::User { text: "q".into() },
+            Item::user("q".into()),
             tool_item("orphan", ToolStatus::Ok),
             thinking(1, "first"),
             tool_item("t1", ToolStatus::Ok),
@@ -4046,7 +4188,7 @@ mod tests {
         let items = vec![
             thinking(1, "a"),
             tool_item("t1", ToolStatus::Ok),
-            Item::User { text: "q2".into() },
+            Item::user("q2".into()),
             tool_item("t2", ToolStatus::Ok),
         ];
         let slots = cycle_slots(&items, &[], false);
@@ -4063,7 +4205,7 @@ mod tests {
     fn cycle_keys_differ_across_turns_with_identical_cycles() {
         let turn = |user: &str, call: &str| {
             vec![
-                Item::User { text: user.into() },
+                Item::user(user.into()),
                 thinking(1, ""),
                 tool_item(call, ToolStatus::Ok),
                 Item::Assistant {
@@ -4251,11 +4393,74 @@ mod tests {
 
     /// The user card's declared height covers every row it paints: the
     /// lead blank, both pad rows, and one row per wrapped line.
+    /// Operator round 6 (2026-11-11): a sent message's chips are drawn in its
+    /// card where the composer placed them, a chip that wraps on both lines.
+    #[test]
+    fn a_message_card_draws_its_chips_where_they_were_sent() {
+        let body = "hey @Castor and @Basic agent, the plan?";
+        let mentions = vec![
+            crate::transcript::SentMention {
+                name: "Castor".into(),
+                kind: abstracttui::widgets::MentionKind::Entity,
+                start: 4,
+            },
+            crate::transcript::SentMention {
+                name: "Basic agent".into(),
+                kind: abstracttui::widgets::MentionKind::Agent,
+                start: 16,
+            },
+            // An offset that is not its `@name`: drawn plain.
+            crate::transcript::SentMention {
+                name: "Vega".into(),
+                kind: abstracttui::widgets::MentionKind::Entity,
+                start: 0,
+            },
+        ];
+        let chips = chip_ranges(body, &mentions);
+        assert_eq!(chips, vec![(4, 11), (16, 28)]);
+        let lines = vec![
+            "hey @Castor and @Basic".to_string(),
+            "agent, the plan?".to_string(),
+        ];
+        let starts = line_starts(body, &lines);
+        assert_eq!(starts, vec![Some(0), Some(23)]);
+        assert_eq!(
+            chip_runs(&lines[0], starts[0], &chips),
+            vec![
+                ("hey ".to_string(), false),
+                ("@Castor".to_string(), true),
+                (" and ".to_string(), false),
+                ("@Basic".to_string(), true)
+            ]
+        );
+        assert_eq!(
+            chip_runs(&lines[1], starts[1], &chips),
+            vec![
+                ("agent".to_string(), true),
+                (", the plan?".to_string(), false)
+            ]
+        );
+        // No chips, or a line not of the body (the cap's marker): one plain run.
+        assert_eq!(
+            chip_runs("… (+3 lines)", None, &chips),
+            vec![("… (+3 lines)".to_string(), false)]
+        );
+        assert_eq!(
+            chip_runs("plain", Some(0), &[]),
+            vec![("plain".to_string(), false)]
+        );
+        // A plain message draws no chip at all.
+        assert!(chip_ranges("hey @Castor", &[]).is_empty());
+    }
+
     #[test]
     fn user_card_height_covers_its_rows() {
         let t = abstracttui::theme::themes()[0].tokens;
         let card = |body: &str| UserCard {
             body: body.into(),
+            chips: Vec::new(),
+            chip_ink: t.accent,
+            chip_bg: t.surface_raised,
             cap: 200,
             uncapped: false,
             icon: VoiceIcon::Idle,

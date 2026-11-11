@@ -165,9 +165,7 @@ impl Harness {
     /// as the emission under test.
     fn leave_splash(&mut self) {
         self.store.fold.update(|f| {
-            f.push_item(abstractcode::transcript::Item::User {
-                text: "settle".into(),
-            });
+            f.push_item(abstractcode::transcript::Item::user("settle".into()));
         });
         for _ in 0..3 {
             self.turn();
@@ -310,11 +308,9 @@ fn splash_logo_centers_and_animates_only_while_visible() {
     assert!(emitted_any, "the splash shimmer re-emits while visible");
     // Conversation starts: the splash predicate flips, the ticker
     // cancels, and the app is byte-idle again even across a tick period.
-    h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "first task".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(abstractcode::transcript::Item::user("first task".into())));
     for _ in 0..6 {
         h.turn();
     }
@@ -1107,9 +1103,9 @@ fn details_toggle_keeps_thinking_visible_and_start_carries_no_client_history() {
     let store = h.store;
     // A finished first turn in the fold.
     store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "first question".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user(
+            "first question".into(),
+        ));
         f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 1,
             content: "let me think about xyzzy".into(),
@@ -2061,9 +2057,7 @@ fn details_command_immediately_rerenders_mixed_content() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "run the suite".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("run the suite".into()));
         f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 1,
             content: "pondering the xyzzy strategy".into(),
@@ -2215,7 +2209,7 @@ fn cycle_panels_anchor_on_click_and_hit_their_drawn_rows() {
     h.turn();
     h.store.fold.update(|f| {
         f.begin_run("r");
-        f.push_item(Item::User { text: "ask".into() });
+        f.push_item(Item::user("ask".into()));
         for n in 1..=40u32 {
             f.push_item(Item::Thinking {
                 iteration: n,
@@ -2357,9 +2351,7 @@ fn one_blank_row_between_a_header_and_its_words() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "who?".into(),
-        });
+        f.push_item(Item::user("who?".into()));
         f.push_item(Item::Thinking {
             iteration: 1,
             content: "CYCLEWORDS here".into(),
@@ -3096,9 +3088,7 @@ fn session_pick_shows_the_animated_loading_screen_until_history_lands() {
     // probe_attach's order: the loading surface hands off to the
     // restored transcript, never to a splash flash.
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "prior turn".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("prior turn".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "prior answer".into(),
             final_answer: true,
@@ -3145,9 +3135,9 @@ fn right_click_on_a_tool_row_opens_its_action_menu() {
         // Enough content to scroll: the mapping is only meaningful
         // once the viewport shows a window, not the whole fold.
         for i in 0..40 {
-            f.push_item(abstractcode::transcript::Item::User {
-                text: format!("filler line {i}"),
-            });
+            f.push_item(abstractcode::transcript::Item::user(format!(
+                "filler line {i}"
+            )));
         }
         f.push_item(abstractcode::transcript::Item::Tool {
             key: "t1".into(),
@@ -3987,9 +3977,7 @@ fn feed_order_survives_mid_list_visibility_flips() {
     store.show_details.set(false); // collapsed view: probe bodies hidden
     store.fold.update(|f| f.begin_run("root"));
     store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "AAA-question".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("AAA-question".into()));
         // A probe body between the two visible items: hidden now.
         f.push_item(abstractcode::transcript::Item::Probe {
             title: "zz_marker_probe".into(),
@@ -4051,9 +4039,7 @@ fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
     let mut h = harness();
     h.turn();
     let store = h.store;
-    let user = |i: usize| Item::User {
-        text: format!("item-{i:04}"),
-    };
+    let user = |i: usize| Item::user(format!("item-{i:04}"));
     // Phase A: exactly MAX_ITEMS items, observed — the sync's seen list
     // is full-length with no drain yet.
     store.fold.update(|f| {
@@ -4089,7 +4075,7 @@ fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
         "each drain cuts back to MAX_ITEMS"
     );
     let oldest_survivor = store.fold.with_untracked(|f| match &f.items[1] {
-        Item::User { text } => text.clone(),
+        Item::User { text, .. } => text.clone(),
         other => panic!("expected the oldest surviving user card, got {other:?}"),
     });
     assert_eq!(oldest_survivor, format!("item-{:04}", TRUNCATE_CHUNK + 2));
@@ -4150,7 +4136,7 @@ fn truncation_drains_keep_the_feed_in_sync_with_fold_order() {
         "the second drain also cuts back to MAX_ITEMS"
     );
     let oldest_survivor = store.fold.with_untracked(|f| match &f.items[1] {
-        Item::User { text } => text.clone(),
+        Item::User { text, .. } => text.clone(),
         other => panic!("expected the oldest surviving user card, got {other:?}"),
     });
     let screen = h.turn();
@@ -4190,9 +4176,9 @@ fn details_shrink_while_scrolled_up_never_blanks_the_pane() {
         .collect::<Vec<_>>()
         .join("\n");
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "FIRST-QUESTION".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user(
+            "FIRST-QUESTION".into(),
+        ));
         for i in 0..40 {
             f.push_item(abstractcode::transcript::Item::Thinking {
                 iteration: i + 1,
@@ -4259,9 +4245,9 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     // (review correction, 2026-07-22).
     h.store.fold.update(|f| {
         for i in 0..60 {
-            f.push_item(abstractcode::transcript::Item::User {
-                text: format!("filler line {i}"),
-            });
+            f.push_item(abstractcode::transcript::Item::user(format!(
+                "filler line {i}"
+            )));
         }
     });
     h.turn();
@@ -4311,9 +4297,7 @@ fn session_switch_while_scrolled_up_shows_the_new_transcript() {
     // offset — the shrink clamp must snap back into content instead of
     // leaving a blank pane (follow is still disengaged from the PageUps).
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "RESTORED-TURN".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("RESTORED-TURN".into()));
     });
     h.turn();
     h.turn();
@@ -5314,9 +5298,7 @@ fn queue_drains_next_as_a_new_run_in_the_same_session() {
     store.run_id.set("rootA".into());
     store.fold.update(|f| {
         f.begin_run("rootA");
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "first task".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("first task".into()));
         let rec = serde_json::json!({"run_id": "rootA", "node_id": "end", "status": "completed",
                                       "result": {"output": {"answer": "first answer"}}});
         let _ = f.apply("rootA", &rec);
@@ -6101,9 +6083,7 @@ fn assistant_answer_tables_typeset_instead_of_raw_pipes() {
     h.turn();
     let store = h.store;
     store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "compare".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("compare".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "Here:\n\n| crate | tests |\n| --- | --- |\n| abstracttui | 1660 |\n".into(),
             final_answer: true,
@@ -8362,9 +8342,9 @@ fn export_command_writes_markdown_and_refuses_overwrite() {
 
     // Seed one complete turn + a tool, then export to an explicit path.
     store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "write hello.txt".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user(
+            "write hello.txt".into(),
+        ));
         f.push_item(abstractcode::transcript::Item::Tool {
             key: "k1".into(),
             name: "write_file".into(),
@@ -8444,7 +8424,7 @@ fn export_jsonl_details_writes_training_lines() {
     h.turn();
     let store = h.store;
     store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User { text: "q1".into() });
+        f.push_item(abstractcode::transcript::Item::user("q1".into()));
         f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 1,
             content: String::new(),
@@ -8458,9 +8438,7 @@ fn export_jsonl_details_writes_training_lines() {
         });
         // A dangling second prompt (no answer): skipped from the file,
         // counted in the notice.
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "q2-unanswered".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("q2-unanswered".into()));
     });
     h.turn();
     let dir = export_scratch_dir();
@@ -9812,9 +9790,7 @@ fn scrolled_up_renders_on_the_strip_and_esc_jump_never_arms_cancel() {
     h.store.run_id.set("run-1".into());
     h.store.fold.update(|f| {
         f.begin_run("run-1");
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "long task".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("long task".into()));
         for i in 0..40 {
             f.push_item(abstractcode::transcript::Item::Assistant {
                 text: format!("progress line {i}"),
@@ -10042,9 +10018,7 @@ fn strip_names_cycle_intent_from_the_models_own_words() {
     h.store.run_id.set("r1".into());
     h.store.fold.update(|f| {
         f.begin_run("r1");
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "task".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("task".into()));
         // Cycle 1 starts + its result lands (the gist source).
         f.apply(
             "r1",
@@ -10125,7 +10099,7 @@ fn arm_live_run(h: &mut Harness) {
     h.store.run_id.set("run-quit-test-0001".into());
     h.store.fold.update(|f| {
         f.begin_run("run-quit-test-0001");
-        f.push_item(abstractcode::transcript::Item::User { text: "t".into() });
+        f.push_item(abstractcode::transcript::Item::user("t".into()));
     });
 }
 
@@ -10638,9 +10612,7 @@ fn scroll_to_top_autoloads_previous_history_bloc_with_progress() {
         f.push_item(abstractcode::transcript::Item::Info {
             text: abstractcode::runner::history_stub_text(3),
         });
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "recent task".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("recent task".into()));
         for i in 0..40 {
             f.push_item(abstractcode::transcript::Item::Assistant {
                 text: format!("line {i}"),
@@ -10684,9 +10656,7 @@ fn scroll_to_top_autoloads_previous_history_bloc_with_progress() {
     h.store.fold.update(|f| {
         abstractcode::runner::prepend_history_items(
             f,
-            vec![abstractcode::transcript::Item::User {
-                text: "an older task".into(),
-            }],
+            vec![abstractcode::transcript::Item::user("an older task".into())],
             2,
         );
     });
@@ -10734,7 +10704,7 @@ fn pageup_on_a_fitting_transcript_never_autoloads_history() {
         f.push_item(abstractcode::transcript::Item::Info {
             text: abstractcode::runner::history_stub_text(3),
         });
-        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::user("hi".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "short answer".into(),
             final_answer: true,
@@ -10960,9 +10930,7 @@ fn thinking_cards_fold_by_default_and_expand_with_details_on() {
     h.turn();
     h.store.fold.update(|f| {
         f.begin_run("root");
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "task".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("task".into()));
         f.push_item(abstractcode::transcript::Item::Thinking {
             iteration: 3,
             content: "I will edit the file next.".into(),
@@ -11099,7 +11067,7 @@ fn typing_off_the_composer_recovers_focus_and_keeps_the_first_character() {
     // A conversation (not the splash) is what mounts the scrollable
     // transcript the keyboard can wander into.
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::user("hi".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
@@ -11139,7 +11107,7 @@ fn typing_after_a_click_in_the_transcript_recovers_focus() {
     h.turn();
     abstracttui::app::selection::selection().set_enabled(true);
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::user("hi".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "a line worth clicking".into(),
             final_answer: true,
@@ -11178,7 +11146,7 @@ fn a_slash_typed_off_the_composer_opens_the_command_dropdown() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::user("hi".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
@@ -11204,7 +11172,7 @@ fn pasted_text_off_the_composer_lands_in_the_draft_and_recovers_focus() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::user("hi".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
@@ -11238,7 +11206,7 @@ fn a_file_dropped_on_the_transcript_stages_a_chip_and_recovers_focus() {
     let mut h = harness();
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::user("hi".into()));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "hello there".into(),
             final_answer: true,
@@ -11284,9 +11252,7 @@ fn type_to_focus_leaves_navigation_and_ctrl_chords_alone() {
                 text: format!("line {i}"),
             });
         }
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "the tail card".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user("the tail card".into()));
     });
     // Three pumps: width discovery, extent sync, and the feed's gap-flip
     // geometry round (see truncation_drains… for the settle contract).
@@ -11335,7 +11301,7 @@ fn the_activity_strip_shows_a_moving_wave_while_a_run_is_live() {
     h.store.run_id.set("root".into());
     h.store.fold.update(|f| f.begin_run("root"));
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User { text: "hi".into() });
+        f.push_item(abstractcode::transcript::Item::user("hi".into()));
     });
 
     let wave_row = |screen: &str| -> Option<String> {
@@ -11385,9 +11351,7 @@ fn gallery_fold(store: &Store) {
     use abstractcode::transcript::{CallCost, Item, ToolStatus};
     store.fold.update(|f| {
         f.begin_run("root");
-        f.push_item(Item::User {
-            text: "the game freezes after level 3 — find the root cause and fix it".into(),
-        });
+        f.push_item(Item::user("the game freezes after level 3 — find the root cause and fix it".into()));
         f.push_item(Item::Thinking {
             iteration: 5,
             content: "I've found the root cause. Let me read the rest of `game.js` to see the full picture before deciding on the fix.".into(),
@@ -11545,9 +11509,9 @@ fn composer_grows_to_four_rows_and_keeps_the_caret_row_visible() {
     // the exact condition under which the crush appeared live.
     h.store.fold.update(|f| {
         for i in 0..60 {
-            f.push_item(abstractcode::transcript::Item::User {
-                text: format!("history line {i}"),
-            });
+            f.push_item(abstractcode::transcript::Item::user(format!(
+                "history line {i}"
+            )));
         }
     });
     for _ in 0..3 {
@@ -11767,9 +11731,7 @@ fn details_mode_truncates_nothing() {
     let tool_error = lines("err-line", 40, "TAIL-OF-TOOLERROR");
     h.store.fold.update(|f| {
         use abstractcode::transcript::Item;
-        f.push_item(Item::User {
-            text: lines("u-line", 300, "TAIL-OF-USER"),
-        });
+        f.push_item(Item::user(lines("u-line", 300, "TAIL-OF-USER")));
         f.push_item(Item::Steer {
             text: lines("s-line", 80, "TAIL-OF-STEER"),
         });
@@ -11871,11 +11833,11 @@ fn folded_view_stays_a_bounded_labelled_summary() {
     h.turn();
     h.store.fold.update(|f| {
         use abstractcode::transcript::Item;
-        f.push_item(Item::User {
-            text: (1..=300)
+        f.push_item(Item::user(
+            (1..=300)
                 .map(|i| format!("u-line-{i}\n"))
                 .collect::<String>(),
-        });
+        ));
         f.push_item(Item::Tool {
             key: "call:1".into(),
             name: "broken_tool".into(),
@@ -13356,9 +13318,9 @@ fn start_live_turn(h: &mut Harness) {
     store.run_id.set("root".into());
     store.fold.update(|f| {
         f.begin_run("root");
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "explain streaming".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user(
+            "explain streaming".into(),
+        ));
     });
     h.turn();
 }

@@ -36,7 +36,7 @@ pub fn items_for(item: &Item, root: Option<&str>) -> Vec<ContextMenuItem> {
     // ENABLED row can never resolve to nothing (that pairing is what
     // keeps `act`'s notice honest — see `blank`).
     match item {
-        Item::User { text } | Item::Steer { text } => {
+        Item::User { text, .. } | Item::Steer { text } => {
             out.push(ContextMenuItem::new("copy", "Copy message").disabled(blank(text)));
             out.push(ContextMenuItem::new("quote", "Quote in composer").disabled(blank(text)));
         }
@@ -96,7 +96,7 @@ pub fn items_for(item: &Item, root: Option<&str>) -> Vec<ContextMenuItem> {
 /// acting on nothing beats acting on the wrong thing).
 pub fn payload(item: &Item, key: &str, root: Option<&str>) -> Option<(&'static str, String)> {
     match (item, key) {
-        (Item::User { text } | Item::Steer { text }, "copy" | "quote") => {
+        (Item::User { text, .. } | Item::Steer { text }, "copy" | "quote") => {
             (!blank(text)).then(|| ("message", text.clone()))
         }
         (Item::Assistant { text, .. }, "copy" | "quote") => {
@@ -238,7 +238,7 @@ mod tests {
         );
         assert_eq!(payload(&t, "copy-error", None), None, "no error to copy");
         assert_eq!(payload(&t, "quote", None), None, "tools do not quote");
-        let user = Item::User { text: "hi".into() };
+        let user = Item::user("hi".into());
         assert_eq!(payload(&user, "copy", None), Some(("message", "hi".into())));
     }
 
@@ -271,7 +271,7 @@ mod tests {
         );
         // Same rule on every other lane that reaches the clipboard.
         for item in [
-            Item::User { text: "  ".into() },
+            Item::user("  ".into()),
             Item::Info {
                 text: "\t\n".into(),
             },

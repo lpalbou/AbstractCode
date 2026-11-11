@@ -28,11 +28,9 @@ fn harness() -> Harness {
     app.mount(move |cx| {
         let store = Store::create(cx);
         store.session_id.set("entry-session".into());
-        store.fold.update(|f| {
-            f.push_item(Item::User {
-                text: "Main conversation request".into(),
-            })
-        });
+        store
+            .fold
+            .update(|f| f.push_item(Item::user("Main conversation request".into())));
         for (scope, answer, draft) in [
             (
                 ChatScope::Docs,
@@ -267,9 +265,7 @@ fn a_side_question_sends_the_history_window_and_shows_what_it_left_out() {
             final_answer: true,
             author: None,
         });
-        f.push_item(Item::User {
-            text: "Newest request".into(),
-        });
+        f.push_item(Item::user("Newest request".into()));
     });
     h.open(ChatScope::Run);
     h.term.push_input(b"\r");

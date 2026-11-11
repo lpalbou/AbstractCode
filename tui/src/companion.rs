@@ -153,7 +153,7 @@ pub fn semantic_revision(session: &str, run: &str, items: &[Item], phase: Phase)
     let mut has_messages = false;
     for item in items.iter().rev() {
         let (role, text) = match item {
-            Item::User { text } => (0u8, text),
+            Item::User { text, .. } => (0u8, text),
             Item::Steer { text } => (1, text),
             Item::Assistant { text, .. } => (2, text),
             Item::Error { text } => (3, text),
@@ -414,9 +414,7 @@ mod tests {
     #[test]
     fn semantic_revision_ignores_tool_and_private_reasoning_changes() {
         let mut items = vec![
-            Item::User {
-                text: "question".into(),
-            },
+            Item::user("question".into()),
             Item::Assistant {
                 text: "answer".into(),
                 final_answer: true,

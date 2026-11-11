@@ -179,7 +179,7 @@ pub fn snap(store: Store, ctx: &UiCtx, binding: &Binding, tracked: bool) -> Snap
     let title = items
         .iter()
         .find_map(|i| match i {
-            Item::User { text } => Some(crate::conversations::card_title(text, "")),
+            Item::User { text, .. } => Some(crate::conversations::card_title(text, "")),
             _ => None,
         })
         .unwrap_or_else(|| crate::conversations::card_title("", &store.session_id.get_untracked()));

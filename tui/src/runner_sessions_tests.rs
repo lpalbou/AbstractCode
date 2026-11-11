@@ -129,9 +129,7 @@ fn a_restored_mention_turn_reads_its_reply_from_the_run() {
         "only the mention is read"
     );
     let mut fold = crate::transcript::Fold::new();
-    fold.push_item(Item::User {
-        text: "@Castor does it hold?".into(),
-    });
+    fold.push_item(Item::user("@Castor does it hold?".into()));
     restore_mention_reply(&mut fold, &plain, &snaps, 0);
     assert_eq!(fold.items.len(), 1, "not a mention turn: nothing appended");
     restore_mention_reply(&mut fold, &row, &snaps, 0);

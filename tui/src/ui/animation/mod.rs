@@ -434,7 +434,7 @@ impl Feed {
             // The brief: the user's own words anchor the drift field and
             // are the only free text on this pane the RUN did not write.
             for item in f.items.iter().take(4) {
-                if let Item::User { text } = item {
+                if let Item::User { text, .. } = item {
                     for word in text.split_whitespace().take(40) {
                         if let Some(w) = safe_label(word) {
                             drift::absorb_term(&mut self.terms, &w, 2.5, 0.0);

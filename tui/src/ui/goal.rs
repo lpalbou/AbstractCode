@@ -80,7 +80,7 @@ fn start_goal_run(store: Store, ctx: &UiCtx, text: &str) {
     });
     // Chips never ride goal runs (v1) — say so while they wait.
     crate::ui::attachments::note_kept_for_goal(store);
-    send_start(store, ctx, workflow, text, opts, Vec::new());
+    send_start(store, ctx, workflow, text, opts, Vec::new(), Vec::new());
     if store.phase.get_untracked() == Phase::Idle {
         return; // synchronous refusal (dead worker): nothing to track
     }

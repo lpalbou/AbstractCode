@@ -552,9 +552,7 @@ pub fn occurrences_as_chat(
             label: auto::occurrence_header(o),
         });
         if !o.user_turn.is_empty() {
-            out.push(ChatEntry::Item(Box::new(Item::User {
-                text: o.user_turn.clone(),
-            })));
+            out.push(ChatEntry::Item(Box::new(Item::user(o.user_turn.clone()))));
         }
         if !o.answer.is_empty() {
             out.push(ChatEntry::Item(Box::new(Item::Assistant {
@@ -1588,9 +1586,7 @@ mod tests {
         }
         assert_eq!(
             entries[1],
-            ChatEntry::Item(Box::new(crate::transcript::Item::User {
-                text: "check".into()
-            }))
+            ChatEntry::Item(Box::new(crate::transcript::Item::user("check".into())))
         );
         assert_eq!(
             entries[2],

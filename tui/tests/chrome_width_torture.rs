@@ -709,9 +709,7 @@ fn approval_and_question_waits_stay_open_on_outside_click_without_any_decision()
     // A transcript long enough to scroll behind the modal.
     h.store.fold.update(|f| {
         for i in 0..120 {
-            f.push_item(Item::User {
-                text: format!("transcript line {i:03}"),
-            });
+            f.push_item(Item::user(format!("transcript line {i:03}")));
         }
     });
     for _ in 0..3 {
@@ -970,9 +968,9 @@ fn run_questions_capture_loaded_context_without_steering_or_crossing_docs_histor
     h.turn();
     h.store.fold.update(|f| {
         f.begin_run("active-root");
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "Find the parser problem".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user(
+            "Find the parser problem".into(),
+        ));
     });
     h.store.phase.set(abstractcode::store::Phase::Running);
     h.store.run_id.set("active-root".into());
@@ -1019,9 +1017,9 @@ fn docs_questions_include_fresh_visible_conversation_even_with_cached_documentat
     let mut h = harness_sized(240, 40);
     h.turn();
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "Todays AI news".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user(
+            "Todays AI news".into(),
+        ));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "The visible news summary".into(),
             final_answer: true,
@@ -1051,9 +1049,9 @@ fn docs_questions_include_fresh_visible_conversation_even_with_cached_documentat
         s.corpus = Some("Cached product docs".into());
     });
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "A newer visible request".into(),
-        })
+        f.push_item(abstractcode::transcript::Item::user(
+            "A newer visible request".into(),
+        ))
     });
     h.turn();
     h.term.push_input(b"What changed?\r");

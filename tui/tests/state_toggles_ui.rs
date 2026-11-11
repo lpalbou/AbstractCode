@@ -102,11 +102,9 @@ fn harness(size: Size) -> Harness {
         store,
         rx,
     };
-    h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "settle".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(abstractcode::transcript::Item::user("settle".into())));
     for _ in 0..3 {
         h.turn();
     }

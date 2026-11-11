@@ -1324,6 +1324,9 @@ pub struct Store {
     /// back with only the unsent chips, and what a resend of that exact
     /// draft asks (client review 2026-11-09 B2). Any other send drops it.
     pub mention_retry: Signal<Option<crate::gateway::mentions::Unsent>>,
+    /// The mentioned entities' answers on their way, in send order: one
+    /// bubble each at the transcript's end (`mention::PendingMention`).
+    pub pending_mentions: Signal<Vec<crate::mention::PendingMention>>,
 }
 
 impl Store {
@@ -1454,6 +1457,7 @@ impl Store {
             mcp_info: cx.signal(Default::default()),
             mentions_off: cx.signal(false),
             mention_retry: cx.signal(None),
+            pending_mentions: cx.signal(Vec::new()),
         }
     }
 

@@ -436,7 +436,11 @@ pub fn send_mentions(
         return;
     }
     let session_id = store.session_id.get_untracked();
-    store.notify(format!("asking {}", names_of(&calls)));
+    // Each entity's answer on its way is a bubble in the transcript (its
+    // dots), never a line above the box (operator round 6, 2026-11-11).
+    store
+        .pending_mentions
+        .update(|p| p.extend(crate::mention::pending_for(&session_id, &calls)));
     ctx.send(Cmd::Mentions {
         session_id,
         text: text.to_string(),
@@ -474,7 +478,9 @@ pub fn resend_mentions(
         store.notify(format!("{}.", crate::mention::NOT_OFFERED));
         return;
     }
-    store.notify(format!("asking {} again", names_of(&held.calls)));
+    store
+        .pending_mentions
+        .update(|p| p.extend(crate::mention::pending_for(&held.session_id, &held.calls)));
     ctx.send(Cmd::Mentions {
         session_id: held.session_id,
         text: held.text,

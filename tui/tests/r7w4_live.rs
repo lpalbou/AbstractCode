@@ -246,11 +246,9 @@ fn live(size: Size) -> Live {
         tx,
         size,
     };
-    l.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "r7w4 drive".into(),
-        })
-    });
+    l.store
+        .fold
+        .update(|f| f.push_item(abstractcode::transcript::Item::user("r7w4 drive".into())));
     for _ in 0..3 {
         l.turn();
     }

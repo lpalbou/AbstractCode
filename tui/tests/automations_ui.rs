@@ -102,9 +102,9 @@ fn harness_sized(size: Size) -> Harness {
     };
     // Leave the animated splash (a conversation item) so frames settle.
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "report the free memory of this computer".into(),
-        })
+        f.push_item(abstractcode::transcript::Item::user(
+            "report the free memory of this computer".into(),
+        ))
     });
     for _ in 0..3 {
         h.turn();
@@ -612,9 +612,9 @@ fn discuss_forks_a_finished_run_and_switches_this_terminal_to_it() {
     // "seeded by the gateway") — the tag-gate B1 regression.
     h.store.phase.set(abstractcode::store::Phase::Idle);
     h.store.fold.update(|f| {
-        f.push_item(abstractcode::transcript::Item::User {
-            text: "what changed since #5?".into(),
-        });
+        f.push_item(abstractcode::transcript::Item::user(
+            "what changed since #5?".into(),
+        ));
         f.push_item(abstractcode::transcript::Item::Assistant {
             text: "the inbox rule changed".into(),
             final_answer: true,

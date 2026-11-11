@@ -363,7 +363,7 @@ pub fn root(cx: Scope, store: Store, ctx: UiCtx, actions: &abstracttui::app::Act
         &feed,
         ctx.workspace_root.as_deref().map(std::rc::Rc::from),
     );
-    transcript_view::wire_live_feed(cx, store, &live_feed);
+    transcript_view::wire_live_feed(cx, store, &live_feed, spin);
     entity_actions::wire_poller_view(cx, store);
     entity_actions::wire_focus_follow(cx, store, follow);
     wire_history_autoload(cx, store, &ctx, follow, scroll_offset);
@@ -1105,7 +1105,20 @@ fn submit(
                 Phase::Idle => {
                     let mentions =
                         crate::mention::start_mentions(&crate::mention::draft_chips(value));
-                    start_run_attaching(store, ctx, &text, mentions);
+                    // The card shows the chips where the composer drew them
+                    // (from its markers, never read out of the words).
+                    let (shown, unplaced) = crate::mention::sent_mentions(draft, value, &text);
+                    start_run_attaching(store, ctx, &text, mentions, shown);
+                    if !unplaced.is_empty() {
+                        store.fold.update(|f| {
+                            f.push_item(Item::Info {
+                                text: format!(
+                                    "[#SEAM] {} could not be shown as a chip in your message (its words are as sent)",
+                                    unplaced.join(", ")
+                                ),
+                            })
+                        });
+                    }
                     started = store.phase.get_untracked() == Phase::Starting;
                 }
             }
@@ -1134,14 +1147,20 @@ fn submit(
 
 /// Explicit composer send: carries the pending attachment chips and the
 /// entities the message mentions (`mention::start_mentions`).
-pub(crate) fn start_run_attaching(store: Store, ctx: &UiCtx, prompt: &str, mentions: Vec<String>) {
+pub(crate) fn start_run_attaching(
+    store: Store,
+    ctx: &UiCtx,
+    prompt: &str,
+    mentions: Vec<String>,
+    shown: Vec<crate::transcript::SentMention>,
+) {
     let pending = store.pending_attachments.get_untracked();
-    start_run_inner(store, ctx, prompt, pending, mentions);
+    start_run_inner(store, ctx, prompt, pending, mentions, shown);
 }
 
 /// Chip-free start (queue drains, programmatic restarts).
 pub(crate) fn start_run(store: Store, ctx: &UiCtx, prompt: &str) {
-    start_run_inner(store, ctx, prompt, Vec::new(), Vec::new());
+    start_run_inner(store, ctx, prompt, Vec::new(), Vec::new(), Vec::new());
 }
 
 fn start_run_inner(
@@ -1150,6 +1169,7 @@ fn start_run_inner(
     prompt: &str,
     attachments: Vec<crate::store::PendingAttachment>,
     mentions: Vec<String>,
+    shown: Vec<crate::transcript::SentMention>,
 ) {
     let workflow = store.workflow.get_untracked();
     if workflow.flow_id.is_empty() {
@@ -1170,7 +1190,7 @@ fn start_run_inner(
         mentions,
         ..agent_start_opts(store, ctx)
     };
-    send_start(store, ctx, workflow, prompt, opts, attachments);
+    send_start(store, ctx, workflow, prompt, opts, attachments, shown);
 }
 
 /// `/workspace send [auto|always|never]`: report or set the stored
@@ -1377,6 +1397,8 @@ pub(crate) fn send_start(
     prompt: &str,
     opts: StartOpts,
     attachments: Vec<crate::store::PendingAttachment>,
+    // The chips of a composer send, placed in `prompt` (`mention::sent_mentions`).
+    shown: Vec<crate::transcript::SentMention>,
 ) {
     // Queue/goal/programmatic starts also supersede the previous narration.
     // Idempotent after a composer submission: no extra host I/O when stopped.
@@ -1385,6 +1407,7 @@ pub(crate) fn send_start(
     store.fold.update(|f| {
         f.push_item(Item::User {
             text: prompt.to_string(),
+            mentions: shown,
         })
     });
     store.phase.set(Phase::Starting);
@@ -2828,7 +2851,10 @@ fn spawn_run_ticker(cx: Scope, store: Store, spin: Signal<u64>) {
         Rc::new(RefCell::new(None));
     cx.effect(move || {
         // Entity turns need the spinner + elapsed display too.
-        let active = store.phase.get() != Phase::Idle || entity_actions::any_convo_active(store);
+        // An entity's answer on its way moves its dots too (operator round 6).
+        let active = store.phase.get() != Phase::Idle
+            || entity_actions::any_convo_active(store)
+            || store.pending_mentions.with(|p| !p.is_empty());
         let mut slot = handle.borrow_mut();
         if active && slot.is_none() {
             *slot = Some(abstracttui::reactive::interval(
@@ -3231,16 +3257,26 @@ mod tests {
         // routing, operator 2026-11-10).
         assert!(has(&[
             "crate::mention::start_mentions(",
-            "&crate::mention::draft_chips(value));\n",
-            "                    start_run_attaching(store, ctx, &text, mentions);"
+            "&crate::mention::draft_chips(value));\n"
+        ]));
+        // The card shows the chips where the composer drew them (operator
+        // round 6): placed from the draft's markers, carried to the card.
+        assert!(has(&[
+            "let (shown, unplaced) = crate::mention::",
+            "sent_mentions(draft, value, &text);\n",
+            "                    start_run_attaching(store, ctx, &text, mentions, shown);"
         ]));
         assert!(has(&[
             "start_run_inner(store, ctx, prompt, ",
-            "pending, mentions);"
+            "pending, mentions, shown);"
         ]));
         assert!(has(&[
             "start_run_inner(store, ctx, prompt, ",
-            "Vec::new(), Vec::new());"
+            "Vec::new(), Vec::new(), Vec::new());"
+        ]));
+        assert!(has(&[
+            "f.push_item(Item::User {\n            text: prompt.to_string(),\n",
+            "            mentions: shown,"
         ]));
         assert!(has(&[
             "let opts = StartOpts {\n        ",

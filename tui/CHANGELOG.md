@@ -14,6 +14,12 @@ offer mentions yet." once and every answer reads "assistant" as before.
 
 ### Added
 
+- **Mentions read in the transcript as they were typed** (operator round 6, 2026-11-11, parity with the web): a
+  message you sent shows its `@` chips in its card, in the composer's chip style, placed from the composer's own
+  chip markers (a chip that cannot be placed keeps its words and one `[#SEAM]` line says so); while a mentioned
+  entity's answer is on its way, a bubble at the end of the transcript names it ("● Castor · entity  answering
+  •··", the dots moving) and its answer replaces it (a refusal removes it), with nothing above the box; your words
+  show once before the answers, a reopened conversation included.
 - **`@` mentions an entity from the conversation.** Typing `@` lists the
   entities this account may see; a pick is one chip, which Backspace removes
   whole, and a typed `@name` that was not picked is plain text, sent as typed.

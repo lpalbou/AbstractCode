@@ -70,10 +70,24 @@ impl CallCost {
     }
 }
 
+/// A chip of a message the person sent (operator round 6, 2026-11-11: the transcript shows the
+/// mentions the way the composer drew them): its display name, its kind, and `start`, the byte
+/// offset of its `@name` in the card's text, from the composer's own chip markers (never read
+/// out of the words).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SentMention {
+    pub name: String,
+    pub kind: abstracttui::widgets::MentionKind,
+    pub start: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
     User {
         text: String,
+        /// The chips the message was sent with (empty for every message not sent from this
+        /// composer, a restored turn included: the history carries no offsets).
+        mentions: Vec<SentMention>,
     },
     Steer {
         text: String,
@@ -144,6 +158,16 @@ pub enum Item {
         title: String,
         body: String,
     },
+}
+
+impl Item {
+    /// A message of the person, without chips.
+    pub fn user(text: String) -> Item {
+        Item::User {
+            text,
+            mentions: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2873,9 +2897,9 @@ mod tests {
             author,
         };
         let mut f = Fold::new();
-        f.push_item(Item::User { text: "one".into() });
+        f.push_item(Item::user("one".into()));
         f.push_item(answer("old", None));
-        f.push_item(Item::User { text: "two".into() });
+        f.push_item(Item::user("two".into()));
         f.push_item(answer(
             "castor",
             Some(ChatAuthor::new(AuthorKind::Entity, "Castor")),
@@ -5470,7 +5494,7 @@ mod tests {
             let mut out = Vec::new();
             for item in &fold.items {
                 match item {
-                    Item::User { text }
+                    Item::User { text, .. }
                     | Item::Steer { text }
                     | Item::Assistant { text, .. }
                     | Item::Info { text }

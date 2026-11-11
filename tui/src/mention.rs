@@ -189,6 +189,92 @@ const CHIP_FIRST: u32 = 0xF_0000;
 /// Last chip marker code point (U+FFFFE/U+FFFFF are noncharacters).
 const CHIP_LAST: u32 = 0xF_FFFD;
 
+/// A mentioned entity's answer on its way (operator round 6, 2026-11-11: "the
+/// 3 dancing dots in the chat itself, where the AI would answer, and with its
+/// @entity_name answering"): one per entity call of a message, from the send
+/// until that call's outcome lands; the transcript draws it as the entity's
+/// bubble with "answering" and its dots.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingMention {
+    pub session_id: String,
+    pub entity: String,
+    pub index: usize,
+    pub name: String,
+}
+
+/// The pending answers of a message's calls (the agent's chip rode the turn).
+pub fn pending_for(session_id: &str, calls: &[MentionCall]) -> Vec<PendingMention> {
+    calls
+        .iter()
+        .filter(|c| c.entity != AGENT_SLUG)
+        .map(|c| PendingMention {
+            session_id: session_id.to_string(),
+            entity: c.entity.clone(),
+            index: c.index,
+            name: c.name.clone(),
+        })
+        .collect()
+}
+
+/// `pending` without the first answer each call in `done` was waiting for
+/// (its outcome landed, or it will never be asked): the first, so a later
+/// message of the same session naming the same entity keeps its own.
+pub fn forget_pending(pending: &mut Vec<PendingMention>, session_id: &str, done: &[MentionCall]) {
+    for call in done {
+        if let Some(at) = pending.iter().position(|p| {
+            p.session_id == session_id && p.entity == call.entity && p.index == call.index
+        }) {
+            pending.remove(at);
+        }
+    }
+}
+
+/// The chips of a message as sent, placed in its sent words (operator round
+/// 6, 2026-11-11: the transcript shows them as the composer drew them): each
+/// chip's `@name` offset comes from the raw draft's chip markers (one scalar
+/// per chip, in text order, [`ComposerSubmission::mentions`] in the same
+/// order), never from reading the words for `@`; it is then moved onto `sent`
+/// (the submission's text trimmed for the turn). The second list names every
+/// chip that is not where its marker says (a marker the composer did not
+/// issue, a text that changed): its words stay plain and the caller says so.
+pub fn sent_mentions(
+    raw: &str,
+    value: &ComposerSubmission,
+    sent: &str,
+) -> (Vec<crate::transcript::SentMention>, Vec<String>) {
+    let mut placed = Vec::new();
+    let mut unplaced = Vec::new();
+    let mut pos = 0usize;
+    let mut next = 0usize;
+    for ch in raw.chars() {
+        let chip = (CHIP_FIRST..=CHIP_LAST).contains(&(ch as u32));
+        match value.mentions.get(next).filter(|_| chip) {
+            Some(m) if value.text[pos..].starts_with(&format!("@{}", m.name)) => {
+                placed.push((m, pos));
+                pos += m.name.len() + 1;
+                next += 1;
+            }
+            _ => pos += ch.len_utf8(),
+        }
+    }
+    unplaced.extend(value.mentions[next..].iter().map(|m| m.name.clone()));
+    let lead = value.text.len() - value.text.trim_start().len();
+    let mut out = Vec::new();
+    for (m, at) in placed {
+        let label = format!("@{}", m.name);
+        match at.checked_sub(lead) {
+            Some(start) if sent.get(start..start + label.len()) == Some(label.as_str()) => out
+                .push(crate::transcript::SentMention {
+                    name: m.name.clone(),
+                    kind: m.kind,
+                    start,
+                }),
+            _ => unplaced.push(m.name.clone()),
+        }
+    }
+    (out, unplaced)
+}
+
 /// The draft a stopped chain puts back into the composer: `raw` (the
 /// buffer the message was sent from, one marker per chip, `chips` in the
 /// same order, [`draft_chips`]) with the chips of the entities in `keep`
@@ -430,6 +516,102 @@ pub fn author_from_value(v: Option<&Value>) -> Option<ChatAuthor> {
 mod tests {
     use super::*;
     use abstracttui::widgets::Mention;
+
+    /// Operator round 6 (2026-11-11): the chips of a sent message are placed
+    /// from the draft's markers on the trimmed words, never read out of them.
+    #[test]
+    fn a_sent_message_places_its_chips_from_the_draft_markers() {
+        let m = |k: u32| char::from_u32(CHIP_FIRST + k).unwrap();
+        let mention = |name: &str, kind: MentionKind, index: usize| Mention {
+            id: name.to_lowercase(),
+            name: name.into(),
+            kind,
+            index,
+        };
+        let raw = format!("  hi {} and {}, {} too", m(0), m(1), m(2));
+        let value = ComposerSubmission {
+            text: "  hi @Castor and @Pollux, @Basic agent too".into(),
+            mentions: vec![
+                mention("Castor", MentionKind::Entity, 0),
+                mention("Pollux", MentionKind::Entity, 1),
+                mention("Basic agent", MentionKind::Agent, 2),
+            ],
+        };
+        let sent = value.text.trim();
+        let (placed, unplaced) = sent_mentions(&raw, &value, sent);
+        assert!(unplaced.is_empty(), "{unplaced:?}");
+        assert_eq!(
+            placed.iter().map(|p| p.start).collect::<Vec<_>>(),
+            vec![3, 15, 24]
+        );
+        for p in &placed {
+            assert_eq!(
+                &sent[p.start..p.start + p.name.len() + 1],
+                format!("@{}", p.name)
+            );
+        }
+        assert_eq!(placed[2].kind, MentionKind::Agent);
+        // A chip with no marker of its own is not placed: its words stay plain.
+        let extra = ComposerSubmission {
+            mentions: vec![
+                mention("Castor", MentionKind::Entity, 0),
+                mention("Vega", MentionKind::Entity, 1),
+            ],
+            ..value.clone()
+        };
+        let (placed, unplaced) = sent_mentions(&format!("  hi {} and @Vega", m(0)), &extra, sent);
+        assert_eq!(placed.len(), 1);
+        assert_eq!(unplaced, vec!["Vega".to_string()]);
+        // No chips: nothing to place.
+        let plain = ComposerSubmission {
+            text: "hi @Castor".into(),
+            mentions: vec![],
+        };
+        assert_eq!(
+            sent_mentions("hi @Castor", &plain, "hi @Castor"),
+            (vec![], vec![])
+        );
+    }
+
+    /// One answer on its way per entity call (not the agent's chip); each
+    /// outcome takes away the FIRST matching one (a queued message keeps its own).
+    #[test]
+    fn pending_answers_come_per_entity_and_go_one_by_one() {
+        let calls = [
+            MentionCall {
+                entity: "castor".into(),
+                name: "Castor".into(),
+                index: 0,
+            },
+            MentionCall {
+                entity: AGENT_SLUG.into(),
+                name: "Basic agent".into(),
+                index: 1,
+            },
+            MentionCall {
+                entity: "pollux".into(),
+                name: "Pollux".into(),
+                index: 2,
+            },
+        ];
+        let mut pending = pending_for("s1", &calls);
+        assert_eq!(
+            pending.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            vec!["Castor", "Pollux"]
+        );
+        pending.extend(pending_for("s1", &calls[..1]));
+        forget_pending(&mut pending, "s1", &calls[..1]);
+        assert_eq!(
+            pending.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            vec!["Pollux", "Castor"]
+        );
+        forget_pending(&mut pending, "s2", &calls[2..]);
+        assert_eq!(
+            pending.len(),
+            2,
+            "another conversation's outcome takes nothing"
+        );
+    }
 
     fn roster() -> Vec<EntityInfo> {
         let mk = |slug: &str, name: &str, state: &str, tasks: Option<u64>| EntityInfo {

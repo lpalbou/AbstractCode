@@ -689,7 +689,7 @@ pub fn activity_groups(items: &[Item], live: bool, waiting: bool) -> Vec<Group> 
                 g.lines.push(format!("error · {}", one_line(text)));
                 g.status = g.status.min(GroupStatus::Failed);
             }
-            Item::User { text } => {
+            Item::User { text, .. } => {
                 let g = groups.last_mut().expect("Start exists");
                 g.lines.push(format!("request · {}", one_line(text)));
             }
@@ -835,9 +835,7 @@ mod tests {
     #[test]
     fn activity_groups_per_model_step() {
         let items = vec![
-            Item::User {
-                text: "fix it".into(),
-            },
+            Item::user("fix it".into()),
             Item::Thinking {
                 iteration: 1,
                 content: "Reading the file".into(),

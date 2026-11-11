@@ -228,7 +228,7 @@ fn last_prompt(store: Store) -> String {
             .iter()
             .rev()
             .find_map(|i| match i {
-                Item::User { text } => Some(text.clone()),
+                Item::User { text, .. } => Some(text.clone()),
                 _ => None,
             })
             .unwrap_or_default()

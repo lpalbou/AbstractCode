@@ -232,8 +232,16 @@ pub fn spawn_mentions(
             &msg.calls,
             |call, outcome| {
                 let unsent = outcome.keeps_message().then(|| msg.unsent_from(call));
+                // A chain that ends here never asks the calls after this one:
+                // their bubbles go with this outcome.
+                let never = never_asked(&msg.calls, call, &outcome);
                 let (sid, call) = (msg.session_id.clone(), call.clone());
-                post.post(move || apply(store, &sid, &call, outcome, unsent));
+                post.post(move || {
+                    store
+                        .pending_mentions
+                        .update(|p| mention::forget_pending(p, &sid, &never));
+                    apply(store, &sid, &call, outcome, unsent)
+                });
             },
         );
     });
@@ -243,6 +251,24 @@ pub fn spawn_mentions(
     if waits {
         wake.post(move || store.notify(format!("{names}: asked when the mentions before end")));
     }
+}
+
+/// The calls a chain will never ask once `call` landed `outcome`: those after
+/// it when the outcome ends the chain, else none.
+pub fn never_asked(
+    calls: &[MentionCall],
+    call: &MentionCall,
+    outcome: &Outcome,
+) -> Vec<MentionCall> {
+    if !outcome.ends_chain() {
+        return Vec::new();
+    }
+    calls
+        .iter()
+        .skip_while(|c| *c != call)
+        .skip(1)
+        .cloned()
+        .collect()
 }
 
 /// Fold one outcome into the conversation it was sent from (UI thread).
@@ -255,6 +281,11 @@ pub fn apply(
     outcome: Outcome,
     unsent: Option<Unsent>,
 ) {
+    // Its outcome landed: its bubble goes (the answer, or the refusal's line,
+    // takes its place).
+    store
+        .pending_mentions
+        .update(|p| mention::forget_pending(p, session_id, std::slice::from_ref(call)));
     if matches!(outcome, Outcome::Refused(Refusal::NotOffered)) {
         // Process-wide: the route is missing on this gateway, whatever
         // the session.
@@ -395,6 +426,22 @@ mod tests {
             "reply": reply, "visit": {},
             "author": {"kind": "entity", "name": name, "entity_id": format!("entity:{}", name.to_lowercase()),
                        "identity_ref": null, "avatar": {"style": "watch-halo", "color": "#336699"}}})
+    }
+
+    /// A chain that ends at a call never asks the calls after it: their
+    /// answers on their way go with that outcome (operator round 6).
+    #[test]
+    fn a_chain_that_ends_names_the_calls_it_never_asks() {
+        let all = calls();
+        let busy = Outcome::Refused(Refusal::CannotAnswer("busy".into()));
+        assert_eq!(never_asked(&all, &all[0], &busy), all[1..].to_vec());
+        assert!(never_asked(&all, &all[0], &Outcome::Refused(Refusal::Elsewhere)).is_empty());
+        let answered = Outcome::Answered {
+            reply: "ok".into(),
+            author: None,
+        };
+        assert!(never_asked(&all, &all[0], &answered).is_empty());
+        assert!(never_asked(&all, &all[all.len() - 1], &busy).is_empty());
     }
 
     #[test]

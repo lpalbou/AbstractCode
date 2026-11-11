@@ -839,7 +839,7 @@ pub fn run(args: &Args) -> i32 {
     // #FALLBACK instead of recognizing its answer source.
     fold.set_agent_workflows(agent_workflow_ids_from_bundles(&bundles));
     fold.begin_run(&run_id);
-    fold.push_item(Item::User { text: prompt });
+    fold.push_item(Item::user(prompt));
 
     let mut cursors: HashMap<String, u64> = HashMap::new();
     cursors.insert(run_id.clone(), 0);
@@ -1361,7 +1361,7 @@ fn preview_suffix(preview: &str) -> String {
 
 fn print_item(item: &Item) {
     match item {
-        Item::User { text } => println!("❯ {text}"),
+        Item::User { text, .. } => println!("❯ {text}"),
         Item::Steer { text } => println!("↪ steer: {text}"),
         Item::Thinking {
             iteration,

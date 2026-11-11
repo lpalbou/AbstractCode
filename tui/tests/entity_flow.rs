@@ -168,9 +168,7 @@ fn focus_round_trip_renders_byte_identically() {
     h.turn();
     let store = h.store;
     store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "agent question".into(),
-        });
+        f.push_item(Item::user("agent question".into()));
         f.push_item(Item::Assistant {
             text: "agent answer".into(),
             final_answer: true,
@@ -190,9 +188,7 @@ fn focus_round_trip_renders_byte_identically() {
         cs.push(parked_convo(
             "doorcheck",
             vec![
-                Item::User {
-                    text: "entity question".into(),
-                },
+                Item::user("entity question".into()),
                 Item::Assistant {
                     text: "entity reply words".into(),
                     final_answer: true,

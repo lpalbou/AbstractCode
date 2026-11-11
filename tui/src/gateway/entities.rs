@@ -1288,7 +1288,7 @@ mod tests {
             assert!(convos[0]
                 .items
                 .iter()
-                .any(|i| matches!(i, Item::User { text } if text == "held words")));
+                .any(|i| matches!(i, Item::User { text, .. } if text == "held words")));
             dispatch_held(store, &tx, "doorcheck", held);
             match rx.try_recv().expect("EntityTurn dispatched") {
                 Cmd::EntityTurn {

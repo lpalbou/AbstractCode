@@ -148,7 +148,7 @@ pub fn capture(store: Store) -> Reference {
                 .items
                 .iter()
                 .filter_map(|item| match item {
-                    Item::User { text } => Some((Role::User, text.as_str())),
+                    Item::User { text, .. } => Some((Role::User, text.as_str())),
                     Item::Steer { text } => Some((Role::Guidance, text.as_str())),
                     Item::Assistant { text, .. } => Some((Role::Assistant, text.as_str())),
                     _ => None,
@@ -366,9 +366,7 @@ mod payload_tests {
         let (root, ()) = abstracttui::reactive::create_root(|cx| {
             let store = Store::create(cx);
             store.fold.update(|f| {
-                f.push_item(Item::User {
-                    text: "News question".into(),
-                });
+                f.push_item(Item::user("News question".into()));
                 f.push_item(Item::Assistant {
                     text: "Visible news answer".into(),
                     final_answer: true,
@@ -413,17 +411,13 @@ mod payload_tests {
             let store = Store::create(cx);
             let long = "a".repeat(HISTORY_WINDOW_TOKENS * 4);
             store.fold.update(|f| {
-                f.push_item(Item::User {
-                    text: "first question".into(),
-                });
+                f.push_item(Item::user("first question".into()));
                 f.push_item(Item::Assistant {
                     text: long.clone(),
                     final_answer: true,
                     author: None,
                 });
-                f.push_item(Item::User {
-                    text: "second question".into(),
-                });
+                f.push_item(Item::user("second question".into()));
                 f.push_item(Item::Assistant {
                     text: "second answer".into(),
                     final_answer: true,

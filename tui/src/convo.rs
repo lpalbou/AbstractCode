@@ -389,7 +389,7 @@ fn render_transcript_turns(items: &mut Vec<Item>, turns: &[crate::entities::Tran
                         body: block,
                     });
                 }
-                items.push(Item::User { text: raw });
+                items.push(Item::user(raw));
             }
             "assistant" => {
                 push_tool_cards(items, &t.tool_details);
@@ -437,9 +437,7 @@ fn push_tool_cards(items: &mut Vec<Item>, details: &[ToolDetail]) {
 /// The user sent a turn: Ready/Parked → TurnRunning (+ the user card).
 /// Returns the epoch the turn thread must carry.
 pub fn fold_send_turn(convo: &mut EntityConvo, text: &str) -> u64 {
-    convo.items.push(Item::User {
-        text: text.to_string(),
-    });
+    convo.items.push(Item::user(text.to_string()));
     convo.status = ConvoStatus::TurnRunning;
     convo.turn_started = Some(Instant::now());
     convo.turn_epoch += 1;
@@ -1021,15 +1019,15 @@ mod tests {
         // The rendered user turn splits: raw words on the user card, the
         // dated MEMORIES chrome details-gated as a probe (live shape).
         assert!(
-            c.items
-                .iter()
-                .any(|i| matches!(i, Item::User { text } if text == "how are the doors today?")),
+            c.items.iter().any(
+                |i| matches!(i, Item::User { text, .. } if text == "how are the doors today?")
+            ),
             "user card carries only the visitor's words"
         );
         assert!(
             !c.items
                 .iter()
-                .any(|i| matches!(i, Item::User { text } if text.contains("MEMORIES ("))),
+                .any(|i| matches!(i, Item::User { text, .. } if text.contains("MEMORIES ("))),
             "prompt chrome never renders as the visitor's words"
         );
         assert!(

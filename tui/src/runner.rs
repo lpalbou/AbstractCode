@@ -2677,9 +2677,7 @@ impl Runner {
             store.fold.update(|f| {
                 f.begin_run(&rid);
                 if !prompt.trim().is_empty() {
-                    f.push_item(Item::User {
-                        text: prompt.trim().to_string(),
-                    });
+                    f.push_item(Item::user(prompt.trim().to_string()));
                 }
             });
         });
@@ -4401,8 +4399,15 @@ pub(crate) fn rehydrate_turn_into(
         .filter(|r| !r.is_empty());
     let repeated = repeat_of.is_some_and(|r| fold.prompted_runs.iter().any(|p| p == r));
     if !prompt.is_empty() && !repeated {
-        fold.push_item(Item::User { text: prompt });
+        fold.push_item(Item::user(prompt));
         fold.prompted_runs.push(root_run_id.to_string());
+        // A mention of a turn NOT restored here (a message to entities only:
+        // its recorded turn has no run in the list) shows the words once: the
+        // next mention repeating that turn folds into this card (operator
+        // round 6, 2026-11-11: "my message and then both of their messages").
+        if let Some(r) = repeat_of {
+            fold.prompted_runs.push(r.to_string());
+        }
     }
     push_attachments_line(fold, bundle, effects_out);
     fold.begin_run(root_run_id);
@@ -4695,7 +4700,7 @@ pub fn rehydrate_live_backlog_into(
         .trim()
         .to_string();
     if !prompt.is_empty() {
-        fold.push_item(Item::User { text: prompt });
+        fold.push_item(Item::user(prompt));
     }
     push_attachments_line(fold, bundle, effects_out);
     fold.begin_run(root_run_id);
@@ -5634,7 +5639,7 @@ mod tests {
         assert!(fold
             .items
             .iter()
-            .any(|i| matches!(i, Item::User { text } if text == "add a test")));
+            .any(|i| matches!(i, Item::User { text, .. } if text == "add a test")));
         assert!(fold
             .items
             .iter()
@@ -5670,20 +5675,11 @@ mod tests {
         f.push_item(Item::Info {
             text: format!("{OLDER_TURNS_STUB_PREFIX}5 earlier turn(s) in this session — keep scrolling up to load them)"),
         });
-        f.push_item(Item::User {
-            text: "turn N".into(),
-        });
+        f.push_item(Item::user("turn N".into()));
         f.begin_run("live-run");
         let root_before = f.root_run_id().to_string();
         // A streamed bloc of two older turns, 3 remaining beyond it.
-        let scratch = vec![
-            Item::User {
-                text: "turn N-2".into(),
-            },
-            Item::User {
-                text: "turn N-1".into(),
-            },
-        ];
+        let scratch = vec![Item::user("turn N-2".into()), Item::user("turn N-1".into())];
         prepend_history_items(&mut f, scratch, 3);
         // Order: updated stub, then the streamed bloc, then the present.
         assert!(
@@ -5691,9 +5687,9 @@ mod tests {
             "stub replaced with the updated count: {:?}",
             f.items[0]
         );
-        assert!(matches!(&f.items[1], Item::User { text } if text == "turn N-2"));
-        assert!(matches!(&f.items[2], Item::User { text } if text == "turn N-1"));
-        assert!(matches!(&f.items[3], Item::User { text } if text == "turn N"));
+        assert!(matches!(&f.items[1], Item::User { text, .. } if text == "turn N-2"));
+        assert!(matches!(&f.items[2], Item::User { text, .. } if text == "turn N-1"));
+        assert!(matches!(&f.items[3], Item::User { text, .. } if text == "turn N"));
         assert_eq!(
             f.items
                 .iter()
@@ -5704,20 +5700,14 @@ mod tests {
         );
         assert_eq!(f.root_run_id(), root_before, "run state untouched");
         // Final bloc: remaining 0 → the stub disappears.
-        prepend_history_items(
-            &mut f,
-            vec![Item::User {
-                text: "turn 1".into(),
-            }],
-            0,
-        );
+        prepend_history_items(&mut f, vec![Item::user("turn 1".into())], 0);
         assert!(
             !f.items.iter().any(
                 |i| matches!(i, Item::Info { text } if text.starts_with(OLDER_TURNS_STUB_PREFIX))
             ),
             "no stub once everything streamed"
         );
-        assert!(matches!(&f.items[0], Item::User { text } if text == "turn 1"));
+        assert!(matches!(&f.items[0], Item::User { text, .. } if text == "turn 1"));
     }
 
     /// A runner panic mid `LoadHistory`/`ProbeAttach` must not leave the
@@ -6344,7 +6334,7 @@ mod tests {
         assert!(
             fold.items
                 .iter()
-                .any(|i| matches!(i, Item::User { text } if text == "do the thing")),
+                .any(|i| matches!(i, Item::User { text, .. } if text == "do the thing")),
             "the prompt replays from the bundle's input_data"
         );
     }
@@ -7056,6 +7046,38 @@ mod tests {
     /// answer" line (even over a ledger that ended without one) and no
     /// "(this turn ended without an answer)". The marker on the list row
     /// or on the bundle's own run row; an ordinary turn keeps both lines.
+    /// Operator round 6 (2026-11-11): "my message and then both of their
+    /// messages". Two mentions repeat a turn that is not restored here (a
+    /// message to entities only): the words show once; with that turn's own
+    /// card restored, never again.
+    #[test]
+    fn mentions_repeating_one_message_restore_its_words_once() {
+        let mirror = |run: &str| {
+            json!({
+                "input_data": {"prompt": "hey @Castor @Pollux"},
+                "run": {"run_id": run, "repeat_of": "p1"},
+                "ledgers": {}
+            })
+        };
+        let users = |fold: &crate::transcript::Fold| {
+            fold.items
+                .iter()
+                .filter(|i| matches!(i, Item::User { .. }))
+                .count()
+        };
+        let mut fold = crate::transcript::Fold::new();
+        let mut fx = Vec::new();
+        rehydrate_turn_into(&mut fold, "m1", &mirror("m1"), false, false, &mut fx);
+        rehydrate_turn_into(&mut fold, "m2", &mirror("m2"), false, false, &mut fx);
+        assert_eq!(users(&fold), 1, "{:?}", fold.items);
+        let mut shown = crate::transcript::Fold::new();
+        shown.push_item(Item::user("hey @Castor @Pollux".into()));
+        shown.prompted_runs.push("p1".into());
+        rehydrate_turn_into(&mut shown, "m1", &mirror("m1"), false, false, &mut fx);
+        rehydrate_turn_into(&mut shown, "m2", &mirror("m2"), false, false, &mut fx);
+        assert_eq!(users(&shown), 1);
+    }
+
     #[test]
     fn a_restored_turn_the_agent_was_not_addressed_in_reads_as_it_did_live() {
         let bundle = |run: Value| {
@@ -7099,7 +7121,7 @@ mod tests {
                 restored(&bundle(skipped.clone()), &plain, failed),
             ] {
                 assert!(
-                    matches!(items.first(), Some(Item::User { text }) if text == "@Castor is it ready?"),
+                    matches!(items.first(), Some(Item::User { text, .. }) if text == "@Castor is it ready?"),
                     "{items:?}"
                 );
                 assert_eq!(lines(&items), 0, "{items:?}");
@@ -7140,7 +7162,7 @@ mod tests {
                     "Castor",
                 );
                 store.fold.update(|f| {
-                    f.push_item(Item::User { text: "q".into() });
+                    f.push_item(Item::user("q".into()));
                     f.push_item(Item::Assistant {
                         text: "entity".into(),
                         final_answer: true,

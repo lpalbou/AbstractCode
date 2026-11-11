@@ -772,9 +772,7 @@ impl Harness {
     fn with_reply(&mut self, reply: &str) {
         self.store.run_id.set("run-ui".into());
         self.store.fold.update(|f| {
-            f.push_item(Item::User {
-                text: "say something".into(),
-            });
+            f.push_item(Item::user("say something".into()));
             f.push_item(Item::Assistant {
                 text: reply.into(),
                 final_answer: true,
@@ -1094,11 +1092,9 @@ fn dictation_before_the_first_run_rides_the_session_media_run() {
     let gw = serve(GatewayScript::default());
     let (_host, _log, _) = fake_host(false);
     let mut h = harness(&gw.url);
-    h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "settle".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(Item::user("settle".into())));
     h.turn();
     h.term.push_input(&[0x12]);
     h.until("recording", |s| s.contains("● Recording…"));
@@ -1123,11 +1119,9 @@ fn dictation_without_a_conversation_says_what_to_do() {
     // A session id outside the gateway's run-id alphabet: no media run
     // this client can name, so the old sentence stands.
     h.store.session_id.set("not a safe id".into());
-    h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "settle".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(Item::user("settle".into())));
     h.turn();
     h.term.push_input(&[0x12]);
     h.until("the sentence", |s| {

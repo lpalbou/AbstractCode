@@ -91,9 +91,7 @@ fn harness(size: Size) -> H {
         size,
     };
     h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "fix the parser".into(),
-        });
+        f.push_item(Item::user("fix the parser".into()));
         f.push_item(Item::Thinking {
             iteration: 1,
             content: "Reading the parser".into(),

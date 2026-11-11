@@ -33,9 +33,7 @@ fn harness(width: i32, companion: Option<Value>) -> Harness {
         store.conn.set(Conn::Ok);
         store.fold.update(|f| {
             f.begin_run("main-root");
-            f.push_item(Item::User {
-                text: "Existing user request".into(),
-            });
+            f.push_item(Item::user("Existing user request".into()));
             f.push_item(Item::Assistant {
                 text: "Existing assistant reply".into(),
                 final_answer: true,

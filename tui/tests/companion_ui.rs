@@ -35,9 +35,7 @@ fn harness(width: i32, companion: Option<Value>) -> Harness {
         store.conn.set(Conn::Ok);
         store.fold.update(|f| {
             f.begin_run("main-root");
-            f.push_item(Item::User {
-                text: "Existing user request".into(),
-            });
+            f.push_item(Item::user("Existing user request".into()));
             f.push_item(Item::Assistant {
                 text: "Existing assistant reply".into(),
                 final_answer: true,
@@ -423,11 +421,9 @@ fn default_has_no_companion_or_background_inference_and_entity_focus_hides_it() 
     let mut h = harness(220, None);
     let screen = h.turn();
     assert!(!screen.contains("Talk / ask"));
-    h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "A changed request".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(Item::user("A changed request".into())));
     h.turn();
     assert_eq!(advice_count(&h.commands()), 0);
     let mut h = harness(220, Some(json!({"enabled":true,"animate":false})));
@@ -453,11 +449,9 @@ fn advice_is_change_driven_not_replayed_and_tool_payloads_never_trigger_an_extra
         0,
         "initial loaded conversation is a baseline"
     );
-    h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "A new visible question".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(Item::user("A new visible question".into())));
     h.turn();
     let commands = h.commands();
     assert_eq!(advice_count(&commands), 1);
@@ -488,11 +482,9 @@ fn advice_is_change_driven_not_replayed_and_tool_payloads_never_trigger_an_extra
         h.store.companion_advice.get_untracked().is_some(),
         "tool-only events do not obsolete the visible-message snapshot"
     );
-    h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "Another new question during cooldown".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(Item::user("Another new question during cooldown".into())));
     h.turn();
     assert_eq!(
         advice_count(&h.commands()),
@@ -501,11 +493,9 @@ fn advice_is_change_driven_not_replayed_and_tool_payloads_never_trigger_an_extra
     );
     h.store.restoring.set(true);
     h.turn();
-    h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "An earlier replayed question".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(Item::user("An earlier replayed question".into())));
     h.turn();
     h.store.restoring.set(false);
     h.turn();
@@ -532,9 +522,7 @@ fn automatic_comments_read_the_history_window_not_a_character_cap() {
             final_answer: true,
             author: None,
         });
-        f.push_item(Item::User {
-            text: "A new visible question".into(),
-        });
+        f.push_item(Item::user("A new visible question".into()));
     });
     h.turn();
     let commands = h.commands();
@@ -599,19 +587,15 @@ fn a_late_automatic_comment_cannot_cross_a_main_session_switch() {
         Some(json!({"enabled":true,"advice":true,"animate":false})),
     );
     h.turn();
-    h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "New work in original session".into(),
-        })
-    });
+    h.store
+        .fold
+        .update(|f| f.push_item(Item::user("New work in original session".into())));
     h.turn();
     assert_eq!(advice_count(&h.commands()), 1);
     h.store.session_id.set("another-session".into());
     h.store.fold.update(|f| {
         f.begin_run("another-root");
-        f.push_item(Item::User {
-            text: "A different conversation".into(),
-        });
+        f.push_item(Item::user("A different conversation".into()));
     });
     h.turn();
     h.store.advice_chat.update(|s| {

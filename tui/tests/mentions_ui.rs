@@ -110,9 +110,7 @@ fn harness() -> Harness {
     ]);
     // Leave the animated splash (a conversation item) so frames settle.
     h.store.fold.update(|f| {
-        f.push_item(Item::User {
-            text: "the release plan is in docs/plan.md".into(),
-        });
+        f.push_item(Item::user("the release plan is in docs/plan.md".into()));
         f.push_item(Item::Assistant {
             text: "I read it: three steps, the gateway first.".into(),
             final_answer: true,
@@ -702,9 +700,7 @@ fn a_live_reply_is_labelled_by_its_frames_author() {
     store.run_id.set("root".into());
     store.fold.update(|f| {
         f.begin_run("root");
-        f.push_item(Item::User {
-            text: "explain streaming".into(),
-        });
+        f.push_item(Item::user("explain streaming".into()));
     });
     h.turn();
     reset_live_on_connect(&store, "root");
@@ -865,4 +861,89 @@ fn a_message_the_agent_was_not_addressed_in_shows_no_spinner_and_the_answer() {
         !screen.contains("· agent ═"),
         "the agent said nothing:\n{screen}"
     );
+}
+
+/// Operator round 6 (2026-11-11): "the 3 dancing dots in the chat itself,
+/// where the AI would answer, and with its @entity_name answering". Each
+/// entity's answer on its way is a bubble at the transcript's end (its mark,
+/// its name, "answering" and the dots), never a line above the box; its
+/// outcome replaces it (an answer) or removes it (a refusal); the person's
+/// words show once before both answers.
+#[test]
+fn each_answer_on_its_way_is_a_bubble_replaced_by_its_answer() {
+    let mut h = harness();
+    h.send_two_chips();
+    let screen = h.capture("120x40-round6-pending");
+    assert_eq!(screen.matches("answering").count(), 2, "{screen}");
+    assert!(screen.contains("● Castor · entity"), "{screen}");
+    assert!(screen.contains("● Pollux · entity"), "{screen}");
+    assert!(
+        !screen.contains("asking"),
+        "nothing above the box:\n{screen}"
+    );
+    assert_eq!(h.store.pending_mentions.get_untracked().len(), 2);
+    agent_answered(&mut h);
+    apply(
+        h.store,
+        SESSION,
+        &call("castor", "Castor", 0),
+        Outcome::Answered {
+            reply: "The plan holds on my side.".into(),
+            author: Some(entity_author("Castor", "#336699")),
+        },
+        None,
+    );
+    let screen = h.capture("120x40-round6-one-answered");
+    assert_eq!(screen.matches("answering").count(), 1, "{screen}");
+    assert!(screen.contains("══ ● Castor · entity"), "{screen}");
+    assert!(screen.contains("The plan holds on my side."), "{screen}");
+    apply(
+        h.store,
+        SESSION,
+        &call("pollux", "Pollux", 1),
+        Outcome::Refused(Refusal::Elsewhere),
+        None,
+    );
+    let screen = h.capture("120x40-round6-done");
+    assert!(!screen.contains("answering"), "{screen}");
+    assert!(
+        screen.contains("· Pollux is in another conversation."),
+        "{screen}"
+    );
+    assert!(h.store.pending_mentions.get_untracked().is_empty());
+    assert_eq!(
+        screen.matches("does the plan hold?").count(),
+        1,
+        "the words once:\n{screen}"
+    );
+}
+
+/// The person's card draws the chips where the composer placed them, in the
+/// composer's chip style (accent on the raised ground, bold); the words
+/// around them stay plain.
+#[test]
+fn the_sent_card_draws_its_chips_in_the_composer_style() {
+    let mut h = harness();
+    h.send_two_chips();
+    let rows: Vec<String> = h.turn().lines().map(str::to_string).collect();
+    let row = rows
+        .iter()
+        .position(|r| r.contains("❯ @Castor and @Pollux does the plan hold?"))
+        .expect("the card's row");
+    let text = &rows[row];
+    let col = |needle: &str| text[..text.find(needle).unwrap()].chars().count() as i32;
+    let screen = h.term.screen();
+    let paint = |x: i32| screen.cell(x, row as i32).expect("cell").paint;
+    let chip = paint(col("@Castor"));
+    let word = paint(col("and"));
+    assert!(
+        chip.attrs.contains(abstracttui::testing::Attrs::BOLD),
+        "{chip:?}"
+    );
+    assert!(
+        !word.attrs.contains(abstracttui::testing::Attrs::BOLD),
+        "{word:?}"
+    );
+    assert_ne!(chip.bg, word.bg, "the chip sits on the raised ground");
+    assert_eq!(paint(col("@Pollux")), chip);
 }

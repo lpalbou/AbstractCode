@@ -534,11 +534,9 @@ fn an_automation_workspace_panel_is_the_run_level() {
 fn the_new_automation_dialog_has_visible_workspaces_and_title_and_limits() {
     per_size(|size| {
         let mut h = harness(size);
-        h.store.fold.update(|f| {
-            f.push_item(Item::User {
-                text: "report the free memory".into(),
-            })
-        });
+        h.store
+            .fold
+            .update(|f| f.push_item(Item::user("report the free memory".into())));
         h.command("/schedule");
         h.keys(b"\r"); // What (the task)
                        // When: every 24 hours. The gateway words Repeat too
@@ -676,9 +674,7 @@ fn the_run_view_shows_the_sandbox_line_per_command() {
     per_size(|size| {
         let mut h = harness(size);
         h.store.fold.update(|f| {
-            f.push_item(Item::User {
-                text: "list my Desktop".into(),
-            });
+            f.push_item(Item::user("list my Desktop".into()));
             for i in fold_sandbox_ledger() {
                 f.push_item(i);
             }

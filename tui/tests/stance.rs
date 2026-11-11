@@ -49,7 +49,7 @@ fn turns_split_at_user_messages_and_count_rounds_not_calls() {
     abstracttui::reactive::create_root(|cx| {
         let store = Store::create(cx);
         store.fold.update(|f| {
-            f.push_item(Item::User { text: "one".into() });
+            f.push_item(Item::user("one".into()));
             f.push_item(thinking(1000.0, 100));
             f.push_item(tool("a", "read_file", ToolStatus::Ok));
             f.push_item(tool("b", "read_file", ToolStatus::Ok));
@@ -57,7 +57,7 @@ fn turns_split_at_user_messages_and_count_rounds_not_calls() {
             f.push_item(thinking(2000.0, 200));
             f.push_item(tool("c", "edit_file", ToolStatus::Failed));
             // Second round.
-            f.push_item(Item::User { text: "two".into() });
+            f.push_item(Item::user("two".into()));
             f.push_item(thinking(500.0, 50));
         });
         let turns = stance::turns(store);
@@ -82,9 +82,7 @@ fn the_baseline_comes_from_prior_turns_only() {
     abstracttui::reactive::create_root(|cx| {
         let store = Store::create(cx);
         store.fold.update(|f| {
-            f.push_item(Item::User {
-                text: "first".into(),
-            });
+            f.push_item(Item::user("first".into()));
             f.push_item(thinking(4000.0, 400));
         });
         let (axes, _) = stance::read(store);
@@ -100,12 +98,10 @@ fn the_baseline_comes_from_prior_turns_only() {
         // Three more turns at the same size; the fourth now has a median.
         store.fold.update(|f| {
             for i in 0..3 {
-                f.push_item(Item::User {
-                    text: format!("turn {i}"),
-                });
+                f.push_item(Item::user(format!("turn {i}")));
                 f.push_item(thinking(4000.0, 400));
             }
-            f.push_item(Item::User { text: "now".into() });
+            f.push_item(Item::user("now".into()));
             f.push_item(thinking(4000.0, 400));
         });
         let (axes, _) = stance::read(store);
@@ -125,7 +121,7 @@ fn attention_is_absent_on_the_agent_lane_and_says_why() {
     abstracttui::reactive::create_root(|cx| {
         let store = Store::create(cx);
         store.fold.update(|f| {
-            f.push_item(Item::User { text: "go".into() });
+            f.push_item(Item::user("go".into()));
             f.push_item(thinking(1000.0, 100));
             f.push_item(tool("a", "read_file", ToolStatus::Ok));
         });
@@ -275,7 +271,7 @@ fn the_agent_lane_drops_the_read_it_can_never_make() {
     abstracttui::reactive::create_root(|cx| {
         let store = Store::create(cx);
         store.fold.update(|f| {
-            f.push_item(Item::User { text: "go".into() });
+            f.push_item(Item::user("go".into()));
             f.push_item(thinking(1000.0, 100));
             f.push_item(tool("a", "read_file", ToolStatus::Ok));
         });

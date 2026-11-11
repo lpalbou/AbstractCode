@@ -422,7 +422,7 @@ pub fn to_markdown(items: &[Item], meta: &ExportMeta, details: bool) -> String {
             continue;
         }
         match item {
-            Item::User { text } => sections.push(format!("## User\n\n{text}")),
+            Item::User { text, .. } => sections.push(format!("## User\n\n{text}")),
             Item::Assistant {
                 text,
                 final_answer,
@@ -571,7 +571,7 @@ fn segment_turns(items: &[Item]) -> Vec<SftTurn> {
     let mut turns: Vec<SftTurn> = Vec::new();
     for item in items {
         match item {
-            Item::User { text } => turns.push(SftTurn {
+            Item::User { text, .. } => turns.push(SftTurn {
                 user: text.clone(),
                 ..SftTurn::default()
             }),
@@ -717,7 +717,7 @@ mod tests {
     use super::*;
 
     fn user(text: &str) -> Item {
-        Item::User { text: text.into() }
+        Item::user(text.into())
     }
 
     fn answer(text: &str) -> Item {
