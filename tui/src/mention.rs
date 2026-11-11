@@ -249,7 +249,15 @@ pub fn sent_mentions(
     for ch in raw.chars() {
         let chip = (CHIP_FIRST..=CHIP_LAST).contains(&(ch as u32));
         match value.mentions.get(next).filter(|_| chip) {
-            Some(m) if value.text[pos..].starts_with(&format!("@{}", m.name)) => {
+            // Checked: a chip that did not match moved `pos` by its marker's
+            // bytes, maybe into a character (review round 6b F7c); such a
+            // chip stays plain words and the caller says so, never a panic.
+            Some(m)
+                if value
+                    .text
+                    .get(pos..)
+                    .is_some_and(|rest| rest.starts_with(&format!("@{}", m.name))) =>
+            {
                 placed.push((m, pos));
                 pos += m.name.len() + 1;
                 next += 1;
@@ -570,6 +578,49 @@ mod tests {
         assert_eq!(
             sent_mentions("hi @Castor", &plain, "hi @Castor"),
             (vec![], vec![])
+        );
+    }
+
+    /// Review round 6b F7c: a chip whose marker does not expand to its
+    /// `@name` in the text moved the offset by the marker's bytes, which can
+    /// land inside a multi-byte character; the next chip's unchecked slice
+    /// then panicked. Never a panic: the words stay plain and the caller
+    /// says so once ([#SEAM]). A multi-byte name that matches is placed.
+    #[test]
+    fn a_chip_that_does_not_match_its_words_never_panics() {
+        let m = |k: u32| char::from_u32(CHIP_FIRST + k).unwrap();
+        let entity = |name: &str, index: usize| Mention {
+            id: "e".into(),
+            name: name.into(),
+            kind: MentionKind::Entity,
+            index,
+        };
+        // "@ÉÉ" is not "@Élodie": the 4-byte marker lands inside the second É.
+        let value = ComposerSubmission {
+            text: "@ÉÉ@Élodie 🌊".into(),
+            mentions: vec![entity("Élodie", 0), entity("Élodie", 1)],
+        };
+        let raw = format!("{}{} 🌊", m(0), m(1));
+        let (placed, unplaced) = sent_mentions(&raw, &value, value.text.trim());
+        assert!(placed.is_empty(), "{placed:?}");
+        assert_eq!(unplaced, vec!["Élodie".to_string(), "Élodie".to_string()]);
+        // Multi-byte names that do match are placed on their bytes.
+        let value = ComposerSubmission {
+            text: "hi @Élodie and @🌊 Wave".into(),
+            mentions: vec![entity("Élodie", 0), entity("🌊 Wave", 1)],
+        };
+        let raw = format!("hi {} and {}", m(0), m(1));
+        let (placed, unplaced) = sent_mentions(&raw, &value, &value.text);
+        assert!(unplaced.is_empty(), "{unplaced:?}");
+        for p in &placed {
+            assert_eq!(
+                &value.text[p.start..p.start + p.name.len() + 1],
+                format!("@{}", p.name)
+            );
+        }
+        assert_eq!(
+            placed.iter().map(|p| p.start).collect::<Vec<_>>(),
+            vec![3, 16]
         );
     }
 
