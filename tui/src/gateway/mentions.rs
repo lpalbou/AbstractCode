@@ -428,6 +428,62 @@ mod tests {
                        "identity_ref": null, "avatar": {"style": "watch-halo", "color": "#336699"}}})
     }
 
+    /// The wiring of [`never_asked`] (review round 6b F7a): a chain that a
+    /// 503 ends on its first call leaves no answer on its way, neither the
+    /// refused call's nor the one it never asks (its bubble and the run
+    /// ticker would otherwise run forever).
+    #[test]
+    fn a_stopped_chain_leaves_no_answer_on_its_way() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (url, server) = serve(
+            vec![(
+                503,
+                "entity_cannot_answer",
+                json!({"detail": "Castor cannot answer right now.", "code": "entity_cannot_answer"}),
+            )],
+            log.clone(),
+        );
+        let (root, ()) = abstracttui::reactive::create_root(|cx| {
+            let store = crate::store::Store::create(cx);
+            store.session_id.set("sess-1".into());
+            store
+                .pending_mentions
+                .set(mention::pending_for("sess-1", &calls()));
+            spawn_mentions(
+                EntityClient::new(&url, None),
+                abstracttui::reactive::wake_handle(),
+                store,
+                &MentionLanes::default(),
+                MentionMessage {
+                    session_id: "sess-1".into(),
+                    text: "@Castor @Pollux hi".into(),
+                    draft: "@Castor @Pollux hi".into(),
+                    chips: calls(),
+                    repeat_of: None,
+                    message: "msg-1".into(),
+                    calls: calls(),
+                },
+            );
+            let mut drained = false;
+            for _ in 0..500 {
+                abstracttui::reactive::drain_posted();
+                if store.pending_mentions.with_untracked(|p| p.is_empty()) {
+                    drained = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(
+                drained,
+                "left: {:?}",
+                store.pending_mentions.get_untracked()
+            );
+        });
+        root.dispose();
+        server.join().unwrap();
+        assert_eq!(*log.lock().unwrap(), ["recv 0"], "Pollux is never asked");
+    }
+
     /// A chain that ends at a call never asks the calls after it: their
     /// answers on their way go with that outcome (operator round 6).
     #[test]

@@ -5150,6 +5150,29 @@ mod tests {
     /// A tiny HTTP gateway for runner tests: answers each request by the
     /// first route whose prefix matches the path (after `/api/gateway`),
     /// 404 `{}` otherwise. Serves until the test process exits.
+    /// Read a request's header lines and its `Content-Length` body whole.
+    /// A fake that answered and closed with a POST body still unread made
+    /// the kernel RESET the socket instead of closing it, and the client
+    /// read "connection reset" instead of the answer — at random, more often
+    /// under a loaded parallel run (review round 6b F7b:
+    /// `mentions_repeat_the_turn_the_same_words_started` failed 4 of 8).
+    fn drain_request(reader: &mut impl std::io::BufRead) {
+        let mut length = 0usize;
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                break;
+            }
+            if let Some((k, v)) = line.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("content-length") {
+                    length = v.trim().parse().unwrap_or(0);
+                }
+            }
+        }
+        let mut body = vec![0u8; length];
+        let _ = reader.read_exact(&mut body);
+    }
+
     fn fake_gateway(routes: Vec<(&'static str, String)>) -> String {
         use std::io::{BufRead, BufReader, Write};
         let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -5160,12 +5183,7 @@ mod tests {
                 let mut reader = BufReader::new(sock.try_clone().unwrap());
                 let mut first = String::new();
                 let _ = reader.read_line(&mut first);
-                loop {
-                    let mut line = String::new();
-                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                        break;
-                    }
-                }
+                drain_request(&mut reader);
                 let path = first.split_whitespace().nth(1).unwrap_or("").to_string();
                 let path = path.trim_start_matches("/api/gateway").to_string();
                 let (status, body) = routes
@@ -6080,19 +6098,14 @@ mod tests {
     /// A gateway answering every request with `status_line` (e.g.
     /// `401 Unauthorized`): a gateway that is up but refuses the credential.
     fn fake_gateway_refusing(status_line: &'static str) -> String {
-        use std::io::{BufRead, BufReader, Write};
+        use std::io::{BufReader, Write};
         let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let url = format!("http://{}", l.local_addr().unwrap());
         std::thread::spawn(move || {
             for sock in l.incoming() {
                 let Ok(mut sock) = sock else { continue };
                 let mut reader = BufReader::new(sock.try_clone().unwrap());
-                loop {
-                    let mut line = String::new();
-                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                        break;
-                    }
-                }
+                drain_request(&mut reader);
                 let body = r#"{"detail":"Unauthorized"}"#;
                 let _ = write!(
                     sock,
