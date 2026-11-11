@@ -87,6 +87,10 @@ offer mentions yet." once and every answer reads "assistant" as before.
 
 ### Fixed
 
+- **A mention chip that does not match its words never stops the send.** A chip whose marker
+  did not expand to its "@name" (or met a name with accented letters or emoji) could crash the
+  send; it now stays as plain words and one faint seam line says so.
+
 - **The mouse wheel scrolls one automation, and every screen that windows its
   content.** Over the runs it scrolls the runs, anywhere else the selected
   run's output, three rows a notch, so a long reply can be read to its end. The
