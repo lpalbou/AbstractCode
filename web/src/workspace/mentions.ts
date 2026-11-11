@@ -344,28 +344,24 @@ export function startedTurn(answer: unknown): StartedTurn {
 }
 
 /** A turn the agent was not asked to answer: its row says `agent_addressed: false` (`GET /runs/{id}`,
- * a session turn, a view message); absent or true is an ordinary turn. */
+ * a session turn); absent or true is an ordinary turn. A view says it at its top level
+ * ([`noteUnaddressed`]), never on a message. */
 export function agentNotAddressed(value: unknown): boolean {
   return record(value)?.agent_addressed === false;
 }
 
 /**
- * The turns the agent was not addressed in, learned from a view (or a view delta): the person's
- * message of such a turn carries `agent_addressed: false`. Noted by run id into `into`; true when
- * something new was noted.
+ * The turn the agent was not addressed in, learned from its view (or a view frame): the gateway
+ * serves `agent_addressed: false` per TURN, at the TOP level of that turn's own view and absent
+ * otherwise, never inside `messages` (AbstractGateway replay_view.py `served_json`). Noted by the
+ * view's `root_run_id` into `into`; true when something new was noted.
  */
 export function noteUnaddressed(view: unknown, into: Set<string>): boolean {
-  const messages = record(view)?.messages;
-  if (!Array.isArray(messages)) return false;
-  let noted = false;
-  for (const raw of messages) {
-    const m = record(raw);
-    const runId = text(m?.run_id);
-    if (m?.role !== "user" || !runId || !agentNotAddressed(m) || into.has(runId)) continue;
-    into.add(runId);
-    noted = true;
-  }
-  return noted;
+  const v = record(view);
+  const root = text(v?.root_run_id);
+  if (v?.agent_addressed !== false || !root || into.has(root)) return false;
+  into.add(root);
+  return true;
 }
 
 /** The same on a `/view/stream` frame (`view` and `delta` carry messages; others teach nothing). */
