@@ -15,12 +15,12 @@ offer mentions yet." once and every answer reads "assistant" as before.
 
 ### Added
 
-- **Mentions read in the transcript as they were typed** (operator round 6, 2026-11-11, parity with the web): a
-  message you sent shows its `@` chips in its card, in the composer's chip style, placed from the composer's own
-  chip markers (a chip that cannot be placed keeps its words and one `[#SEAM]` line says so); while a mentioned
-  entity's answer is on its way, a bubble at the end of the transcript names it ("● Castor · entity  answering
-  •··", the dots moving) and its answer replaces it (a refusal removes it), with nothing above the box; your words
-  show once before the answers, a reopened conversation included.
+- **Mentions read in the transcript as they were typed** (operator round 6, 2026-11-11): a message you sent shows
+  its `@` chips in its card, styled as in the box (a chip that cannot be placed keeps its words, and a `[#SEAM]`
+  line says so; a reopened conversation shows the plain words). While a mentioned entity's answer is on its way, a
+  bubble at the end of the transcript names it ("● Castor · entity  answering •··", the dots moving); its answer
+  takes its place, a refusal removes it, and nothing shows above the box. Your words show once before the
+  answers, in a reopened conversation too.
 - **`@` mentions an entity from the conversation.** Typing `@` lists the
   entities this account may see; a pick is one chip, which Backspace removes
   whole, and a typed `@name` that was not picked is plain text, sent as typed.
@@ -122,10 +122,12 @@ once and replies carry no author.
 - **`@` mentions an entity from Code's chat.** Typing `@` lists the entities this account may see; a pick is a
   chip (a typed `@name` that was not picked stays plain text), and an entity you name reads the conversation's
   history before it answers. On send, the message starts its turn as before, then each picked entity
-  is asked in order, the next once the previous answered ("Castor is answering…" above the box); an entity picked
-  twice is asked once. Each answer is a turn of the conversation, so it reads the same after a reload; it appears
-  once the current reply has ended. "Castor is in another conversation." and an entity this account cannot
-  mention ("cannot be mentioned here", then no longer offered) are said and the next one is asked; when an entity
+  is asked in order, the next once the previous answered; an entity picked twice is asked once. While an
+  entity's answer is on its way, a bubble at the end of the conversation shows its name, "answering" and moving
+  dots, and nothing about it shows above the box. Each answer is a turn of the conversation, so it reads the same
+  after a reload; it appears once the current reply has ended and takes the bubble's place. "Castor is in another
+  conversation." and an entity this account cannot mention ("cannot be mentioned here", then no longer offered)
+  are said at once, that entity's bubble goes, and the next one is asked; when an entity
   cannot answer, the asking stops and the message goes back into the box with only the entities that did not
   answer: sending the same words again asks only those, starts no new turn, and never asks an entity twice. Stop
   during the mentions says who was not asked ("Stopped before asking Hypnos."). A guided message asks its names
@@ -169,8 +171,8 @@ once and replies carry no author.
 
 - A conversation that opens on an entity's answer continues with its newest agent turn's workflow, instead of
   saying its workflow is no longer available.
-- Your words show once when an entity answers them, and only while your own turn is on screen (a mention turn
-  shown alone keeps its question).
+- Your words show once before the entities' answers, however many entities you named, a message to entities
+  only included (a mention turn shown alone keeps its question).
 - A mention sent while a run is working (guidance, or the Avatar view's message to the running turn) is
   answered, instead of being refused with "That earlier message is not one of your own turns in this
   conversation".

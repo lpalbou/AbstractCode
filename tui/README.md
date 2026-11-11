@@ -72,8 +72,9 @@ you can scroll with the wheel; built on AbstractTUI 0.8.0
   entity chips only the agent stays out (no agent run starts), with the
   agent's chip too (listed first) your message starts
   the agent's turn, which leaves the entity's part to it; then the entity
-  answers in the conversation as `● Castor · entity`
-  (AbstractGateway 0.21.0). Each visit gets its own transcript
+  answers in the conversation as `● Castor · entity` (until it does, its
+  bubble reads `● Castor · entity  answering •··`), and your sent message
+  keeps its chips (AbstractGateway 0.21.0). Each visit gets its own transcript
   and header chip, and `Alt+E`
   cycles focus between the agent and open visits. Entity turns are
   non-interruptible and stream no mid-turn progress (a server-side

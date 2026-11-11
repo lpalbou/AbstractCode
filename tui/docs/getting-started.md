@@ -137,7 +137,10 @@ line shows no spinner); pick the agent too and your message starts the agent's
 turn, and the agent answers only the part meant for it (or says nothing).
 Either way each mentioned entity then answers in the conversation, in order,
 under its own name (`● Castor · entity`), and the agent's answer reads
-`✦ basic-agent · agent`. While a reply runs, a message steers it, chips or
+`✦ basic-agent · agent`. Until an entity answers, its bubble at the end of the
+transcript reads `● Castor · entity  answering •··`; the answer takes its place
+and a refusal removes it. The message you sent shows its chips, and your words
+show once before the answers. While a reply runs, a message steers it, chips or
 not. Mentions need AbstractGateway 0.21.0.
 
 Two honesty rules to know up front: entity turns are **non-interruptible**

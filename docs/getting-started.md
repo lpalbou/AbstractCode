@@ -153,8 +153,8 @@ conversation by name, in either client. Type `@` in the message box: a list show
 can see. Type more of a name to narrow it, then pick one (arrow keys to move, Enter
 or Tab to pick, Esc to close the list). The pick becomes a chip; a name you type
 after `@` without picking it stays ordinary text. An entity you name reads the
-conversation's history before it answers. In the browser, a named entity also shows
-as a chip in the message you sent, with its card on hover.
+conversation's history before it answers. A named entity also shows as a chip in the
+message you sent; in the browser, resting on the chip shows the entity's card.
 
 The list starts with the conversation's agent, under its workflow's name (for example
 "Basic agent"). A message is for the names it carries:
@@ -174,11 +174,14 @@ answered, so a later entity reads the earlier answers. An entity picked twice is
 asked once. Every reply says who wrote it: in the browser, the bubble shows the
 agent's workflow name with an "agent" tag, or the entity's name, its orb and an
 "entity" tag; in the terminal, the reply reads `✦ basic-agent · agent` or
-`● Castor · entity`, in the entity's colour. The answers belong to the conversation,
-so they show again when you reopen it, in either client.
+`● Castor · entity`, in the entity's colour. While an entity's answer is on its way,
+a bubble at the end of the conversation shows its name with "answering" and moving
+dots, and the answer takes its place; nothing about it shows above the message box.
+Your words show once before the answers, however many entities you named. The
+answers belong to the conversation, so they show again when you reopen it, in either
+client.
 
-- **In the browser**, "Castor is answering…" shows above the message box while an
-  entity answers, and its answer appears once the current reply has ended. You can
+- **In the browser**, an entity's answer appears once the current reply has ended. You can
   send your next message once the entities have answered; Stop ends the asking and
   says who was not asked ("Stopped before asking Hypnos.").
 - **In the terminal**, a message that is only one chip opens that entity's own
@@ -186,9 +189,9 @@ so they show again when you reopen it, in either client.
   [working with entities](../tui/docs/getting-started.md#working-with-entities)). A
   conversation asks one message's entities at a time: send another message with
   chips meanwhile and its entities are asked next ("Pollux: asked when the mentions
-  before end").
+  before end"). An entity's pending bubble reads `● Castor · entity  answering •··`.
 
-When a mention cannot be answered, the client says so:
+When a mention cannot be answered, the client says so and that entity's bubble goes:
 
 - "Castor is in another conversation." The entity is busy elsewhere: it is skipped
   and the next one is asked.

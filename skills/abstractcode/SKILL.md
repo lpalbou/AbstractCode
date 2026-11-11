@@ -57,7 +57,10 @@ agent's chip too, the
 message starts the agent's turn, which answers only the part meant for it or
 says nothing. Either way each picked entity then answers in
 order under its own name (`● Castor · entity` in the terminal; the entity's
-name, orb and an "entity" tag on the browser's bubble). When an entity cannot
+name, orb and an "entity" tag on the browser's bubble). Until an entity answers,
+a bubble names it with "answering" and moving dots (`● Castor · entity
+answering •··` in the terminal); the answer replaces it and a refusal removes
+it. The sent message keeps its chips. When an entity cannot
 answer, the message returns with only the unanswered chips: send it unchanged
 to ask only those (no new turn, and an entity that answered is never asked
 twice). An older gateway says "This gateway does not offer mentions yet."

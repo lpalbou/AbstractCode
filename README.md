@@ -15,11 +15,13 @@ Status: **pre-alpha.** Interfaces and UX may change.
 What's new: terminal 0.15.0 mentions an entity with `@` (the agent leaves the
 entity's part to it, and every answer names its author), shows one automation as
 panels with a runs table and a scrollable run output, and is built on AbstractTUI
-0.8.0. Browser 0.16.0 mentions an entity with `@` too (a named entity shows as a
-chip in the message, with its card on hover), names every reply's author, moves the
+0.8.0. Browser 0.16.0 mentions an entity with `@` too (a chip in your sent message
+shows the entity's card on hover), names every reply's author, moves the
 iteration limit to Model → Limits & streaming, and shows each part of its first
 screen as soon as the gateway's answers for it arrive. In both, `@` lists the
-conversation's agent first, and a message to entities only does not reach the agent. Browser 0.15.4 never sends a reasoning level or MTP setting the model cannot use
+conversation's agent first, a message to entities only does not reach the agent,
+your sent message keeps its chips, and while an entity's answer is on its way its
+bubble shows in the conversation with its name and moving dots. Browser 0.15.4 never sends a reasoning level or MTP setting the model cannot use
 (changing the model puts both back on the gateway default) and always opens on the Conversation
 view. Browser 0.15.3 no longer lists AbstractNote's own work (note captures and the
 "Process / Reflect / Consolidate my notes" automations) among your conversations and automations,
