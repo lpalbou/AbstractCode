@@ -147,7 +147,7 @@ import type { AttachmentRef } from "../lib/types";
 import { RunStatusBar } from "./run_status_bar";
 import { CODE_CAPTURE_DEFAULTS, CodeVoiceSettings, VoiceTools, fetchVoiceDefaults, spokenMessage, useWorkspaceVoice } from "./voice_tools";
 import { workflowPromptProperty, restoreWorkflowFields } from "./input_schema";
-import { READ_ALOUD_INITIAL, readAloudStep, WorkingDots } from "@abstractframework/panel-chat";
+import { READ_ALOUD_INITIAL, readAloudStep } from "@abstractframework/panel-chat";
 import { codeReadAloudInput } from "./read_aloud_input";
 import { TOOLS_MIGRATION_NOTICE, migrateLegacyTools, toolsMigrationKey } from "./tool_layers";
 import {
@@ -2424,8 +2424,8 @@ export function CodeWorkspace() {
               messageProps={{
                 renderMentionCard: (mention) => mentionCard(mention, entityCards.current?.identity === identity ? entityCards.current.cards : null),
                 renderFooter: (message) => {
-                  // An answer on its way: its three dots in its bubble.
-                  if (String(message.id || "").startsWith(PENDING_MENTION_ID)) return <WorkingDots label={`${message.author?.name || "The entity"} is answering`} />;
+                  // The shared card owns the pending reply's body indicator.
+                  if (String(message.id || "").startsWith(PENDING_MENTION_ID)) return null;
                   const status = message.runId === session.runId ? snapshot.status : catalog.sessionActivity[session.sessionId]?.content.find((c) => c.runId === message.runId)?.status;
                   if (!status) return null;
                   const target = sessionReadTarget(message.kind === "attachments" ? [...messages,message] : messages, message.runId || "", status);

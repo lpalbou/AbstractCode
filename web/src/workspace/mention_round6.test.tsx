@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { WorkingDots, type ChatMessage } from "@abstractframework/panel-chat";
+import { type ChatMessage } from "@abstractframework/panel-chat";
 import { WorkflowChat } from "../vendor/abstractchat/conversation.js";
 import { foldRepeatedTurns, pendingMentionsFor, PENDING_MENTION_ID, sendMentions, withPendingMentions } from "./mentions";
 
@@ -68,10 +68,10 @@ describe("an answer on its way is a bubble with its dots, not a line in the comp
   it("the thread draws its author and its three dots", () => {
     const html = renderToStaticMarkup(
       <WorkflowChat draft="" onDraftChange={() => {}} onSend={() => {}} messages={withPendingMentions([], pending.slice(0, 1))}
-        messageProps={{ renderFooter: (m) => (String(m.id || "").startsWith(PENDING_MENTION_ID) ? <WorkingDots label={`${m.author?.name} is answering`} /> : null) }} />,
+        messageProps={{ renderFooter: () => null }} />,
     );
     expect(html).toContain("Castor");
-    expect(html).toContain("pc-working-dots");
+    expect(html.match(/class="pc-working-dots"/g)?.length).toBe(1);
     expect(html).toContain("answering");
   });
 
@@ -98,12 +98,12 @@ describe("an answer on its way is a bubble with its dots, not a line in the comp
     expect(app).toMatch(/onSkipped: \(mention, refusal\) => \{\s*forThis\(\(entries\) => entries\.filter\(\(e\) => !\(e\.mention\.id === mention\.id && e\.mention\.index === mention\.index\)\)\);\s*if \(here\(\)\) setMentionStatus\(\{ sessionId, text: refusal\.sentence \}\);/);
   });
 
-  it("the app: no 'is answering' line, the bubbles in the thread, their dots in the footer, cleared on follow", () => {
+  it("the app: no 'is answering' line, the bubbles in the thread, their dots in the shared body, cleared on follow", () => {
     expect(app).not.toContain("is answering…");
     expect(app).toContain("setPendingMentions({ sessionId, entries: pendingMentionsFor(message, mentions, (m) => cards?.get(m.id)?.avatar) });");
     expect(app).toContain("forThis((entries) => entries.filter((e) => e.runId));");
     expect(app).toContain("pendingMentions?.sessionId === session.sessionId ? pendingMentions.entries : [],");
-    expect(app).toContain("if (String(message.id || \"\").startsWith(PENDING_MENTION_ID)) return <WorkingDots");
+    expect(app).toContain("if (String(message.id || \"\").startsWith(PENDING_MENTION_ID)) return null;");
     expect(app).toMatch(/setFollowTurn\(null\);\s*\/\/[^\n]*\n\s*setPendingMentions\(\(now\) => \(now && now\.sessionId === followTurn\.sessionId \? null : now\)\);/);
   });
 });

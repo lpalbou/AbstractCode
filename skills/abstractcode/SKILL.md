@@ -3,7 +3,7 @@ name: abstractcode
 description: Operate AbstractCode terminal and browser clients of AbstractGateway. Use for connecting, continuing durable coding sessions, inspecting tool permissions and workspaces, asking scoped assistant questions, or configuring terminal voice and dictation.
 license: MIT
 metadata:
-  package-version: "terminal 0.15.0 / web 0.16.0"
+  package-version: "terminal 0.15.0 / web 0.16.1"
 ---
 
 # Use AbstractCode
@@ -47,7 +47,7 @@ scrolling, arrow keys and explicit buttons are available in the Tools list.
 
 ## Mentions
 
-In either client (terminal 0.15.0, web 0.16.0, with AbstractGateway 0.21.0),
+In either client (terminal 0.15.0, web 0.16.1, with AbstractGateway 0.21.0),
 type `@` and pick an entity: the pick is a chip, and a typed `@name` that was
 not picked is plain text. The list starts with the conversation's agent (sent
 as `agent` in the start's `mentions`). In the terminal, a message that is only

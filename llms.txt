@@ -24,7 +24,7 @@ Ground rules for reading this repository:
   voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
   (shared unread markers, the Avatar view's live line and Findings, the Paused · N
   section) needs 0.20.0 or later; `@` mentions and the reply's author (terminal
-  0.15.0, browser 0.16.0) need 0.21.0.
+  0.15.0, browser 0.16.1) need 0.21.0.
 - Tools are approval-gated by default; approvals are durable gateway commands,
   so a wait raised in one client is answerable from the other.
 - The authoritative command list is `/help` inside the terminal client, and

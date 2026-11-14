@@ -117,36 +117,49 @@ describe("a start the agent was not addressed in", () => {
   });
 });
 
-describe("the turn reads the same after a reload (`agent_addressed: false`)", () => {
-  const view = {
+describe("the turn reads the same after a reload (`agent_addressed: false`, as served)", () => {
+  // AbstractGateway replay_view.py served_json: the flag sits at the TOP of the turn's own view (its
+  // root), absent otherwise, never inside `messages`; GET /runs and the session turns carry it on the row.
+  const personView = {
+    version: "replay_view_v1", root_run_id: "p1", session_id: "s1", status: "completed", agent_addressed: false, cursor: { token: "p1:0~x", records: 0, runs: { p1: 0 } },
+    messages: [{ id: "p1:input", role: "user", kind: "prompt", text: "@Castor is it ready?", run_id: "p1" }],
+  };
+  const mentionView = {
     version: "replay_view_v1", root_run_id: "m1", session_id: "s1", status: "completed", cursor: { token: "m1:0~x", records: 0, runs: { m1: 0 } },
     messages: [
-      { id: "p1:input", role: "user", kind: "prompt", text: "@Castor is it ready?", run_id: "p1", agent_addressed: false },
+      { id: "m1:input", role: "user", kind: "prompt", text: "@Castor is it ready?", run_id: "m1" },
       { id: "m1:final", role: "assistant", kind: "final", text: "It is.", run_id: "m1" },
     ],
   };
-  it("the marker on a run, a session turn or a view message; absent or true is an ordinary turn", () => {
+  it("the marker on a run or a session turn's row; on a view, at its top level by its root; never on a message", () => {
     expect(agentNotAddressed({ run_id: "p1", agent_addressed: false })).toBe(true);
     expect(agentNotAddressed({ run_id: "a1", agent_addressed: true })).toBe(false);
     expect(agentNotAddressed({ run_id: "a1" })).toBe(false);
     expect(agentNotAddressed(null)).toBe(false);
     const into = new Set<string>();
-    expect(noteUnaddressed(view, into)).toBe(true);
+    expect(noteUnaddressed(personView, into)).toBe(true);
     expect([...into]).toEqual(["p1"]);
-    expect(noteUnaddressed(view, into)).toBe(false);
+    expect(noteUnaddressed(personView, into)).toBe(false);
+    expect(noteUnaddressed(mentionView, into)).toBe(false);
+    // A flag on a message is not what the gateway serves: never read.
+    const onMessage = { ...mentionView, messages: [{ ...mentionView.messages[0], run_id: "p9", agent_addressed: false }] };
+    expect(noteUnaddressed(onMessage, new Set())).toBe(false);
     const fromFrame = new Set<string>();
-    expect(noteUnaddressedFrame({ event: "delta", data: JSON.stringify({ messages: [view.messages[0]] }) }, fromFrame)).toBe(true);
+    expect(noteUnaddressedFrame({ event: "view", data: JSON.stringify(personView) }, fromFrame)).toBe(true);
     expect([...fromFrame]).toEqual(["p1"]);
     expect(noteUnaddressedFrame({ event: "done", data: "{}" }, new Set())).toBe(false);
-    const plain = { ...view, messages: [{ ...view.messages[0], agent_addressed: undefined }] };
-    expect(noteUnaddressed(plain, new Set())).toBe(false);
   });
-  it("the app's workflow transport notes it from every view it reads", async () => {
+  it("after a reload the app's workflow transport notes it from the turn's own view", async () => {
     vi.stubGlobal("document", { cookie: "" });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(view), { status: 200, headers: { ETag: '"m1:0~x"' } })));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const view = String(url).includes("/p1/") ? personView : mentionView;
+      return new Response(JSON.stringify(view), { status: 200, headers: { ETag: `"${view.cursor.token}"` } });
+    }));
     const unaddressed = new Set<string>();
     const transport = createWorkflowTransport({ onDeltaError() {}, streams: new StreamGate(), unaddressed });
     await transport.replayView!.getView("m1");
+    expect([...unaddressed]).toEqual([]);
+    await transport.replayView!.getView("p1");
     expect([...unaddressed]).toEqual(["p1"]);
   });
   it("such a turn is no workflow turn: the conversation continues with its agent turn's workflow", () => {

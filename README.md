@@ -15,7 +15,7 @@ Status: **pre-alpha.** Interfaces and UX may change.
 What's new: terminal 0.15.0 mentions an entity with `@` (the agent leaves the
 entity's part to it, and every answer names its author), shows one automation as
 panels with a runs table and a scrollable run output, and is built on AbstractTUI
-0.8.0. Browser 0.16.0 mentions an entity with `@` too (a chip in your sent message
+0.8.0. Browser 0.16.1 mentions an entity with `@` too (a chip in your sent message
 shows the entity's card on hover), names every reply's author, moves the
 iteration limit to Model → Limits & streaming, and shows each part of its first
 screen as soon as the gateway's answers for it arrive. In both, `@` lists the
@@ -61,7 +61,7 @@ voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
 (shared unread markers, the Avatar view's live line and Findings, the `Paused · N`
 section) needs 0.20.0 or later; with an older gateway every update shows as progress
 and automations are listed without sections. `@` mentions and answer authors
-(terminal 0.15.0, browser 0.16.0) need 0.21.0 or later.
+(terminal 0.15.0, browser 0.16.1) need 0.21.0 or later.
 
 Then start whichever client you prefer:
 
