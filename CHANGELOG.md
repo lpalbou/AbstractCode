@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [web 0.16.1] - 2026-11-14
 
+- Each pending entity reply shows one set of working dots in its message body.
 - A reopened turn addressed only to entities keeps the agent silent. The conversation no longer
   waits for an agent reply or adds an empty-answer notice to that turn.
 - Shared reply badges show confirmed question resolutions, omit private titles and open the
