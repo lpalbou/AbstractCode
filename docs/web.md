@@ -1,5 +1,6 @@
 # AbstractCode Web
 
+Browser version 0.16.1 keeps turns addressed only to entities silent for the agent, including after you reopen the conversation. Confirmed question-resolution badges open the original question; private entries reveal no title.
 AbstractCode Web is a gateway-authenticated workspace for coding agents and registered workflows. The browser observes durable runs; it does not execute models, workflow nodes, or tools locally.
 
 Start with [getting started](getting-started.md). For hosting and authentication, see [web deployment](deployment-web.md).
