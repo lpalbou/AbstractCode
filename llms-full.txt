@@ -27,7 +27,7 @@ Status: **pre-alpha.** Interfaces and UX may change.
 What's new: terminal 0.15.0 mentions an entity with `@` (the agent leaves the
 entity's part to it, and every answer names its author), shows one automation as
 panels with a runs table and a scrollable run output, and is built on AbstractTUI
-0.8.0. Browser 0.16.0 mentions an entity with `@` too (a chip in your sent message
+0.8.0. Browser 0.16.1 mentions an entity with `@` too (a chip in your sent message
 shows the entity's card on hover), names every reply's author, moves the
 iteration limit to Model → Limits & streaming, and shows each part of its first
 screen as soon as the gateway's answers for it arrive. In both, `@` lists the
@@ -73,7 +73,7 @@ voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
 (shared unread markers, the Avatar view's live line and Findings, the `Paused · N`
 section) needs 0.20.0 or later; with an older gateway every update shows as progress
 and automations are listed without sections. `@` mentions and answer authors
-(terminal 0.15.0, browser 0.16.0) need 0.21.0 or later.
+(terminal 0.15.0, browser 0.16.1) need 0.21.0 or later.
 
 Then start whichever client you prefer:
 
@@ -1635,6 +1635,7 @@ language models and tooling.
 
 # AbstractCode Web
 
+Browser version 0.16.1 keeps turns addressed only to entities silent for the agent, including after you reopen the conversation. Confirmed question-resolution badges open the original question; private entries reveal no title.
 AbstractCode Web is a gateway-authenticated workspace for coding agents and registered workflows. The browser observes durable runs; it does not execute models, workflow nodes, or tools locally.
 
 Start with [getting started](getting-started.md). For hosting and authentication, see [web deployment](deployment-web.md).
@@ -4724,6 +4725,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.16.1] - 2026-11-14
+
+- Each pending entity reply shows one set of working dots in its message body.
+- A reopened turn addressed only to entities keeps the agent silent. The conversation no longer
+  waits for an agent reply or adds an empty-answer notice to that turn.
+- Shared reply badges show confirmed question resolutions, omit private titles and open the
+  resolved question. Replies awaiting their first words show working dots.
+
 ## [terminal 0.15.0] - 2026-11-10
 
 Built on AbstractTUI 0.8.0. `@` mentions and the answer's author need
@@ -4804,6 +4813,10 @@ offer mentions yet." once and every answer reads "assistant" as before.
   conversation", never "Conversation" followed by part of its session ID.
 
 ### Fixed
+
+- **A mention chip that does not match its words never stops the send.** A chip whose marker
+  did not expand to its "@name" (or met a name with accented letters or emoji) could crash the
+  send; it now stays as plain words and one faint seam line says so.
 
 - **The mouse wheel scrolls one automation, and every screen that windows its
   content.** Over the runs it scrolls the runs, anywhere else the selected
