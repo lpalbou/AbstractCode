@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.16.2] - 2026-11-18
+
+- A picture attached to a message shows as a thumbnail instead of a file chip; it loads as it
+  scrolls into view. Clicking it opens the preview at the picture's actual size, and a picture
+  larger than the window scrolls inside the preview. Built on `@abstractframework/panel-chat` 0.9.15.
+
 ## [web 0.16.1] - 2026-11-14
 
 - Each pending entity reply shows one set of working dots in its message body.
