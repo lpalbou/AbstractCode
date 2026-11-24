@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.16.3] - 2026-11-24
+
+- When your sign-in to the gateway has ended (for example after the admin password was changed
+  in another window), the Automations list says "Sign in to the gateway to manage automations."
+  with the gateway's own sentence, instead of "The gateway gave an unexpected answer". Open
+  AbstractCode again from the gateway console to sign in; a gateway with no automations shows the
+  empty list as before. Built on `@abstractframework/ui-kit` 0.9.29.
+
 ## [web 0.16.2] - 2026-11-18
 
 - A picture attached to a message shows as a thumbnail instead of a file chip; it loads as it

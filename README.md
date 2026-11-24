@@ -61,7 +61,7 @@ voice routes need AbstractGateway 0.13.0 or later; the browser client 0.15.0
 (shared unread markers, the Avatar view's live line and Findings, the `Paused · N`
 section) needs 0.20.0 or later; with an older gateway every update shows as progress
 and automations are listed without sections. `@` mentions and answer authors
-(terminal 0.15.0, browser 0.16.2) need 0.21.0 or later.
+(terminal 0.15.0, browser 0.16.3) need 0.21.0 or later.
 
 Then start whichever client you prefer:
 
