@@ -11,6 +11,7 @@ import type { SessionSummary } from "./catalog";
 
 const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
 const archivedSource = readFileSync(new URL("./archived_conversations.tsx", import.meta.url), "utf8");
+const css = readFileSync(new URL("./workspace.css", import.meta.url), "utf8");
 
 const item = (over: Partial<SessionSummary> = {}) =>
   ({ sessionId: "s1", prompt: "Fix the parser", latestRunId: "r1", firstRunId: "r1", runIds: ["r1"], turnCount: 1, updatedAt: "2026-10-04T01:00:00Z", state: "done", truncated: false, ...over }) as SessionSummary;
@@ -32,6 +33,11 @@ describe("the card's Rename action", () => {
     expect(html).toContain('aria-current="page"');
     expect(html).toContain(">Parser work</span>");
     expect(html).toContain('aria-label="Rename Parser work"');
+  });
+  it("with a mouse, floats left of the floating archive icon in the sidebar (never under it)", () => {
+    const pointer = css.slice(css.indexOf(".code-sidebar .af-session-card { position: relative; }"));
+    expect(pointer).toMatch(/\.code-sidebar \.af-session-card__rename \{\s*position: absolute;/);
+    expect(pointer).toContain(".code-sidebar .af-session-card__rename:not(:last-child) { right: 38px; }");
   });
   it("says a refusal under the card, the way an archive refusal is said", () => {
     const html = card({ onRename: async () => {}, renameError: "Not renamed: session_not_found" });

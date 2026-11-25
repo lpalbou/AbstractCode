@@ -2994,6 +2994,16 @@ select option {
     transform: translateY(-50%);
     background: var(--ui-surface-2);
   }
+  /* Rename (a gateway that stores names) floats the same way, just left of archive. */
+  .code-sidebar .af-session-card__rename {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    margin: 0;
+    transform: translateY(-50%);
+    background: var(--ui-surface-2);
+  }
+  .code-sidebar .af-session-card__rename:not(:last-child) { right: 38px; }
 }
 /* Section headers: a quiet label row, not a raised band. */
 .code-sidebar .code-panel-header {
