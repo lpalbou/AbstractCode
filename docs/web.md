@@ -1,6 +1,6 @@
 # AbstractCode Web
 
-Browser version 0.16.3 asks you to sign in again in the Automations list when your gateway sign-in has ended. Version 0.16.2 shows a picture attached to a message as a thumbnail; clicking it opens the picture at its actual size. Version 0.16.1 keeps turns addressed only to entities silent for the agent, including after you reopen the conversation. Confirmed question-resolution badges show the recorded notice; clicking one opens its notice details. Private entries reveal no title.
+Browser version 0.16.4 lets you rename a conversation from its card (a gateway that stores names; see [Renaming a conversation](#renaming-a-conversation)). Version 0.16.3 asks you to sign in again in the Automations list when your gateway sign-in has ended. Version 0.16.2 shows a picture attached to a message as a thumbnail; clicking it opens the picture at its actual size. Version 0.16.1 keeps turns addressed only to entities silent for the agent, including after you reopen the conversation. Confirmed question-resolution badges show the recorded notice; clicking one opens its notice details. Private entries reveal no title.
 AbstractCode Web is a gateway-authenticated workspace for coding agents and registered workflows. The browser observes durable runs; it does not execute models, workflow nodes, or tools locally.
 
 Start with [getting started](getting-started.md). For hosting and authentication, see [web deployment](deployment-web.md).

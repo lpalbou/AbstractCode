@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.16.4] - 2026-11-25
+
 - Rename a conversation: the pencil next to a card's archive icon, F2 on a focused card or a
   double-click on its name turns the name into a text box; Enter keeps the new name, Escape or a
   click elsewhere keeps the old one, and an empty name brings back the first message. The name is
