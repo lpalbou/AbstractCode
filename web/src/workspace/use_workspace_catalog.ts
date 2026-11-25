@@ -65,6 +65,11 @@ type CatalogState = {
   capabilitiesError: string;
   /** The gateway stores conversation names (`capabilities.session_titles`, session_titles.ts): Rename is offered. */
   sessionTitles: boolean;
+  /**
+   * The gateway listed the conversations but could not read their stored names
+   * (`session_titles_error` of `GET /runs`): its sentence, shown once in the sidebar; "" otherwise.
+   */
+  titlesNotice: string;
   /** The same `GET discovery/tools` answer as the kit reads it (ToolModeEditor, planRunTools). */
   toolCatalog: ToolCatalogItem[];
   /** The catalog's warnings in the gateway's words (plugin load failures, MCP). */
@@ -103,6 +108,7 @@ const empty: CatalogState = {
   sessionToolPolicy: null,
   capabilitiesError: "",
   sessionTitles: false,
+  titlesNotice: "",
   toolCatalog: [],
   toolWarnings: [],
   streaming: STREAMING_LOADING,
@@ -129,9 +135,22 @@ function capabilityFields(value: any, failure?: string) {
     capabilitiesLoading: false,
     sessionToolPolicy: sessionToolPolicyCapability(value),
     capabilitiesError: failure ? `Could not read the gateway's capabilities: ${failure}` : "",
-    sessionTitles: gatewaySupportsSessionTitles(value),
+    // A failed read keeps what the gateway said last (a passing 502 must not close an open editor).
+    ...(failure ? {} : { sessionTitles: gatewaySupportsSessionTitles(value) }),
     streaming: streamingCapability(value, failure),
     iterationLimit: iterationLimitDefaultFrom(value),
+  };
+}
+
+/** A runs page without one session's rows (the shape of the page kept). */
+export function withoutSession(runs: unknown, sessionId: string): unknown {
+  const keep = (rows: unknown[]) => rows.filter((row) => String((row as any)?.session_id ?? (row as any)?.sessionId ?? "") !== sessionId);
+  if (Array.isArray(runs)) return keep(runs);
+  const body = (runs || {}) as Record<string, unknown>;
+  return {
+    ...body,
+    ...(Array.isArray(body.items) ? { items: keep(body.items) } : {}),
+    ...(Array.isArray(body.runs) ? { runs: keep(body.runs) } : {}),
   };
 }
 
@@ -222,8 +241,10 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       titles.current.landed(listGen);
       lastRuns.current = runs;
       const page = pageOf(runs);
+      const titlesError = runs?.session_titles_error;
       setState((s) => ({
         ...s,
+        titlesNotice: titlesError ? String(titlesError.message || titlesError.reason_code || "the stored names are unreadable") : "",
         sessionsLoading: false,
         sessions: page.sessions,
         notesSessions: normalizeSessionSummaries(runs, {}, { purpose: "notes" }),
@@ -372,6 +393,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
   }, [loadConversations]);
   /** Archived (round 6): drop it from the shown list and count it now; the list reload confirms. */
   const forgetSession = useCallback((sessionId: string) => {
+    // The last runs page too: it is what a rename answer redraws the list from.
+    if (lastRuns.current) lastRuns.current = withoutSession(lastRuns.current, sessionId);
     setState((s) => ({
       ...s,
       sessions: s.sessions.filter((item) => item.sessionId !== sessionId),

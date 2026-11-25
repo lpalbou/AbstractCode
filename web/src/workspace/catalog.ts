@@ -6,6 +6,18 @@ import {
   type StreamRepliesMode,
 } from "@abstractframework/panel-chat";
 export type JsonObject = Record<string, unknown>;
+
+/** The longest conversation name the gateway stores, in characters (code points). */
+export const SESSION_TITLE_MAX = 120;
+
+/**
+ * A name as served, cut to SESSION_TITLE_MAX characters. The gateway already normalises and cuts
+ * what it stores and serves; this is only the client's one guard against an oversized answer (a
+ * served name is read here and from the rename answer, session_titles.ts).
+ */
+export function cutSessionTitle(title: string): string {
+  return Array.from(title).slice(0, SESSION_TITLE_MAX).join("");
+}
 export type JsonSchema = JsonObject;
 
 export type WorkflowRegistryScope = "private" | "tenant_catalog";
@@ -742,7 +754,8 @@ export function normalizeSessionSummaries(
       if (prompt) break;
     }
     // The stored name rides on every row of a titled session; any listed row says it.
-    const title = newest.map(({ run }) => text(run.session_title)).find(Boolean);
+    const served = newest.map(({ run }) => text(run.session_title)).find(Boolean);
+    const title = served ? cutSessionTitle(served) : undefined;
     let toolCalls: number | undefined = 0;
     for (const { run } of group) {
       const count = run.tool_calls;

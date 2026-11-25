@@ -3004,6 +3004,9 @@ select option {
     background: var(--ui-surface-2);
   }
   .code-sidebar .af-session-card__rename:not(:last-child) { right: 38px; }
+  /* While they show (hover, keyboard focus), the row's text makes room for them instead of running under. */
+  .code-sidebar .af-session-card:is(:hover, :focus-within):has(> .af-session-card__archive, > .af-session-card__rename) > .af-session-card__open { padding-right: 40px; }
+  .code-sidebar .af-session-card:is(:hover, :focus-within):has(> .af-session-card__rename):has(> .af-session-card__archive) > .af-session-card__open { padding-right: 72px; }
 }
 /* Section headers: a quiet label row, not a raised band. */
 .code-sidebar .code-panel-header {

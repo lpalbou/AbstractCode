@@ -59,7 +59,9 @@ import { SidebarDrawer } from "./sidebar_drawer";
 import { CodeDefaultWorkspacesDialog } from "./workspace_folders";
 import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
 import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
-import { ConversationCard, conversationTitle, searchConversations } from "./sidebar_cards";
+import { ConversationCard, conversationHeaderTitle, searchConversations } from "./sidebar_cards";
+import { useConversationRename } from "./rename_state";
+import type { SessionSummary } from "./catalog";
 import {
   WorkspaceBrowser,
   uploadRefusal,
@@ -198,6 +200,8 @@ export function CodeWorkspace() {
     void connection.refresh();
   }, [connection.refresh]);
   const catalog = useWorkspaceCatalog(identity, onAuthError);
+  // Rename (backlog 1343): which row is being renamed, and the refusal shown under it.
+  const renaming = useConversationRename(identity, catalog.renameSession);
   const readScope = sessionReadScope(connection.status);
   const observedReceipts = useMemo(() => Object.values(catalog.sessionActivity || {}).flatMap((a) => a.content), [catalog.sessionActivity]);
   const readClient = useMemo(() => createSessionReadClient((path, init) => fetch(path, { ...init, credentials: "same-origin", headers: { ...init?.headers, ...csrfHeaders() } })), [identity]);
@@ -297,6 +301,8 @@ export function CodeWorkspace() {
   >(null);
   const isAgent = isChatAgent(workflow);
   const [session, setSession] = useState(route);
+  // The listed item a conversation was opened from (its name, for the header while it is not listed).
+  const [openedFrom, setOpenedFrom] = useState<(Pick<SessionSummary, "title" | "prompt"> & { sessionId: string }) | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -630,13 +636,14 @@ export function CodeWorkspace() {
   const currentSession =
     catalog.sessions.find((item) => item.sessionId === session.sessionId) ??
     catalog.notesSessions.find((item) => item.sessionId === session.sessionId);
-  // The header names the conversation as its sidebar row does (conversationTitle): its stored
-  // name, else its first message (the shown one while the list has none yet).
-  const firstAsked = currentSession?.prompt || messages.find((m) => m.role === "user")?.content;
-  const title =
-    currentSession || session.runId || firstAsked
-      ? conversationTitle({ title: currentSession?.title, prompt: firstAsked })
-      : "New conversation";
+  // The header names the conversation as its sidebar row does: its stored name, else its first
+  // message; a conversation opened from outside the list (Archived) keeps the name it was opened with.
+  const title = conversationHeaderTitle({
+    listed: currentSession,
+    opened: openedFrom?.sessionId === session.sessionId ? openedFrom : undefined,
+    firstAsked: messages.find((m) => m.role === "user")?.content,
+    hasRun: Boolean(session.runId),
+  });
   // "Email isn't set up — open My email": the gateway console's Users tab,
   // in a new tab (the console has its own sign-in).
   const myEmailUrl = myEmailConsoleUrl(connection.status?.gateway_url);
@@ -917,7 +924,19 @@ export function CodeWorkspace() {
     setAutomationView(false);
   }, []);
   /** Open a gateway session as the conversation (sidebar, a discussion fork, a run). */
-  const openConversation = useCallback((sessionId: string, runId: string) => {
+  const openConversation = useCallback((sessionId: string, runId: string, from?: Pick<SessionSummary, "title" | "prompt">) => {
+    setOpenedFrom(from ? { sessionId, title: from.title, prompt: from.prompt } : null);
+    // The conversation already open (its card clicked again): only its latest turn is followed; the
+    // draft, the queued turns and the uploads stay.
+    if (sessionRef.current.sessionId === sessionId && sessionRef.current.sessionId) {
+      if (sessionRef.current.runId !== runId) {
+        setSession({ sessionId, runId });
+        writeRoute(sessionId, runId);
+      }
+      setSidebarOpen(false);
+      setAutomationView(false);
+      return;
+    }
     sendLock.current = false;
     setSending(false);
     uploads.clear();
@@ -1648,7 +1667,7 @@ export function CodeWorkspace() {
         setError(formatError(e));
     });
   };
-  const filteredSessions = searchConversations(catalog.sessions, search);
+  const filteredSessions = searchConversations(catalog.sessions, search, renaming.editingId);
   // Round 6 (DESIGN R6.2): archive a conversation from its card's "⋯" or the header's "⋯", always
   // through the one inline confirm; the gateway hides it (nothing is deleted), the list moves it
   // under `Archived · N`, and an archived ACTIVE conversation hands over to the next one.
@@ -1693,16 +1712,6 @@ export function CodeWorkspace() {
   // Rename (backlog 1343): only on a gateway that stores conversation names; an older one gets no
   // rename anywhere and is never asked. A refusal is said under the card, as an archive refusal is.
   const renameSupported = connection.connected && catalog.sessionTitles;
-  const [renameError, setRenameError] = useState<{ sessionId: string; message: string } | null>(null);
-  const renameConversation = async (sessionId: string, name: string) => {
-    setRenameError(null);
-    try {
-      await catalog.renameSession(sessionId, name);
-    } catch (e) {
-      setRenameError({ sessionId, message: `Not renamed: ${formatError(e)}` });
-      throw e;
-    }
-  };
 
   // Settings: one renderer for a conversation (its run preferences) and an
   // automation (its definition, through AutomationSettingsPanel).
@@ -2136,8 +2145,9 @@ export function CodeWorkspace() {
                 openConversation(item.sessionId, item.latestRunId)
               }
               onAskArchive={connection.connected ? () => askArchive(item.sessionId, "card") : undefined}
-              onRename={renameSupported ? (name) => renameConversation(item.sessionId, name) : undefined}
-              renameError={renameError?.sessionId === item.sessionId ? renameError.message : undefined}
+              onRename={renameSupported ? (name) => renaming.rename(item.sessionId, name) : undefined}
+              onRenameEditingChange={(editing) => renaming.editingChange(item.sessionId, editing)}
+              renameError={renaming.error?.sessionId === item.sessionId ? renaming.error.message : undefined}
               confirm={archiveAsk?.where === "card" && archiveAsk.sessionId === item.sessionId ? archiveConfirm : undefined}
             />
           ))}
@@ -2151,6 +2161,7 @@ export function CodeWorkspace() {
           {/* One notice per page: while the banner says the gateway cannot be reached, a read marker
               that could not be saved is part of it; otherwise it reads like the banner. */}
           {sessionReads.error && !snapshot.unreachable ? <p className="code-alert code-alert--inline" role="status"><Icon name="warning" size={14} /><span>{sessionReads.error}</span></p> : null}
+          {catalog.titlesNotice && !snapshot.unreachable ? <p className="code-alert code-alert--inline" role="status" data-notice="session-titles"><Icon name="warning" size={14} /><span>Conversation names could not be loaded: {catalog.titlesNotice}</span></p> : null}
           {catalog.sessionsLoading && !catalog.sessionsLoaded ? (
             <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}
@@ -2163,7 +2174,7 @@ export function CodeWorkspace() {
             <ArchivedConversations
               enabled={connection.connected && archivedOpen.conversations}
               revision={catalog.archivedSessions}
-              onOpen={(item) => { setSidebarOpen(false); openConversation(item.sessionId, item.latestRunId); }}
+              onOpen={(item) => { setSidebarOpen(false); openConversation(item.sessionId, item.latestRunId, item); }}
               onUnarchived={() => void catalog.refresh()}
             />
           </ArchivedFooter>

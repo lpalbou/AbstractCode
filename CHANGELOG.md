@@ -9,13 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [web 0.16.4] - 2026-11-25
 
-- Rename a conversation: the pencil next to a card's archive icon, F2 on a focused card or a
-  double-click on its name turns the name into a text box; Enter keeps the new name, Escape or a
-  click elsewhere keeps the old one, and an empty name brings back the first message. The name is
-  stored by the gateway (`PUT /api/gateway/sessions/{session_id}/title`), so it is the same after a
-  reload, in another browser and on another device; the sidebar, the header, **Archived · N** and
-  search use it. A refusal brings the previous name back and is said under the card. Offered only
-  when the gateway advertises `session_titles`; with an older gateway nothing changes. Built on
+- Rename a conversation: the pencil next to a card's archive icon or F2 on a focused card turns
+  the name into a text box; Enter keeps the new name, Escape or a click elsewhere keeps the old
+  one, and an empty name brings back the first message. The name is stored by the gateway
+  (`PUT /api/gateway/sessions/{session_id}/title`), so it is the same after a reload, in another
+  browser and on another device; the sidebar, the header (also for a conversation opened from
+  **Archived · N**), **Archived · N** and search use it. While the gateway answers, the box waits
+  read-only and the app never takes the cursor from where you went; a refusal (or no answer within
+  15 seconds) brings the previous name back, keeps what you typed, and is said under the card until
+  you leave the box. A conversation being renamed stays listed during a search. Clicking the
+  conversation that is already open keeps the draft, the queued turns and the attachments. If the
+  gateway cannot read the stored names, the sidebar says so once. Offered only with AbstractGateway
+  0.24.0 or newer (`capabilities.session_titles`); with an older gateway nothing changes. A gateway
+  error page (HTML) is shown as its status only, for archive too. Built on
   `@abstractframework/ui-kit` 0.9.30 (the shared card's rename).
 
 ## [web 0.16.3] - 2026-11-24

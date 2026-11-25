@@ -29,9 +29,9 @@
 .af-session-card:has(.af-session-card__archive:focus-visible) .af-session-card__rename { opacity: 1; visibility: visible; pointer-events: auto; }
 .af-session-card__rename:hover { background: color-mix(in srgb, var(--af-session-fg) 10%, transparent); color: var(--af-session-fg); }
 .af-session-card__edit { flex: 1; min-width: 0; min-height: 64px; padding: 9px 10px; box-sizing: border-box; }
-.af-session-card__title-input { flex: 1; min-width: 0; box-sizing: border-box; margin: -3px 0; padding: 2px 6px; border: 1px solid var(--ui-border-1); border-radius: 6px; background: var(--bg-primary); color: var(--af-session-fg); font: inherit; font-size: max(13px, var(--font-size-sm, 13px)); line-height: 1.35; }
+.af-session-card__title-input { flex: 1; min-width: 0; box-sizing: border-box; margin: -3px 0; padding: 2px 6px; border: 1px solid var(--af-session-muted); border-radius: 6px; background: var(--bg-primary); color: var(--af-session-fg); font: inherit; font-size: max(13px, var(--font-size-sm, 13px)); line-height: 1.35; }
 .af-session-card__title-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.af-session-card__title-input:disabled { opacity: .6; cursor: progress; }
+.af-session-card__title-input:read-only { cursor: progress; color: var(--af-session-muted); }
 .af-session-card__archive:hover { background: color-mix(in srgb, var(--error) 10%, transparent); }
 @media (hover: none), (pointer: coarse) { .af-session-card__archive { flex-basis: 44px; width: 44px; height: 44px; opacity: 1; visibility: visible; pointer-events: auto; } }
 @media (hover: none), (pointer: coarse) { .af-session-card__rename { flex-basis: 44px; width: 44px; height: 44px; opacity: 1; visibility: visible; pointer-events: auto; } }

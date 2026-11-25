@@ -2,16 +2,12 @@
 // host passes onRename, which the app does only on a gateway that advertises `session_titles`; the request is
 // PUT /sessions/{id}/title (never on an older gateway); one function names a conversation everywhere.
 import React from "react";
-import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ConversationCard, UNTITLED_CONVERSATION, conversationTitle } from "./sidebar_cards";
+import { ConversationCard, UNTITLED_CONVERSATION, conversationHeaderTitle, conversationTitle, searchConversations } from "./sidebar_cards";
 import { gatewaySupportsSessionTitles, renameSession, sessionTitlePath } from "./session_titles";
 import type { SessionSummary } from "./catalog";
 
-const appSource = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
-const archivedSource = readFileSync(new URL("./archived_conversations.tsx", import.meta.url), "utf8");
-const css = readFileSync(new URL("./workspace.css", import.meta.url), "utf8");
 
 const item = (over: Partial<SessionSummary> = {}) =>
   ({ sessionId: "s1", prompt: "Fix the parser", latestRunId: "r1", firstRunId: "r1", runIds: ["r1"], turnCount: 1, updatedAt: "2026-10-04T01:00:00Z", state: "done", truncated: false, ...over }) as SessionSummary;
@@ -34,14 +30,9 @@ describe("the card's Rename action", () => {
     expect(html).toContain(">Parser work</span>");
     expect(html).toContain('aria-label="Rename Parser work"');
   });
-  it("with a mouse, floats left of the floating archive icon in the sidebar (never under it)", () => {
-    const pointer = css.slice(css.indexOf(".code-sidebar .af-session-card { position: relative; }"));
-    expect(pointer).toMatch(/\.code-sidebar \.af-session-card__rename \{\s*position: absolute;/);
-    expect(pointer).toContain(".code-sidebar .af-session-card__rename:not(:last-child) { right: 38px; }");
-  });
   it("says a refusal under the card, the way an archive refusal is said", () => {
     const html = card({ onRename: async () => {}, renameError: "Not renamed: session_not_found" });
-    expect(html).toContain('<p class="code-inline-error" role="alert">Not renamed: session_not_found</p>');
+    expect(html).toMatch(/<p class="code-inline-error" id="(code-rename-error-[^"]+)" role="alert">Not renamed: session_not_found<\/p>/);
     expect(card({ onRename: async () => {} })).not.toContain("role=\"alert\"");
   });
 });
@@ -53,10 +44,27 @@ describe("one name everywhere", () => {
     expect(conversationTitle({ prompt: "Write a snake game" })).toBe("Write a snake game");
     expect(conversationTitle({})).toBe(UNTITLED_CONVERSATION);
   });
-  it("the sidebar, the chat header and the archived list all use it", () => {
-    expect(appSource).toMatch(/conversationTitle\(\{ title: currentSession\?\.title, prompt: firstAsked \}\)/);
-    expect(appSource).toMatch(/<strong title=\{automationView \? automationTitle : title\}>/);
-    expect(archivedSource).toContain("title={conversationTitle(item)}");
+  it("a stored name without a visible character falls back to the next name", () => {
+    for (const blank of ["\u200b\u200b", "\u2060", "\u0301", "\u3000", "\u202e"]) {
+      expect(conversationTitle({ title: blank, prompt: "Write a snake game" })).toBe("Write a snake game");
+      expect(conversationTitle({ title: blank })).toBe(UNTITLED_CONVERSATION);
+    }
+    expect(conversationTitle({ title: "\u0634\u0627\u06cc" })).toBe("\u0634\u0627\u06cc");
+  });
+  it("the header uses the listed name, else the name it was opened with (Archived), else the first message", () => {
+    expect(conversationHeaderTitle({ listed: { title: "Snake", prompt: "Write a snake game" }, firstAsked: "Write a snake game", hasRun: true })).toBe("Snake");
+    expect(conversationHeaderTitle({ listed: { prompt: "Write a snake game" }, firstAsked: "Other", hasRun: true })).toBe("Write a snake game");
+    expect(conversationHeaderTitle({ opened: { title: "Q3 report", prompt: "Summarise" }, hasRun: true })).toBe("Q3 report");
+    expect(conversationHeaderTitle({ opened: { prompt: "Summarise" }, hasRun: true })).toBe("Summarise");
+    expect(conversationHeaderTitle({ firstAsked: "Typed first", hasRun: false })).toBe("Typed first");
+    expect(conversationHeaderTitle({ hasRun: true })).toBe(UNTITLED_CONVERSATION);
+    expect(conversationHeaderTitle({ hasRun: false })).toBe("New conversation");
+  });
+  it("search keeps the row being renamed, whatever it now matches", () => {
+    const items = [item({ sessionId: "a", prompt: "Alpha plan" }), item({ sessionId: "b", prompt: "Beta notes", title: "Beta release plan" })];
+    expect(searchConversations(items, "alpha").map((s) => s.sessionId)).toEqual(["a"]);
+    expect(searchConversations(items, "alpha", "b").map((s) => s.sessionId)).toEqual(["a", "b"]);
+    expect(searchConversations(items, "zzz", null).map((s) => s.sessionId)).toEqual([]);
   });
 });
 
@@ -65,13 +73,6 @@ describe("the gateway capability", () => {
     expect(gatewaySupportsSessionTitles({ capabilities: { session_titles: true, contracts: {} } })).toBe(true);
     for (const older of [{}, null, undefined, { capabilities: {} }, { capabilities: { session_titles: "true" } }, { capabilities: { session_titles: false } }, { session_titles: true }, { capabilities: { contracts: { session_titles: true } } }])
       expect(gatewaySupportsSessionTitles(older)).toBe(false);
-  });
-  it("the app passes onRename only when the gateway advertises it (an older one is never asked)", () => {
-    expect(appSource).toContain("const renameSupported = connection.connected && catalog.sessionTitles;");
-    expect(appSource).toContain("onRename={renameSupported ? (name) => renameConversation(item.sessionId, name) : undefined}");
-    expect(appSource.match(/renameConversation\(/g)?.length).toBe(1);
-    expect(appSource).toMatch(/await catalog\.renameSession\(sessionId, name\)/);
-    expect(appSource).toMatch(/setRenameError\(\{ sessionId, message: `Not renamed: \$\{formatError\(e\)\}` \}\);\s*throw e;/);
   });
 });
 
@@ -103,5 +104,36 @@ describe("the rename request", () => {
       throw new Error(message);
     }) as any;
     await expect(renameSession("x", "Name", request)).rejects.toThrow(message);
+  });
+});
+
+describe("round 2: the request's own failures are plain refusals", () => {
+  it("a gateway that does not answer in time is refused with a plain sentence", async () => {
+    const request = ((_: string, init: RequestInit) => new Promise((_ok, no) => init.signal?.addEventListener("abort", () => no(init.signal!.reason)))) as any;
+    await expect(renameSession("s1", "Name", request, 20)).rejects.toThrow("the gateway did not answer");
+  });
+  it("an answer that is not JSON is refused without its text", async () => {
+    const request = (async () => { throw new SyntaxError("Unexpected token '<', \"<html>\" is not valid JSON"); }) as any;
+    await expect(renameSession("s1", "Name", request)).rejects.toThrow("the gateway gave an answer that is not a name");
+  });
+  it("a blank stored title is no name; a long one is cut to 120 characters", async () => {
+    expect(await renameSession("s1", "x", (async () => ({ title: "   ", changed: true })) as any)).toEqual({ title: null, changed: true });
+    const long = await renameSession("s1", "x", (async () => ({ title: "\u{1F600}".repeat(300), changed: true })) as any);
+    expect(Array.from(long.title!).length).toBe(120);
+  });
+  it("a refused request whose body is a page (a proxy's HTML) says only its status; a short sentence is kept", async () => {
+    const { gatewayRequest } = await import("./transport");
+    const original = globalThis.fetch;
+    (globalThis as any).document ??= { cookie: "" };
+    try {
+      globalThis.fetch = (async () => new Response("<html><head><title>405 Not Allowed</title></head><body>nginx</body></html>", { status: 405 })) as any;
+      await expect(gatewayRequest("api/gateway/sessions/s1/title", { method: "PUT", body: "{}" })).rejects.toThrow(/^Gateway request failed \(405\)$/);
+      globalThis.fetch = (async () => new Response("Service unavailable", { status: 503 })) as any;
+      await expect(gatewayRequest("api/gateway/sessions/s1/archive", { method: "POST", body: "{}" })).rejects.toThrow(/^Service unavailable$/);
+      globalThis.fetch = (async () => new Response(JSON.stringify({ detail: { reason_code: "session_not_found", message: "Session s1 does not exist." } }), { status: 404 })) as any;
+      await expect(gatewayRequest("api/gateway/sessions/s1/title", { method: "PUT", body: "{}" })).rejects.toThrow("Session s1 does not exist.");
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

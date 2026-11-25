@@ -5,7 +5,7 @@
 //   - `GET /runs` rows of a titled session carry `session_title` (catalog.ts reads it).
 // An older gateway serves neither: this app then offers no rename and never sends the PUT.
 import { gatewayApiPath } from "@abstractframework/ui-kit";
-import type { SessionSummary } from "./catalog";
+import { cutSessionTitle, type SessionSummary } from "./catalog";
 import { gatewayRequest } from "./transport";
 
 /**
@@ -23,20 +23,36 @@ export function gatewaySupportsSessionTitles(discovery: unknown): boolean {
 
 export const sessionTitlePath = (sessionId: string) => `sessions/${encodeURIComponent(sessionId)}/title`;
 
+/** How long a rename waits for the gateway before it counts as refused. */
+export const RENAME_TIMEOUT_MS = 15_000;
+
 /** The name the gateway stored (null: none, the conversation is named by its first message). */
 export type StoredSessionTitle = { title: string | null; changed: boolean };
 
-/** Store (or, with "", clear) a conversation's name; answers what the gateway stored. */
+/**
+ * Store (or, with "", clear) a conversation's name; answers what the gateway stored. A gateway that
+ * does not answer within `timeoutMs` (or answers something that is not JSON) is a refusal with a
+ * plain sentence, like any other.
+ */
 export async function renameSession(
   sessionId: string,
   title: string,
   request: typeof gatewayRequest = gatewayRequest,
+  timeoutMs: number = RENAME_TIMEOUT_MS,
 ): Promise<StoredSessionTitle> {
-  const body = (await request(gatewayApiPath(sessionTitlePath(sessionId)), {
-    method: "PUT",
-    body: JSON.stringify({ title }),
-  })) as { title?: unknown; changed?: unknown } | null;
-  const stored = typeof body?.title === "string" && body.title.trim() ? body.title : null;
+  let body: { title?: unknown; changed?: unknown } | null;
+  try {
+    body = (await request(gatewayApiPath(sessionTitlePath(sessionId)), {
+      method: "PUT",
+      body: JSON.stringify({ title }),
+      signal: AbortSignal.timeout(timeoutMs),
+    })) as { title?: unknown; changed?: unknown } | null;
+  } catch (reason: any) {
+    if (reason?.name === "TimeoutError" || reason?.name === "AbortError") throw new Error("the gateway did not answer");
+    if (reason instanceof SyntaxError) throw new Error("the gateway gave an answer that is not a name");
+    throw reason;
+  }
+  const stored = typeof body?.title === "string" && body.title.trim() ? cutSessionTitle(body.title) : null;
   return { title: stored, changed: body?.changed === true };
 }
 

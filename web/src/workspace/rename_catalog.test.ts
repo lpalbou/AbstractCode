@@ -89,6 +89,7 @@ vi.mock("./transport", () => ({
 }));
 
 import { useWorkspaceCatalog } from "./use_workspace_catalog";
+import { useConversationRename } from "./rename_state";
 import { conversationTitle } from "./sidebar_cards";
 
 const RUNS = /^api\/gateway\/runs\?root_only=true&include_ledger_len=false&include_metrics=true&limit=\d+$/;
@@ -122,10 +123,10 @@ afterEach(() => {
   onAuthError.mockReset();
 });
 
-async function mountListed(list = LIST()) {
+async function mountListed(list = LIST(), who: { identity: string } = { identity: "default:admin" }) {
   const view: { catalog: ReturnType<typeof useWorkspaceCatalog> } = {} as any;
   hooks.mount(() => {
-    view.catalog = useWorkspaceCatalog("default:admin", onAuthError);
+    view.catalog = useWorkspaceCatalog(who.identity, onAuthError);
   });
   await settle();
   await release(RUNS, list);
@@ -259,5 +260,160 @@ describe("the capability read at start", () => {
     await release("api/gateway/discovery/capabilities", Object.assign(new Error("HTTP 500"), { status: 500 }), true);
     expect(failed.catalog.sessionTitles).toBe(false);
     expect(writes()).toEqual([]);
+  });
+});
+
+describe("round 2: the list and the names it shows", () => {
+  it("a list read started before the answer and landing after it keeps the stored name", async () => {
+    const view = await mountListed();
+    const done = attempt(view.catalog.renameSession("s1", "Snake"));
+    await settle();
+    void view.catalog.refreshSessions(); // started while the PUT is out
+    await settle();
+    await release(TITLE("s1"), { session_id: "s1", title: "Snake", changed: true });
+    expect(await done).toBe("stored");
+    await release(RUNS, LIST()); // ... lands after the answer, without the name
+    expect(names(view)[0]).toBe("Snake");
+    void view.catalog.refreshSessions(); // a read started after the answer is the truth again
+    await settle();
+    await release(RUNS, LIST());
+    expect(names(view)[0]).toBe("Write a snake game");
+  });
+
+  it("the name shown at once is trimmed, the gateway's blank answer is no name, a long served name is cut", async () => {
+    const view = await mountListed();
+    const done = attempt(view.catalog.renameSession("s1", "   Snake   "));
+    await settle();
+    expect(names(view)[0]).toBe("Snake");
+    await release(TITLE("s1"), { session_id: "s1", title: "   ", changed: true });
+    expect(await done).toBe("stored");
+    expect(names(view)[0]).toBe("Write a snake game");
+    void view.catalog.refreshSessions();
+    await settle();
+    await release(RUNS, page(row("s1", "2026-11-20T10:00:00Z", "Write a snake game", "\u{1F600}".repeat(500))));
+    expect(Array.from(names(view)[0]).length).toBe(120);
+  });
+
+  it("an archived conversation does not come back when another rename answers", async () => {
+    const view = await mountListed();
+    view.catalog.forgetSession("s2");
+    await settle();
+    expect(view.catalog.sessions.map((s) => s.sessionId)).toEqual(["s1"]);
+    const done = attempt(view.catalog.renameSession("s1", "Snake"));
+    await settle();
+    await release(TITLE("s1"), { session_id: "s1", title: "Snake", changed: true });
+    expect(await done).toBe("stored");
+    expect(view.catalog.sessions.map((s) => s.sessionId)).toEqual(["s1"]);
+  });
+
+  it("another identity starts without this one's names or list", async () => {
+    const who = { identity: "default:alice" };
+    const view = await mountListed(LIST(), who);
+    const done = attempt(view.catalog.renameSession("s1", "Alice's name"));
+    await settle();
+    await release(TITLE("s1"), { session_id: "s1", title: "Alice's name", changed: true });
+    expect(await done).toBe("stored");
+    who.identity = "default:bob";
+    hooks.render();
+    await settle();
+    // Bob's list is still out: a rename now must not redraw Alice's list.
+    const early = attempt(view.catalog.renameSession("s9", "Bob's"));
+    await settle();
+    expect(view.catalog.sessions.map((s) => s.sessionId)).toEqual([]);
+    await release(TITLE("s9"), { session_id: "s9", title: "Bob's", changed: true });
+    expect(await early).toBe("stored");
+    await release(RUNS, LIST());
+    expect(names(view)).toEqual(["Write a snake game", "Fix the parser"]);
+  });
+
+  it("a list whose names cannot be read says so once; a later list without the error clears it", async () => {
+    const view = await mountListed({ ...LIST(), session_titles_error: { reason_code: "session_titles_unreadable", message: "The titles file cannot be read." } } as any);
+    expect(view.catalog.titlesNotice).toBe("The titles file cannot be read.");
+    void view.catalog.refreshSessions();
+    await settle();
+    await release(RUNS, LIST());
+    expect(view.catalog.titlesNotice).toBe("");
+  });
+
+  it("a failed capability read keeps the rename the gateway offered before", async () => {
+    const view = await mountListed();
+    await release("api/gateway/discovery/capabilities", { capabilities: { session_titles: true } });
+    expect(view.catalog.sessionTitles).toBe(true);
+    void view.catalog.refresh();
+    await settle();
+    await release("api/gateway/discovery/capabilities", Object.assign(new Error("HTTP 502"), { status: 502 }), true);
+    expect(view.catalog.sessionTitles).toBe(true);
+  });
+});
+
+describe("round 2: the row being renamed and its refusal (useConversationRename)", () => {
+  function mountRename(store: (id: string, name: string) => Promise<void>, who = { identity: "default:admin" }) {
+    const view: { r: ReturnType<typeof useConversationRename> } = {} as any;
+    hooks.mount(() => {
+      view.r = useConversationRename(who.identity, store);
+    });
+    return view;
+  }
+  const deferred = () => {
+    let ok!: () => void, no!: (e: Error) => void;
+    const promise = new Promise<void>((a, b) => { ok = a; no = b; });
+    return { promise, ok, no };
+  };
+
+  it("a refusal is shown under that row and reaches the card (which keeps its editor)", async () => {
+    const view = mountRename(async () => { throw new Error("session_not_found"); });
+    view.r.editingChange("s1", true);
+    expect(await attempt(view.r.rename("s1", "Name"))).toBe("session_not_found");
+    await settle();
+    expect(view.r.error).toEqual({ sessionId: "s1", message: "Not renamed: session_not_found" });
+    expect(view.r.editingId).toBe("s1");
+  });
+
+  it("the error goes when the editor closes, when a new attempt starts and when a later rename of it succeeds", async () => {
+    let fail = true;
+    const view = mountRename(async () => { if (fail) throw new Error("refused"); });
+    await attempt(view.r.rename("s1", "A"));
+    await settle();
+    expect(view.r.error?.sessionId).toBe("s1");
+    view.r.editingChange("s1", false);
+    await settle();
+    expect(view.r.error).toBeNull();
+    await attempt(view.r.rename("s1", "A"));
+    await settle();
+    fail = false;
+    const later = view.r.rename("s1", "B");
+    await settle();
+    expect(view.r.error).toBeNull();
+    await later;
+    await settle();
+    expect(view.r.error).toBeNull();
+  });
+
+  it("a late refusal of an older attempt never shows over a newer one; another row's error stays its own", async () => {
+    const first = deferred(), second = deferred();
+    const calls = [first, second];
+    const view = mountRename(() => calls.shift()!.promise);
+    const a = attempt(view.r.rename("s1", "First"));
+    const b = attempt(view.r.rename("s1", "Second"));
+    second.ok();
+    expect(await b).toBe("stored");
+    first.no(new Error("first attempt failed"));
+    expect(await a).toBe("first attempt failed");
+    await settle();
+    expect(view.r.error).toBeNull();
+  });
+
+  it("an error is only for its row, and a new identity starts clean", async () => {
+    const who = { identity: "default:alice" };
+    const view = mountRename(async () => { throw new Error("no"); }, who);
+    await attempt(view.r.rename("s2", "X"));
+    view.r.editingChange("s1", false); // another row's editor closing
+    await settle();
+    expect(view.r.error?.sessionId).toBe("s2");
+    view.r.editingChange("s2", true);
+    who.identity = "default:bob";
+    hooks.render();
+    await settle();
+    expect([view.r.error, view.r.editingId]).toEqual([null, null]);
   });
 });
