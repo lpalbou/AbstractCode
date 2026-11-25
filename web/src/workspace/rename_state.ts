@@ -1,29 +1,33 @@
 // Backlog 1343: the host side of renaming a conversation from its sidebar card. The card says when its
-// editor opens and closes (onRenameEditingChange); this keeps which row is being renamed (so a search
-// never hides it while its editor is open or its save is pending) and the refusal shown under it.
+// editor opens and closes (onRenameEditingChange); this keeps which rows are being renamed (so a search
+// never hides one while its editor is open or its save is pending) and the refusal shown under each.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatError } from "./transport";
 
-export type RenameError = { sessionId: string; message: string };
-
 /**
  * `store` saves a name (the catalog's renameSession: optimistic, reverted on refusal, rejecting with
- * the refusal). The error under a row is cleared when its editor closes, when a later rename of it
- * succeeds and when the signed-in identity changes; a late refusal of an older attempt never shows
- * over a newer one.
+ * the refusal). Each row has its own error: shown while its editor is open, cleared when that editor
+ * closes, when a later rename of it succeeds and when the signed-in identity changes. A refusal of an
+ * older attempt, or one that lands after the row's editor closed, is never shown.
  */
 export function useConversationRename(identity: string, store: (sessionId: string, name: string) => Promise<void>) {
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [error, setError] = useState<RenameError | null>(null);
-  // The latest attempt per conversation; numbers never repeat, even across identities.
+  // The rows whose editor is open (or whose save is pending), and each row's refusal.
+  const [editing, setEditing] = useState<ReadonlySet<string>>(() => new Set());
+  const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
+  // The latest attempt per conversation while its editor is open; numbers never repeat.
   const latest = useRef<Record<string, number>>({});
   const counter = useRef(0);
   useEffect(() => {
     latest.current = {};
-    setEditingId(null);
-    setError(null);
+    setEditing(new Set());
+    setErrors({});
   }, [identity]);
-  const clear = (sessionId: string) => setError((cur) => (cur?.sessionId === sessionId ? null : cur));
+  const clear = (sessionId: string) =>
+    setErrors((cur) => {
+      if (!(sessionId in cur)) return cur;
+      const { [sessionId]: _gone, ...rest } = cur;
+      return rest;
+    });
   const rename = useCallback(
     async (sessionId: string, name: string) => {
       const attempt = ++counter.current;
@@ -32,20 +36,27 @@ export function useConversationRename(identity: string, store: (sessionId: strin
       try {
         await store(sessionId, name);
       } catch (e) {
-        if (latest.current[sessionId] === attempt) setError({ sessionId, message: `Not renamed: ${formatError(e)}` });
+        if (latest.current[sessionId] === attempt) setErrors((cur) => ({ ...cur, [sessionId]: `Not renamed: ${formatError(e)}` }));
         throw e;
       }
       if (latest.current[sessionId] === attempt) clear(sessionId);
     },
     [store],
   );
-  const editingChange = useCallback((sessionId: string, editing: boolean) => {
-    if (editing) {
-      setEditingId(sessionId);
+  const editingChange = useCallback((sessionId: string, open: boolean) => {
+    if (open) {
+      setEditing((cur) => (cur.has(sessionId) ? cur : new Set(cur).add(sessionId)));
       return;
     }
-    setEditingId((cur) => (cur === sessionId ? null : cur));
+    // Closed (or gone with its row): a refusal arriving later has nowhere to be read, so it is dropped.
+    delete latest.current[sessionId];
+    setEditing((cur) => {
+      if (!cur.has(sessionId)) return cur;
+      const next = new Set(cur);
+      next.delete(sessionId);
+      return next;
+    });
     clear(sessionId);
   }, []);
-  return { editingId, error, rename, editingChange };
+  return { editing, errors, rename, editingChange };
 }

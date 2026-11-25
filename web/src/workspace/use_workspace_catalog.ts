@@ -11,6 +11,7 @@ import {
   normalizeWorkflowCatalog,
   normalizeWorkspacePolicy,
   normalizeToolCatalog,
+  cutSessionTitle,
   normalizeSessionSummaries,
   withoutNotesSessions,
   type WorkflowDefinition,
@@ -35,7 +36,7 @@ import {
   type GatewayDefaultState,
 } from "./workflow_selection";
 import { archivedConversationCount } from "./archived_conversations";
-import { gatewaySupportsSessionTitles, renameSession as storeSessionTitle, SessionTitleOverrides } from "./session_titles";
+import { gatewaySupportsSessionTitles, RenameTimeout, renameSession as storeSessionTitle, SessionTitleOverrides } from "./session_titles";
 import { withoutNotesEntries } from "./notes_work";
 import {
   CONVERSATIONS_PAGE,
@@ -67,9 +68,10 @@ type CatalogState = {
   sessionTitles: boolean;
   /**
    * The gateway listed the conversations but could not read their stored names
-   * (`session_titles_error` of `GET /runs`): its sentence, shown once in the sidebar; "" otherwise.
+   * (`session_titles_error` of `GET /runs`): its message when it is a string (at most 200
+   * characters), else ""; null when the names were read.
    */
-  titlesNotice: string;
+  titlesNotice: string | null;
   /** The same `GET discovery/tools` answer as the kit reads it (ToolModeEditor, planRunTools). */
   toolCatalog: ToolCatalogItem[];
   /** The catalog's warnings in the gateway's words (plugin load failures, MCP). */
@@ -108,7 +110,7 @@ const empty: CatalogState = {
   sessionToolPolicy: null,
   capabilitiesError: "",
   sessionTitles: false,
-  titlesNotice: "",
+  titlesNotice: null,
   toolCatalog: [],
   toolWarnings: [],
   streaming: STREAMING_LOADING,
@@ -140,6 +142,12 @@ function capabilityFields(value: any, failure?: string) {
     streaming: streamingCapability(value, failure),
     iterationLimit: iterationLimitDefaultFrom(value),
   };
+}
+
+/** The name the gateway lists is the one asked for (the gateway trims, joins spaces and cuts to 120). */
+function sameName(listed: string | undefined, asked: string): boolean {
+  const norm = (name: string) => cutSessionTitle(name.replace(/\s+/g, " ").trim());
+  return norm(listed || "") === norm(asked);
 }
 
 /** A runs page without one session's rows (the shape of the page kept). */
@@ -244,7 +252,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       const titlesError = runs?.session_titles_error;
       setState((s) => ({
         ...s,
-        titlesNotice: titlesError ? String(titlesError.message || titlesError.reason_code || "the stored names are unreadable") : "",
+        titlesNotice: titlesError ? (typeof titlesError.message === "string" ? Array.from(titlesError.message.trim()).slice(0, 200).join("") : "") : null,
         sessionsLoading: false,
         sessions: page.sessions,
         notesSessions: normalizeSessionSummaries(runs, {}, { purpose: "notes" }),
@@ -419,11 +427,18 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
       titles.current.refused(sessionId, turn);
       show();
       if (reason?.status === 401) onAuthError();
+      if (reason instanceof RenameTimeout) {
+        // The gateway may have stored it anyway: read the list once, and if the name is there it was
+        // not refused after all.
+        await loadConversations();
+        const listed = lastRuns.current ? normalizeSessionSummaries(lastRuns.current).find((item) => item.sessionId === sessionId) : undefined;
+        if (listed && sameName(listed.title, title)) return;
+      }
       throw reason;
     }
     titles.current.stored(sessionId, turn, stored.title, listGeneration.current);
     show();
-  }, [onAuthError]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onAuthError, loadConversations]); // eslint-disable-line react-hooks/exhaustive-deps
   return { ...state, refresh, refreshSessions: loadConversations, loadMore, forgetSession, renameSession };
 }
 

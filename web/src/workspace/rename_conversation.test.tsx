@@ -63,7 +63,7 @@ describe("one name everywhere", () => {
   it("search keeps the row being renamed, whatever it now matches", () => {
     const items = [item({ sessionId: "a", prompt: "Alpha plan" }), item({ sessionId: "b", prompt: "Beta notes", title: "Beta release plan" })];
     expect(searchConversations(items, "alpha").map((s) => s.sessionId)).toEqual(["a"]);
-    expect(searchConversations(items, "alpha", "b").map((s) => s.sessionId)).toEqual(["a", "b"]);
+    expect(searchConversations(items, "alpha", new Set(["b"])).map((s) => s.sessionId)).toEqual(["a", "b"]);
     expect(searchConversations(items, "zzz", null).map((s) => s.sessionId)).toEqual([]);
   });
 });

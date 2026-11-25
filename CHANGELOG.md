@@ -15,9 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`PUT /api/gateway/sessions/{session_id}/title`), so it is the same after a reload, in another
   browser and on another device; the sidebar, the header (also for a conversation opened from
   **Archived · N**), **Archived · N** and search use it. While the gateway answers, the box waits
-  read-only and the app never takes the cursor from where you went; a refusal (or no answer within
-  15 seconds) brings the previous name back, keeps what you typed, and is said under the card until
-  you leave the box. A conversation being renamed stays listed during a search. Clicking the
+  read-only and the app never takes the cursor from where you went; a refusal brings the previous
+  name back, keeps what you typed (the box stays open until you go back to it and press Escape or
+  click elsewhere) and is said under that card only, until you leave the box or a later rename of it
+  succeeds; a refusal arriving after you left the box, or after the conversation was archived, is not
+  shown. With no answer within 15 seconds the app reads the list once: a name that was stored
+  anyway shows, with no message. A conversation being renamed stays listed during a search. Clicking the
   conversation that is already open keeps the draft, the queued turns and the attachments. If the
   gateway cannot read the stored names, the sidebar says so once. Offered only with AbstractGateway
   0.24.0 or newer (`capabilities.session_titles`); with an older gateway nothing changes. A gateway

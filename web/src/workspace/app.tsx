@@ -1667,7 +1667,7 @@ export function CodeWorkspace() {
         setError(formatError(e));
     });
   };
-  const filteredSessions = searchConversations(catalog.sessions, search, renaming.editingId);
+  const filteredSessions = searchConversations(catalog.sessions, search, renaming.editing);
   // Round 6 (DESIGN R6.2): archive a conversation from its card's "⋯" or the header's "⋯", always
   // through the one inline confirm; the gateway hides it (nothing is deleted), the list moves it
   // under `Archived · N`, and an archived ACTIVE conversation hands over to the next one.
@@ -2147,7 +2147,7 @@ export function CodeWorkspace() {
               onAskArchive={connection.connected ? () => askArchive(item.sessionId, "card") : undefined}
               onRename={renameSupported ? (name) => renaming.rename(item.sessionId, name) : undefined}
               onRenameEditingChange={(editing) => renaming.editingChange(item.sessionId, editing)}
-              renameError={renaming.error?.sessionId === item.sessionId ? renaming.error.message : undefined}
+              renameError={renaming.errors[item.sessionId]}
               confirm={archiveAsk?.where === "card" && archiveAsk.sessionId === item.sessionId ? archiveConfirm : undefined}
             />
           ))}
@@ -2161,7 +2161,7 @@ export function CodeWorkspace() {
           {/* One notice per page: while the banner says the gateway cannot be reached, a read marker
               that could not be saved is part of it; otherwise it reads like the banner. */}
           {sessionReads.error && !snapshot.unreachable ? <p className="code-alert code-alert--inline" role="status"><Icon name="warning" size={14} /><span>{sessionReads.error}</span></p> : null}
-          {catalog.titlesNotice && !snapshot.unreachable ? <p className="code-alert code-alert--inline" role="status" data-notice="session-titles"><Icon name="warning" size={14} /><span>Conversation names could not be loaded: {catalog.titlesNotice}</span></p> : null}
+          {catalog.titlesNotice !== null && !snapshot.unreachable ? <p className="code-alert code-alert--inline" role="status" data-notice="session-titles"><Icon name="warning" size={14} /><span>{catalog.titlesNotice ? `Conversation names could not be loaded: ${catalog.titlesNotice}` : "Conversation names could not be loaded."}</span></p> : null}
           {catalog.sessionsLoading && !catalog.sessionsLoaded ? (
             <LoadingStatus>Loading conversations…</LoadingStatus>
           ) : null}

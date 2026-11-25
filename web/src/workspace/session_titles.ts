@@ -26,6 +26,14 @@ export const sessionTitlePath = (sessionId: string) => `sessions/${encodeURIComp
 /** How long a rename waits for the gateway before it counts as refused. */
 export const RENAME_TIMEOUT_MS = 15_000;
 
+/** The gateway did not answer a rename in time: it may still have stored the name (the list says). */
+export class RenameTimeout extends Error {
+  constructor() {
+    super("the gateway did not answer");
+    this.name = "RenameTimeout";
+  }
+}
+
 /** The name the gateway stored (null: none, the conversation is named by its first message). */
 export type StoredSessionTitle = { title: string | null; changed: boolean };
 
@@ -48,7 +56,7 @@ export async function renameSession(
       signal: AbortSignal.timeout(timeoutMs),
     })) as { title?: unknown; changed?: unknown } | null;
   } catch (reason: any) {
-    if (reason?.name === "TimeoutError" || reason?.name === "AbortError") throw new Error("the gateway did not answer");
+    if (reason?.name === "TimeoutError" || reason?.name === "AbortError") throw new RenameTimeout();
     if (reason instanceof SyntaxError) throw new Error("the gateway gave an answer that is not a name");
     throw reason;
   }

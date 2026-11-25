@@ -74,11 +74,11 @@ export function conversationHeaderTitle(p: {
  * first message or the session id (support pastes ids). It searches the list it is given, so
  * whatever the list leaves out (AbstractNote's background work) is never found either.
  */
-export function searchConversations<T extends Pick<SessionSummary, "title" | "prompt" | "sessionId">>(items: readonly T[], query: string, keep?: string | null): T[] {
+export function searchConversations<T extends Pick<SessionSummary, "title" | "prompt" | "sessionId">>(items: readonly T[], query: string, keep?: ReadonlySet<string> | null): T[] {
   const q = query.toLowerCase();
-  // `keep`: the conversation being renamed stays listed while its editor is open or its save is
-  // pending, whatever its new name matches (it would otherwise vanish with the text being typed).
-  return items.filter((item) => item.sessionId === keep || `${item.title || ""} ${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
+  // `keep`: the conversations being renamed stay listed while their editor is open or their save is
+  // pending, whatever their new name matches (they would otherwise vanish with the text being typed).
+  return items.filter((item) => keep?.has(item.sessionId) || `${item.title || ""} ${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
 }
 
 const WEEKDAYS: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };

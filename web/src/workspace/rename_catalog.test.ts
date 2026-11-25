@@ -345,10 +345,16 @@ describe("round 2: the list and the names it shows", () => {
   it("a list whose names cannot be read says so once; a later list without the error clears it", async () => {
     const view = await mountListed({ ...LIST(), session_titles_error: { reason_code: "session_titles_unreadable", message: "The titles file cannot be read." } } as any);
     expect(view.catalog.titlesNotice).toBe("The titles file cannot be read.");
+    for (const [message, shown] of [[{ html: "<b>x</b>" }, ""], [42, ""], [undefined, ""], ["y".repeat(4000), "y".repeat(200)]] as const) {
+      void view.catalog.refreshSessions();
+      await settle();
+      await release(RUNS, { ...LIST(), session_titles_error: { reason_code: "session_titles_unreadable", message } } as any);
+      expect(view.catalog.titlesNotice).toBe(shown);
+    }
     void view.catalog.refreshSessions();
     await settle();
     await release(RUNS, LIST());
-    expect(view.catalog.titlesNotice).toBe("");
+    expect(view.catalog.titlesNotice).toBeNull();
   });
 
   it("a failed capability read keeps the rename the gateway offered before", async () => {
@@ -381,39 +387,42 @@ describe("round 2: the row being renamed and its refusal (useConversationRename)
     view.r.editingChange("s1", true);
     expect(await attempt(view.r.rename("s1", "Name"))).toBe("session_not_found");
     await settle();
-    expect(view.r.error).toEqual({ sessionId: "s1", message: "Not renamed: session_not_found" });
-    expect(view.r.editingId).toBe("s1");
+    expect(view.r.errors).toEqual({ s1: "Not renamed: session_not_found" });
+    expect([...view.r.editing]).toEqual(["s1"]);
   });
 
   it("the error goes when the editor closes, when a new attempt starts and when a later rename of it succeeds", async () => {
     let fail = true;
     const view = mountRename((_id, name) => (name === "Pending" ? new Promise<void>(() => {}) : fail ? Promise.reject(new Error("refused")) : Promise.resolve()));
+    view.r.editingChange("s1", true);
     await attempt(view.r.rename("s1", "A"));
     await settle();
-    expect(view.r.error?.sessionId).toBe("s1");
+    expect(view.r.errors.s1).toBe("Not renamed: refused");
     view.r.editingChange("s1", false);
     await settle();
-    expect(view.r.error).toBeNull();
+    expect(view.r.errors).toEqual({});
+    view.r.editingChange("s1", true);
     await attempt(view.r.rename("s1", "A"));
     await settle();
-    expect(view.r.error?.sessionId).toBe("s1");
+    expect(view.r.errors.s1).toBeDefined();
     fail = false;
     view.r.rename("s1", "Pending").catch(() => undefined);
     await settle();
-    expect(view.r.error).toBeNull(); // cleared when the new attempt starts, before any answer
+    expect(view.r.errors).toEqual({}); // cleared when the new attempt starts, before any answer
     await attempt(view.r.rename("s1", "A2"));
     const later = view.r.rename("s1", "B");
     await settle();
-    expect(view.r.error).toBeNull();
+    expect(view.r.errors).toEqual({});
     await later;
     await settle();
-    expect(view.r.error).toBeNull();
+    expect(view.r.errors).toEqual({});
   });
 
-  it("a late refusal of an older attempt never shows over a newer one; another row's error stays its own", async () => {
+  it("a late refusal of an older attempt never shows over a newer one", async () => {
     const first = deferred(), second = deferred();
     const calls = [first, second];
     const view = mountRename(() => calls.shift()!.promise);
+    view.r.editingChange("s1", true);
     const a = attempt(view.r.rename("s1", "First"));
     const b = attempt(view.r.rename("s1", "Second"));
     second.ok();
@@ -421,21 +430,57 @@ describe("round 2: the row being renamed and its refusal (useConversationRename)
     first.no(new Error("first attempt failed"));
     expect(await a).toBe("first attempt failed");
     await settle();
-    expect(view.r.error).toBeNull();
+    expect(view.r.errors).toEqual({});
   });
 
-  it("an error is only for its row, and a new identity starts clean", async () => {
+  it("a refusal that lands after the row's editor closed (or its row went) is dropped", async () => {
+    const late = deferred();
+    const view = mountRename(() => late.promise);
+    view.r.editingChange("s2", true);
+    const out = attempt(view.r.rename("s2", "Hung"));
+    view.r.editingChange("s2", false); // archived while pending: the card unmounts
+    late.no(new Error("the gateway did not answer"));
+    expect(await out).toBe("the gateway did not answer");
+    await settle();
+    expect([view.r.errors, [...view.r.editing]]).toEqual([{}, []]);
+  });
+
+  it("two rows: each keeps its own error and stays pinned while its editor is open; nothing accumulates", async () => {
+    const answers: Record<string, ReturnType<typeof deferred>> = { s1: deferred(), s3: deferred() };
+    const view = mountRename((id) => answers[id].promise);
+    view.r.editingChange("s3", true);
+    const three = attempt(view.r.rename("s3", "Beta"));
+    view.r.editingChange("s1", true); // F2 on another row while s3 is pending
+    await settle();
+    expect([...view.r.editing].sort()).toEqual(["s1", "s3"]);
+    const one = attempt(view.r.rename("s1", "Gamma"));
+    answers.s1.no(new Error("refused s1"));
+    expect(await one).toBe("refused s1");
+    answers.s3.no(new Error("refused s3"));
+    expect(await three).toBe("refused s3");
+    await settle();
+    expect(view.r.errors).toEqual({ s1: "Not renamed: refused s1", s3: "Not renamed: refused s3" });
+    view.r.editingChange("s1", false);
+    await settle();
+    expect(view.r.errors).toEqual({ s3: "Not renamed: refused s3" });
+    expect([...view.r.editing]).toEqual(["s3"]);
+    view.r.editingChange("s3", false);
+    view.r.editingChange("s9", false); // a row that was never open
+    await settle();
+    expect([view.r.errors, [...view.r.editing]]).toEqual([{}, []]);
+  });
+
+  it("a new identity starts clean", async () => {
     const who = { identity: "default:alice" };
     const view = mountRename(async () => { throw new Error("no"); }, who);
-    await attempt(view.r.rename("s2", "X"));
-    view.r.editingChange("s1", false); // another row's editor closing
-    await settle();
-    expect(view.r.error?.sessionId).toBe("s2");
     view.r.editingChange("s2", true);
+    await attempt(view.r.rename("s2", "X"));
+    await settle();
+    expect(view.r.errors.s2).toBeDefined();
     who.identity = "default:bob";
     hooks.render();
     await settle();
-    expect([view.r.error, view.r.editingId]).toEqual([null, null]);
+    expect([view.r.errors, [...view.r.editing]]).toEqual([{}, []]);
   });
 });
 
@@ -458,5 +503,36 @@ describe("round 2: names in the overrides and the archived list", () => {
     await settle();
     const rows = ([] as any[]).concat(view.el.props.children).filter(Boolean);
     expect(rows.map((r: any) => r.props.title)).toEqual(["Q3 report", "Plain archived"]);
+  });
+});
+
+describe("round 3: a rename the gateway did not answer in time", () => {
+  const timeout = () => Object.assign(new Error("signal timed out"), { name: "TimeoutError" });
+  it("reads the list once: a name that landed anyway is no refusal", async () => {
+    const view = await mountListed();
+    const done = attempt(view.catalog.renameSession("s2", "Late name"));
+    await settle();
+    await release(TITLE("s2"), timeout(), true);
+    await release(RUNS, page(row("s1", "2026-11-20T10:00:00Z", "Write a snake game"), row("s2", "2026-11-19T10:00:00Z", "Fix the parser", "Late name")));
+    expect(await done).toBe("stored");
+    expect(names(view)).toEqual(["Write a snake game", "Late name"]);
+  });
+  it("and a name that did not land is a refusal (\"the gateway did not answer\")", async () => {
+    const view = await mountListed();
+    const done = attempt(view.catalog.renameSession("s2", "Lost name"));
+    await settle();
+    await release(TITLE("s2"), timeout(), true);
+    await release(RUNS, LIST());
+    expect(await done).toBe("the gateway did not answer");
+    expect(names(view)).toEqual(["Write a snake game", "Fix the parser"]);
+  });
+  it("any other refusal reads nothing more", async () => {
+    const view = await mountListed();
+    const done = attempt(view.catalog.renameSession("s2", "X"));
+    await settle();
+    const before = net.log.length;
+    await release(TITLE("s2"), refusal(500, "boom"), true);
+    expect(await done).toBe("boom");
+    expect(net.log.slice(before).filter((r) => RUNS.test(r.path))).toEqual([]);
   });
 });
