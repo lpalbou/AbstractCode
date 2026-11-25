@@ -42,21 +42,43 @@ export function conversationMetaLine(
 export const UNTITLED_CONVERSATION = "Untitled conversation";
 
 /**
- * A conversation's name (ADR 0043: never a computer id): its first message, else a plain
- * fallback. The gateway serves no session title, so the opening message is the name.
+ * A conversation's name wherever one is shown (ADR 0043: never a computer id): the name a person
+ * gave it (the gateway's stored title, `session_titles.ts`), else its first message, else a plain
+ * fallback. Clearing the stored name brings the first message back.
  */
-export function conversationTitle(item: Pick<SessionSummary, "prompt">): string {
-  return item.prompt?.trim() || UNTITLED_CONVERSATION;
+export function conversationTitle(item: Pick<SessionSummary, "title" | "prompt">): string {
+  return [item.title, item.prompt].map((name) => name?.trim() || "").find(visible) || UNTITLED_CONVERSATION;
+}
+
+/** A name with at least one visible character (not only spaces, marks, or zero-width and other format characters). */
+const visible = (name: string) => /[^\s\p{Z}\p{C}\p{M}]/u.test(name);
+
+/**
+ * The chat header's name: the conversation's sidebar name (conversationTitle) from the listed
+ * conversation, else from the item it was opened from (an archived one is not in the list), else
+ * its first asked message; "New conversation" before anything was asked.
+ */
+export function conversationHeaderTitle(p: {
+  listed?: Pick<SessionSummary, "title" | "prompt">;
+  opened?: Pick<SessionSummary, "title" | "prompt">;
+  firstAsked?: string;
+  hasRun: boolean;
+}): string {
+  const title = p.listed?.title ?? p.opened?.title;
+  const prompt = p.listed?.prompt || p.opened?.prompt || p.firstAsked;
+  return p.listed || p.opened || p.hasRun || prompt ? conversationTitle({ title, prompt }) : "New conversation";
 }
 
 /**
- * The search box over the listed conversations: the query (any case) in the shown name or the
- * session id (support pastes ids). It searches the list it is given, so whatever the list leaves
- * out (AbstractNote's background work) is never found either.
+ * The search box over the listed conversations: the query (any case) in the stored name, the
+ * first message or the session id (support pastes ids). It searches the list it is given, so
+ * whatever the list leaves out (AbstractNote's background work) is never found either.
  */
-export function searchConversations<T extends Pick<SessionSummary, "prompt" | "sessionId">>(items: readonly T[], query: string): T[] {
+export function searchConversations<T extends Pick<SessionSummary, "title" | "prompt" | "sessionId">>(items: readonly T[], query: string, keep?: ReadonlySet<string> | null): T[] {
   const q = query.toLowerCase();
-  return items.filter((item) => `${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
+  // `keep`: the conversations being renamed stay listed while their editor is open or their save is
+  // pending, whatever their new name matches (they would otherwise vanish with the text being typed).
+  return items.filter((item) => keep?.has(item.sessionId) || `${item.title || ""} ${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
 }
 
 const WEEKDAYS: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
@@ -120,25 +142,33 @@ export function useRevealClampedTitle(title: string, schedule = ""): React.RefOb
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const root = ref.current;
-    const name = root?.querySelector<HTMLElement>(".af-session-card__title");
-    const button = root?.querySelector<HTMLElement>(".af-session-card__open");
-    if (!root || !name || !button) return;
-    name.removeAttribute("title");
-    const cadence = root.querySelector<HTMLElement>('.af-session-card__meta > [data-field="cadence"]');
-    if (cadence) {
-      if (schedule && cadence.getAttribute("data-short") !== schedule) cadence.setAttribute("data-short", schedule);
-      else if (!schedule && cadence.hasAttribute("data-short")) cadence.removeAttribute("data-short");
-    }
-    const update = () => {
+    if (!root) return;
+    // Applied again whenever the card swaps its content (the kit's rename editor replaces the row's
+    // button and title, and puts them back, without this component rendering again).
+    const apply = () => {
+      const name = root.querySelector<HTMLElement>(".af-session-card__title");
+      const button = root.querySelector<HTMLElement>(".af-session-card__open");
+      if (!name || !button) return;
+      if (name.hasAttribute("title")) name.removeAttribute("title");
+      const cadence = root.querySelector<HTMLElement>('.af-session-card__meta > [data-field="cadence"]');
+      if (cadence) {
+        if (schedule && cadence.getAttribute("data-short") !== schedule) cadence.setAttribute("data-short", schedule);
+        else if (!schedule && cadence.hasAttribute("data-short")) cadence.removeAttribute("data-short");
+      }
       const tip = name.scrollHeight > name.clientHeight + 1 ? title : "";
       // Written only when it changes: the kit tooltip hides when its sentence is rewritten.
       if (tip && button.getAttribute("data-af-tip") !== tip) button.setAttribute("data-af-tip", tip);
       else if (!tip && button.hasAttribute("data-af-tip")) button.removeAttribute("data-af-tip");
     };
-    update();
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null;
-    observer?.observe(root);
-    return () => observer?.disconnect();
+    apply();
+    const resized = typeof ResizeObserver === "function" ? new ResizeObserver(apply) : null;
+    resized?.observe(root);
+    const swapped = typeof MutationObserver === "function" ? new MutationObserver(apply) : null;
+    swapped?.observe(root, { childList: true, subtree: true });
+    return () => {
+      resized?.disconnect();
+      swapped?.disconnect();
+    };
   });
   return ref;
 }
@@ -155,16 +185,28 @@ export function ConversationCard(props: {
   onAskArchive?(): void;
   /** The inline confirm, while this card's archive is being asked. */
   confirm?: React.ReactNode;
+  /**
+   * Rename in place (only when the gateway stores names): resolves once stored; a rejection keeps
+   * the typed name in the card's input while `renameError` says why.
+   */
+  onRename?(title: string): Promise<void>;
+  /** The card's rename editor opened (true) or closed after any pending save (false). */
+  onRenameEditingChange?(editing: boolean): void;
+  /** The gateway's refusal of this card's last rename, as a sentence (it describes the input). */
+  renameError?: string;
 }): React.ReactElement {
   const { item } = props;
   const title = conversationTitle(item);
   const reveal = useRevealClampedTitle(title);
+  const errorId = `code-rename-error-${React.useId()}`;
   return (
     <div ref={reveal} className={`code-session-item${props.confirm ? " is-confirming" : ""}`} data-item-id={item.sessionId}>
       <SessionCard sessionId={item.sessionId} title={title} selected={props.selected} unread={props.unread}
         needsAttention={props.needsAttention ?? props.activity?.needsAttention} working={props.activity?.working ?? item.state === "running"}
         turnCount={item.turnCount} toolCount={item.toolCalls} countsPartial={item.truncated} updatedAt={item.updatedAt} nowMs={Date.now()}
-        onOpen={props.onClick} onArchive={props.onAskArchive} archiveDisabled={item.state === "running" || item.state === "waiting"} />
+        onOpen={props.onClick} onArchive={props.onAskArchive} archiveDisabled={item.state === "running" || item.state === "waiting"}
+        onRename={props.onRename} onRenameEditingChange={props.onRenameEditingChange} renameErrorId={props.renameError ? errorId : undefined} />
+      {props.renameError ? <p className="code-inline-error" id={errorId} role="alert">{props.renameError}</p> : null}
       {props.confirm}
     </div>
   );

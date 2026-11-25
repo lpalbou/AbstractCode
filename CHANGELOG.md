@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [web 0.16.4] - 2026-11-25
+
+- Rename a conversation: the pencil next to a card's archive icon or F2 on a focused card turns
+  the name into a text box; Enter keeps the new name, Escape or a click elsewhere keeps the old
+  one, and an empty name brings back the first message. The name is stored by the gateway
+  (`PUT /api/gateway/sessions/{session_id}/title`), so it is the same after a reload, in another
+  browser and on another device; the sidebar, the header (also for a conversation opened from
+  **Archived · N**), **Archived · N** and search use it. While the gateway answers, the box waits
+  read-only and the app never takes the cursor from where you went; a refusal brings the previous
+  name back, keeps what you typed (the box stays open until you go back to it and press Escape or
+  click elsewhere) and is said under that card only, until you leave the box or a later rename of it
+  succeeds; a refusal arriving after you left the box, or after the conversation was archived, is not
+  shown. With no answer within 15 seconds the app reads the list once: a name that was stored
+  anyway shows, with no message. A conversation being renamed stays listed during a search. Clicking the
+  conversation that is already open keeps the draft, the queued turns and the attachments. If the
+  gateway cannot read the stored names, the sidebar says so once. Offered only with AbstractGateway
+  0.24.0 or newer (`capabilities.session_titles`); with an older gateway nothing changes. A gateway
+  error page (HTML) is shown as its status only, for archive too. Built on
+  `@abstractframework/ui-kit` 0.9.30 (the shared card's rename).
+
 ## [web 0.16.3] - 2026-11-24
 
 - When your sign-in to the gateway has ended (for example after the admin password was changed

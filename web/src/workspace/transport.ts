@@ -49,7 +49,9 @@ export async function gatewayRequest<T = any>(
             ? body.detail.message
             : JSON.stringify(body.detail || body);
     } catch {
-      /* Keep server text. */
+      // Not JSON: a short plain sentence is kept; a page (a proxy's HTML error) or a long body is
+      // not shown, only the status below.
+      detail = raw.length <= 200 && !/[<>]/.test(raw) ? raw.trim() : "";
     }
     throw new GatewayHttpError(
       detail || `Gateway request failed (${response.status})`,

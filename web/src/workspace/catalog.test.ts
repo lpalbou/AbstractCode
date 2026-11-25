@@ -445,3 +445,36 @@ it("includes chat wake turns but excludes descendants and automation controllers
  ]});
  expect(rows).toHaveLength(1);expect(rows[0].latestRunId).toBe("wake");
 });
+
+describe("a conversation's stored name (session_title, backlog 1343)", () => {
+  const turn = (session: string, id: string, at: string, title?: unknown) => ({
+    run_id: id, session_id: session, status: "completed", created_at: at, updated_at: at, parent_run_id: null,
+    input_data: { prompt: `First message of ${session}` }, ...(title === undefined ? {} : { session_title: title }),
+  });
+  it("reads session_title from the session's rows, trimmed; untitled sessions have none", () => {
+    const sessions = normalizeSessionSummaries({
+      items: [
+        turn("named", "n2", "2026-11-20T10:05:00Z", "  Snake game "),
+        turn("named", "n1", "2026-11-20T10:00:00Z", "Snake game"),
+        turn("plain", "p1", "2026-11-19T10:00:00Z"),
+        turn("blank", "b1", "2026-11-18T10:00:00Z", "   "),
+        turn("odd", "o1", "2026-11-17T10:00:00Z", 42),
+      ],
+    });
+    expect(sessions.map((s) => [s.sessionId, s.title, s.prompt])).toEqual([
+      ["named", "Snake game", "First message of named"],
+      ["plain", undefined, "First message of plain"],
+      ["blank", undefined, "First message of blank"],
+      ["odd", undefined, "First message of odd"],
+    ]);
+    expect("title" in sessions[1]).toBe(false);
+  });
+  it("any listed row of the session says it (a cut page may hold only older turns)", () => {
+    const [s] = normalizeSessionSummaries({ items: [turn("s", "r2", "2026-11-20T10:05:00Z"), turn("s", "r1", "2026-11-20T10:00:00Z", "Named")] });
+    expect(s.title).toBe("Named");
+  });
+  it("leaves the order and the updated time to the runs", () => {
+    const sessions = normalizeSessionSummaries({ items: [turn("a", "a1", "2026-11-19T10:00:00Z", "Zebra"), turn("b", "b1", "2026-11-20T10:00:00Z", "Aardvark")] });
+    expect(sessions.map((s) => [s.sessionId, s.updatedAt])).toEqual([["b", "2026-11-20T10:00:00Z"], ["a", "2026-11-19T10:00:00Z"]]);
+  });
+});

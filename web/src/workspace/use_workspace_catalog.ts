@@ -11,6 +11,7 @@ import {
   normalizeWorkflowCatalog,
   normalizeWorkspacePolicy,
   normalizeToolCatalog,
+  cutSessionTitle,
   normalizeSessionSummaries,
   withoutNotesSessions,
   type WorkflowDefinition,
@@ -35,6 +36,7 @@ import {
   type GatewayDefaultState,
 } from "./workflow_selection";
 import { archivedConversationCount } from "./archived_conversations";
+import { gatewaySupportsSessionTitles, RenameTimeout, renameSession as storeSessionTitle, SessionTitleOverrides } from "./session_titles";
 import { withoutNotesEntries } from "./notes_work";
 import {
   CONVERSATIONS_PAGE,
@@ -62,6 +64,14 @@ type CatalogState = {
    */
   sessionToolPolicy: SessionToolPolicyCapability | null;
   capabilitiesError: string;
+  /** The gateway stores conversation names (`capabilities.session_titles`, session_titles.ts): Rename is offered. */
+  sessionTitles: boolean;
+  /**
+   * The gateway listed the conversations but could not read their stored names
+   * (`session_titles_error` of `GET /runs`): its message when it is a string (at most 200
+   * characters), else ""; null when the names were read.
+   */
+  titlesNotice: string | null;
   /** The same `GET discovery/tools` answer as the kit reads it (ToolModeEditor, planRunTools). */
   toolCatalog: ToolCatalogItem[];
   /** The catalog's warnings in the gateway's words (plugin load failures, MCP). */
@@ -99,6 +109,8 @@ const empty: CatalogState = {
   capabilitiesLoading: true,
   sessionToolPolicy: null,
   capabilitiesError: "",
+  sessionTitles: false,
+  titlesNotice: null,
   toolCatalog: [],
   toolWarnings: [],
   streaming: STREAMING_LOADING,
@@ -125,8 +137,28 @@ function capabilityFields(value: any, failure?: string) {
     capabilitiesLoading: false,
     sessionToolPolicy: sessionToolPolicyCapability(value),
     capabilitiesError: failure ? `Could not read the gateway's capabilities: ${failure}` : "",
+    // A failed read keeps what the gateway said last (a passing 502 must not close an open editor).
+    ...(failure ? {} : { sessionTitles: gatewaySupportsSessionTitles(value) }),
     streaming: streamingCapability(value, failure),
     iterationLimit: iterationLimitDefaultFrom(value),
+  };
+}
+
+/** The name the gateway lists is the one asked for (the gateway trims, joins spaces and cuts to 120). */
+function sameName(listed: string | undefined, asked: string): boolean {
+  const norm = (name: string) => cutSessionTitle(name.replace(/\s+/g, " ").trim());
+  return norm(listed || "") === norm(asked);
+}
+
+/** A runs page without one session's rows (the shape of the page kept). */
+export function withoutSession(runs: unknown, sessionId: string): unknown {
+  const keep = (rows: unknown[]) => rows.filter((row) => String((row as any)?.session_id ?? (row as any)?.sessionId ?? "") !== sessionId);
+  if (Array.isArray(runs)) return keep(runs);
+  const body = (runs || {}) as Record<string, unknown>;
+  return {
+    ...body,
+    ...(Array.isArray(body.items) ? { items: keep(body.items) } : {}),
+    ...(Array.isArray(body.runs) ? { runs: keep(body.runs) } : {}),
   };
 }
 
@@ -144,6 +176,10 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     identity: string;
     values: Record<string, unknown>;
   }>({ identity: "", values: {} });
+  // Names this client set, over the listed ones until a later list shows them (session_titles.ts),
+  // and the last runs page, to show a name change (or its refusal) without reading the list again.
+  const titles = useRef(new SessionTitleOverrides());
+  const lastRuns = useRef<unknown>(null);
   const fetchRuns = useCallback(
     (signal: AbortSignal) =>
       fetchConversationRuns(
@@ -157,7 +193,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
   );
   const pageOf = (runs: any) =>
     conversationPage(
-      normalizeSessionSummaries(runs, inputCache.current.values),
+      titles.current.apply(normalizeSessionSummaries(runs, inputCache.current.values)),
       visible.current,
     );
   // Run summaries intentionally omit user input. Hydrate the SHOWN conversations' labels through
@@ -210,9 +246,13 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         return;
       }
       if (listGeneration.current !== listGen) return;
+      titles.current.landed(listGen);
+      lastRuns.current = runs;
       const page = pageOf(runs);
+      const titlesError = runs?.session_titles_error;
       setState((s) => ({
         ...s,
+        titlesNotice: titlesError ? (typeof titlesError.message === "string" ? Array.from(titlesError.message.trim()).slice(0, 200).join("") : "") : null,
         sessionsLoading: false,
         sessions: page.sessions,
         notesSessions: normalizeSessionSummaries(runs, {}, { purpose: "notes" }),
@@ -252,8 +292,11 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     pending.current?.abort();
     const abort = new AbortController();
     pending.current = abort;
-    if (inputCache.current.identity !== identity)
+    if (inputCache.current.identity !== identity) {
       inputCache.current = { identity, values: {} };
+      titles.current.clear();
+      lastRuns.current = null;
+    }
     if (!identity) {
       setState(empty);
       return;
@@ -358,6 +401,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
   }, [loadConversations]);
   /** Archived (round 6): drop it from the shown list and count it now; the list reload confirms. */
   const forgetSession = useCallback((sessionId: string) => {
+    // The last runs page too: it is what a rename answer redraws the list from.
+    if (lastRuns.current) lastRuns.current = withoutSession(lastRuns.current, sessionId);
     setState((s) => ({
       ...s,
       sessions: s.sessions.filter((item) => item.sessionId !== sessionId),
@@ -365,7 +410,36 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     }));
     void loadConversations();
   }, [loadConversations]);
-  return { ...state, refresh, refreshSessions: loadConversations, loadMore, forgetSession };
+  /**
+   * Rename (or, with "", clear the name of) a conversation: shown at once, the gateway's normalised
+   * name once it answers, the previous name again if it refuses (the rejection is the caller's to
+   * show). Only the name changes: the order and the "updated" times stay the list's.
+   */
+  const renameSession = useCallback(async (sessionId: string, title: string) => {
+    const show = () =>
+      setState((s) => ({ ...s, sessions: lastRuns.current ? pageOf(lastRuns.current).sessions : titles.current.apply(s.sessions) }));
+    const turn = titles.current.begin(sessionId, title, listGeneration.current);
+    show();
+    let stored: Awaited<ReturnType<typeof storeSessionTitle>>;
+    try {
+      stored = await storeSessionTitle(sessionId, title, gatewayRequest);
+    } catch (reason: any) {
+      titles.current.refused(sessionId, turn);
+      show();
+      if (reason?.status === 401) onAuthError();
+      if (reason instanceof RenameTimeout) {
+        // The gateway may have stored it anyway: read the list once, and if the name is there it was
+        // not refused after all.
+        await loadConversations();
+        const listed = lastRuns.current ? normalizeSessionSummaries(lastRuns.current).find((item) => item.sessionId === sessionId) : undefined;
+        if (listed && sameName(listed.title, title)) return;
+      }
+      throw reason;
+    }
+    titles.current.stored(sessionId, turn, stored.title, listGeneration.current);
+    show();
+  }, [onAuthError, loadConversations]); // eslint-disable-line react-hooks/exhaustive-deps
+  return { ...state, refresh, refreshSessions: loadConversations, loadMore, forgetSession, renameSession };
 }
 
 /**
