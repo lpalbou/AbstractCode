@@ -77,15 +77,18 @@ try {
   assert.ok(boxes.titleRight <= boxes.rename.left && boxes.metaRight <= boxes.rename.left, "the title's end and the details never run under the actions");
   pass("hover: both actions hittable, text makes room");
 
-  // F2 opens the editor; Escape restores the tooltip the clamped title had.
+  // F2 opens the editor; Escape restores the tooltip the clamped title had (every time).
   await card("s2").locator(".af-session-card__open").focus();
   const tipBefore = await card("s2").locator(".af-session-card__open").getAttribute("data-af-tip");
   assert.ok(tipBefore, "a clamped name has a tooltip");
-  await page.keyboard.press("F2");
-  await input.waitFor();
-  await page.keyboard.press("Escape");
-  await card("s2").locator(".af-session-card__open").waitFor();
-  await page.waitForTimeout(100);
+  for (let i = 0; i < 6; i++) {
+    await card("s2").locator(".af-session-card__open").focus();
+    await page.keyboard.press("F2");
+    await input.waitFor();
+    await page.keyboard.press("Escape");
+    await card("s2").locator(".af-session-card__open").waitFor();
+    assert.equal(await card("s2").locator(".af-session-card__open").getAttribute("data-af-tip"), tipBefore, `tooltip back at once after editing (${i})`);
+  }
   const tipAfter = await card("s2").locator(".af-session-card__open").getAttribute("data-af-tip");
   assert.equal(tipAfter, tipBefore, "tooltip back after editing: " + JSON.stringify([tipAfter, await card("s2").locator(".af-session-card__title").getAttribute("title")]));
   assert.equal(await card("s2").locator(".af-session-card__title").getAttribute("title"), null);
@@ -100,6 +103,7 @@ try {
   const alert = card("s1").locator("[role='alert']");
   await alert.waitFor();
   assert.equal(await alert.textContent(), "Not renamed: The titles file cannot be read.");
+  assert.equal(await page.locator(".code-session-item [role='alert']").count(), 1, "the error is under that row only");
   assert.equal(await input.getAttribute("aria-invalid"), "true");
   assert.ok((await input.getAttribute("aria-describedby")).split(" ").includes(await alert.getAttribute("id")));
   assert.equal(await input.inputValue(), "Snake");

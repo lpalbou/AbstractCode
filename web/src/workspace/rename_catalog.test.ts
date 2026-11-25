@@ -90,6 +90,8 @@ vi.mock("./transport", () => ({
 
 import { useWorkspaceCatalog } from "./use_workspace_catalog";
 import { useConversationRename } from "./rename_state";
+import { SessionTitleOverrides } from "./session_titles";
+import { ArchivedConversations } from "./archived_conversations";
 import { conversationTitle } from "./sidebar_cards";
 
 const RUNS = /^api\/gateway\/runs\?root_only=true&include_ledger_len=false&include_metrics=true&limit=\d+$/;
@@ -326,6 +328,20 @@ describe("round 2: the list and the names it shows", () => {
     expect(names(view)).toEqual(["Write a snake game", "Fix the parser"]);
   });
 
+  it("a rename still out when the identity changes never names the next identity's conversation", async () => {
+    const who = { identity: "default:alice" };
+    const view = await mountListed(LIST(), who);
+    const out = attempt(view.catalog.renameSession("s1", "Alice's pending name"));
+    await settle();
+    who.identity = "default:bob";
+    hooks.render();
+    await settle();
+    await release(RUNS, LIST());
+    expect(names(view)).toEqual(["Write a snake game", "Fix the parser"]);
+    await release(TITLE("s1"), { session_id: "s1", title: "Alice's pending name", changed: true });
+    expect(await out).toBe("stored");
+  });
+
   it("a list whose names cannot be read says so once; a later list without the error clears it", async () => {
     const view = await mountListed({ ...LIST(), session_titles_error: { reason_code: "session_titles_unreadable", message: "The titles file cannot be read." } } as any);
     expect(view.catalog.titlesNotice).toBe("The titles file cannot be read.");
@@ -371,7 +387,7 @@ describe("round 2: the row being renamed and its refusal (useConversationRename)
 
   it("the error goes when the editor closes, when a new attempt starts and when a later rename of it succeeds", async () => {
     let fail = true;
-    const view = mountRename(async () => { if (fail) throw new Error("refused"); });
+    const view = mountRename((_id, name) => (name === "Pending" ? new Promise<void>(() => {}) : fail ? Promise.reject(new Error("refused")) : Promise.resolve()));
     await attempt(view.r.rename("s1", "A"));
     await settle();
     expect(view.r.error?.sessionId).toBe("s1");
@@ -380,7 +396,12 @@ describe("round 2: the row being renamed and its refusal (useConversationRename)
     expect(view.r.error).toBeNull();
     await attempt(view.r.rename("s1", "A"));
     await settle();
+    expect(view.r.error?.sessionId).toBe("s1");
     fail = false;
+    view.r.rename("s1", "Pending").catch(() => undefined);
+    await settle();
+    expect(view.r.error).toBeNull(); // cleared when the new attempt starts, before any answer
+    await attempt(view.r.rename("s1", "A2"));
     const later = view.r.rename("s1", "B");
     await settle();
     expect(view.r.error).toBeNull();
@@ -415,5 +436,27 @@ describe("round 2: the row being renamed and its refusal (useConversationRename)
     hooks.render();
     await settle();
     expect([view.r.error, view.r.editingId]).toEqual([null, null]);
+  });
+});
+
+describe("round 2: names in the overrides and the archived list", () => {
+  it("an override holds the trimmed name; spaces only clear it", () => {
+    const o = new SessionTitleOverrides();
+    o.begin("s1", "   Snake   ", 0);
+    o.begin("s2", "   ", 0);
+    const shown = o.apply([{ sessionId: "s1", title: "Old" }, { sessionId: "s2", title: "Old" }] as any[]);
+    expect(shown).toEqual([{ sessionId: "s1", title: "Snake" }, { sessionId: "s2" }]);
+  });
+
+  it("the archived list names each row by its stored title, else its first message", async () => {
+    const view: { el: any } = { el: null };
+    const request = (async () => page(row("a1", "2026-11-10T10:00:00Z", "Summarise Q3", "Q3 report"), row("a2", "2026-11-09T10:00:00Z", "Plain archived"))) as any;
+    hooks.mount(() => {
+      view.el = ArchivedConversations({ enabled: true, revision: 1, onOpen: () => {}, onUnarchived: () => {}, request });
+    });
+    await settle();
+    await settle();
+    const rows = ([] as any[]).concat(view.el.props.children).filter(Boolean);
+    expect(rows.map((r: any) => r.props.title)).toEqual(["Q3 report", "Plain archived"]);
   });
 });
