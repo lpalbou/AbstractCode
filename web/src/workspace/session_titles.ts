@@ -9,15 +9,15 @@ import type { SessionSummary } from "./catalog";
 import { gatewayRequest } from "./transport";
 
 /**
- * Whether the gateway stores conversation names, from `GET discovery/capabilities` as the catalog
- * holds it (`catalog.capabilities`, the unwrapped `capabilities.contracts`). Only a literal `true`
- * counts: a missing key is an older gateway.
+ * Whether the gateway stores conversation names, from its `GET discovery/capabilities` answer (the
+ * catalog reads it at start: `catalog.sessionTitles`). Only a literal `true` counts: a missing key
+ * is an older gateway (0.23.0 and before), which then gets no rename anywhere.
  */
-export function gatewaySupportsSessionTitles(contracts: unknown): boolean {
-  // >>> The one place that names where the gateway advertises `session_titles: true`.
-  // ASSUMED until the gateway's change lands: `capabilities.contracts.sessions.session_titles`.
-  const sessions = (contracts as { sessions?: { session_titles?: unknown } } | null | undefined)?.sessions;
-  return sessions?.session_titles === true;
+export function gatewaySupportsSessionTitles(discovery: unknown): boolean {
+  // >>> The one place that names where the gateway advertises it: `{"capabilities": {"session_titles": true}}`
+  // (the gateway's `GET /discovery/capabilities`, beside `session_tool_policy`; not under `contracts`).
+  const capabilities = (discovery as { capabilities?: { session_titles?: unknown } } | null | undefined)?.capabilities;
+  return capabilities?.session_titles === true;
   // <<<
 }
 

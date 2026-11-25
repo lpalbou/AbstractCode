@@ -55,13 +55,13 @@ describe("one name everywhere", () => {
 });
 
 describe("the gateway capability", () => {
-  it("only a literal session_titles: true at the advertised place turns rename on", () => {
-    expect(gatewaySupportsSessionTitles({ sessions: { session_titles: true } })).toBe(true);
-    for (const older of [{}, null, undefined, { sessions: {} }, { sessions: { session_titles: "true" } }, { sessions: { session_titles: false } }, { session_titles: true }])
+  it("only a literal capabilities.session_titles: true in GET discovery/capabilities turns rename on", () => {
+    expect(gatewaySupportsSessionTitles({ capabilities: { session_titles: true, contracts: {} } })).toBe(true);
+    for (const older of [{}, null, undefined, { capabilities: {} }, { capabilities: { session_titles: "true" } }, { capabilities: { session_titles: false } }, { session_titles: true }, { capabilities: { contracts: { session_titles: true } } }])
       expect(gatewaySupportsSessionTitles(older)).toBe(false);
   });
   it("the app passes onRename only when the gateway advertises it (an older one is never asked)", () => {
-    expect(appSource).toContain("const renameSupported = connection.connected && gatewaySupportsSessionTitles(catalog.capabilities);");
+    expect(appSource).toContain("const renameSupported = connection.connected && catalog.sessionTitles;");
     expect(appSource).toContain("onRename={renameSupported ? (name) => renameConversation(item.sessionId, name) : undefined}");
     expect(appSource.match(/renameConversation\(/g)?.length).toBe(1);
     expect(appSource).toMatch(/await catalog\.renameSession\(sessionId, name\)/);

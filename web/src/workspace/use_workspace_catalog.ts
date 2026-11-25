@@ -35,7 +35,7 @@ import {
   type GatewayDefaultState,
 } from "./workflow_selection";
 import { archivedConversationCount } from "./archived_conversations";
-import { renameSession as storeSessionTitle, SessionTitleOverrides } from "./session_titles";
+import { gatewaySupportsSessionTitles, renameSession as storeSessionTitle, SessionTitleOverrides } from "./session_titles";
 import { withoutNotesEntries } from "./notes_work";
 import {
   CONVERSATIONS_PAGE,
@@ -63,6 +63,8 @@ type CatalogState = {
    */
   sessionToolPolicy: SessionToolPolicyCapability | null;
   capabilitiesError: string;
+  /** The gateway stores conversation names (`capabilities.session_titles`, session_titles.ts): Rename is offered. */
+  sessionTitles: boolean;
   /** The same `GET discovery/tools` answer as the kit reads it (ToolModeEditor, planRunTools). */
   toolCatalog: ToolCatalogItem[];
   /** The catalog's warnings in the gateway's words (plugin load failures, MCP). */
@@ -100,6 +102,7 @@ const empty: CatalogState = {
   capabilitiesLoading: true,
   sessionToolPolicy: null,
   capabilitiesError: "",
+  sessionTitles: false,
   toolCatalog: [],
   toolWarnings: [],
   streaming: STREAMING_LOADING,
@@ -126,6 +129,7 @@ function capabilityFields(value: any, failure?: string) {
     capabilitiesLoading: false,
     sessionToolPolicy: sessionToolPolicyCapability(value),
     capabilitiesError: failure ? `Could not read the gateway's capabilities: ${failure}` : "",
+    sessionTitles: gatewaySupportsSessionTitles(value),
     streaming: streamingCapability(value, failure),
     iterationLimit: iterationLimitDefaultFrom(value),
   };

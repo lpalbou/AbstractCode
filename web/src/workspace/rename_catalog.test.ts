@@ -90,7 +90,6 @@ vi.mock("./transport", () => ({
 
 import { useWorkspaceCatalog } from "./use_workspace_catalog";
 import { conversationTitle } from "./sidebar_cards";
-import { gatewaySupportsSessionTitles } from "./session_titles";
 
 const RUNS = /^api\/gateway\/runs\?root_only=true&include_ledger_len=false&include_metrics=true&limit=\d+$/;
 const TITLE = (id: string) => `api/gateway/sessions/${id}/title`;
@@ -245,11 +244,20 @@ describe("renaming a conversation through the catalog", () => {
   });
 });
 
-describe("an older gateway", () => {
-  it("advertises no session titles, so the app offers no rename and sends no PUT", async () => {
+describe("the capability read at start", () => {
+  it("a gateway that stores names says so: sessionTitles", async () => {
     const view = await mountListed();
+    expect(view.catalog.sessionTitles).toBe(false); // until the answer is in
+    await release("api/gateway/discovery/capabilities", { capabilities: { session_titles: true, contracts: { automations: { version: 1 } } } });
+    expect(view.catalog.sessionTitles).toBe(true);
+  });
+  it("an older gateway (no key, or an unreadable answer) gets no rename, and no PUT is ever sent", async () => {
+    const older = await mountListed();
     await release("api/gateway/discovery/capabilities", { capabilities: { contracts: { automations: { version: 1 } } } });
-    expect(gatewaySupportsSessionTitles(view.catalog.capabilities)).toBe(false);
+    expect(older.catalog.sessionTitles).toBe(false);
+    const failed = await mountListed();
+    await release("api/gateway/discovery/capabilities", Object.assign(new Error("HTTP 500"), { status: 500 }), true);
+    expect(failed.catalog.sessionTitles).toBe(false);
     expect(writes()).toEqual([]);
   });
 });

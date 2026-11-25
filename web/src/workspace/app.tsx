@@ -60,7 +60,6 @@ import { CodeDefaultWorkspacesDialog } from "./workspace_folders";
 import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
 import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
 import { ConversationCard, conversationTitle, searchConversations } from "./sidebar_cards";
-import { gatewaySupportsSessionTitles } from "./session_titles";
 import {
   WorkspaceBrowser,
   uploadRefusal,
@@ -1693,7 +1692,7 @@ export function CodeWorkspace() {
   );
   // Rename (backlog 1343): only on a gateway that stores conversation names; an older one gets no
   // rename anywhere and is never asked. A refusal is said under the card, as an archive refusal is.
-  const renameSupported = connection.connected && gatewaySupportsSessionTitles(catalog.capabilities);
+  const renameSupported = connection.connected && catalog.sessionTitles;
   const [renameError, setRenameError] = useState<{ sessionId: string; message: string } | null>(null);
   const renameConversation = async (sessionId: string, name: string) => {
     setRenameError(null);
