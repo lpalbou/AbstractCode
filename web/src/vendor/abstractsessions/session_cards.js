@@ -220,9 +220,109 @@ function formatRelativeTime(ts, nowMs) {
 
 // dist/compact_activity_card.js
 import { jsx as _jsx2, jsxs as _jsxs2 } from "react/jsx-runtime";
+import React from "react";
+var TITLE_MAX_LENGTH = 120;
 function CompactActivityCard(p) {
   const marker = p.needsAttention ? "attention" : p.working ? "working" : p.failed ? "failed" : p.unread ? "unread" : "";
-  return _jsxs2("div", { className: `af-session-card${p.className ? ` ${p.className}` : ""}`, "data-selected": p.selected || void 0, "data-unread": p.unread || void 0, "data-attention": p.needsAttention || void 0, "data-working": p.working || void 0, "data-failed": p.failed || void 0, children: [_jsxs2("button", { type: "button", className: "af-session-card__open", ...p.openAttributes, disabled: p.disabled, "aria-current": p.selected ? "page" : void 0, "aria-label": `${p.title}${p.description ? `. ${p.description}` : ""}`, onClick: p.onOpen, children: [_jsxs2("span", { className: "af-session-card__heading", children: [marker && _jsx2("span", { className: `af-session-card__marker is-${marker}`, "aria-hidden": "true" }), _jsx2("span", { className: "af-session-card__title", title: p.title, children: p.title })] }), _jsx2("span", { className: "af-session-card__meta", children: p.metadata })] }), p.onArchive && _jsx2("button", { type: "button", className: "af-session-card__archive", "aria-label": `Archive ${p.title}`, title: p.archiveTitle || "Archive conversation", disabled: p.disabled || p.archiveDisabled, onClick: p.onArchive, children: _jsx2(Icon, { name: "archive", size: 14 }) })] });
+  const [editing, setEditing] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
+  const openRef = React.useRef(null);
+  const inputRef = React.useRef(null);
+  const baseline = React.useRef("");
+  const busy = React.useRef(false);
+  const alive = React.useRef(true);
+  const returnFocus = React.useRef(false);
+  const active = React.useRef(false);
+  const renamable = Boolean(p.onRename) && !p.disabled;
+  React.useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  React.useEffect(() => {
+    if (editing && !renamable && !busy.current)
+      leave(false);
+  }, [editing, renamable]);
+  React.useEffect(() => {
+    const input = inputRef.current;
+    if (editing && input) {
+      baseline.current = input.value.trim();
+      input.focus();
+      input.select();
+    } else if (!editing && returnFocus.current) {
+      returnFocus.current = false;
+      openRef.current?.focus();
+    }
+  }, [editing]);
+  React.useEffect(() => {
+    if (editing && !pending)
+      inputRef.current?.focus();
+  }, [pending]);
+  const startEdit = () => {
+    if (!renamable || editing)
+      return;
+    active.current = true;
+    setEditing(true);
+  };
+  const leave = (focusRow) => {
+    if (!active.current)
+      return;
+    active.current = false;
+    returnFocus.current = focusRow;
+    setEditing(false);
+  };
+  const commit = () => {
+    if (busy.current || !p.onRename)
+      return;
+    const value = (inputRef.current?.value ?? "").trim();
+    if (value === baseline.current)
+      return leave(true);
+    let result;
+    try {
+      result = p.onRename(value);
+    } catch {
+      return;
+    }
+    if (!result || typeof result.then !== "function")
+      return leave(true);
+    busy.current = true;
+    setPending(true);
+    const settle = (ok) => {
+      busy.current = false;
+      if (!alive.current)
+        return;
+      setPending(false);
+      if (ok)
+        leave(true);
+    };
+    result.then(() => settle(true), () => settle(false));
+  };
+  const stop = (event) => event.stopPropagation();
+  return _jsxs2("div", { className: `af-session-card${p.className ? ` ${p.className}` : ""}`, "data-selected": p.selected || void 0, "data-unread": p.unread || void 0, "data-attention": p.needsAttention || void 0, "data-working": p.working || void 0, "data-failed": p.failed || void 0, onKeyDown: p.onRename ? (event) => {
+    if (event.key === "F2" && !editing) {
+      event.preventDefault();
+      startEdit();
+    }
+  } : void 0, children: [editing ? _jsxs2("div", { className: "af-session-card__edit", onKeyDown: stop, onKeyUp: stop, onKeyPress: stop, onClick: stop, onDoubleClick: stop, onMouseDown: stop, onPointerDown: stop, children: [_jsxs2("span", { className: "af-session-card__heading", children: [pending ? _jsx2("span", { className: "af-session-card__marker is-working", "aria-hidden": "true" }) : marker && _jsx2("span", { className: `af-session-card__marker is-${marker}`, "aria-hidden": "true" }), _jsx2("input", { ref: inputRef, type: "text", className: "af-session-card__title-input", defaultValue: p.title, maxLength: TITLE_MAX_LENGTH, "aria-label": "Rename conversation", dir: "auto", autoComplete: "off", enterKeyHint: "done", disabled: pending, "aria-busy": pending || void 0, onKeyDown: (event) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229)
+      return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      if (!busy.current)
+        leave(true);
+    }
+  }, onBlur: (event) => {
+    if (!active.current || busy.current || document.activeElement === event.currentTarget)
+      return;
+    leave(false);
+  } })] }), _jsx2("span", { className: "af-session-card__meta", children: p.metadata })] }) : _jsxs2("button", { ref: openRef, type: "button", className: "af-session-card__open", ...p.openAttributes, disabled: p.disabled, "aria-current": p.selected ? "page" : void 0, "aria-keyshortcuts": p.onRename ? "F2" : void 0, "aria-label": `${p.title}${p.description ? `. ${p.description}` : ""}`, onClick: p.onOpen, children: [_jsxs2("span", { className: "af-session-card__heading", children: [marker && _jsx2("span", { className: `af-session-card__marker is-${marker}`, "aria-hidden": "true" }), _jsx2("span", { className: "af-session-card__title", title: p.title, dir: p.onRename ? "auto" : void 0, onDoubleClick: p.onRename ? (event) => {
+    event.preventDefault();
+    startEdit();
+  } : void 0, children: p.title })] }), _jsx2("span", { className: "af-session-card__meta", children: p.metadata })] }), p.onRename && !editing && _jsx2("button", { type: "button", className: "af-session-card__rename", "aria-label": `Rename ${p.title}`, title: "Rename conversation", "aria-keyshortcuts": "F2", disabled: p.disabled, onClick: startEdit, children: _jsx2(Icon, { name: "edit", size: 14 }) }), p.onArchive && !editing && _jsx2("button", { type: "button", className: "af-session-card__archive", "aria-label": `Archive ${p.title}`, title: p.archiveTitle || "Archive conversation", disabled: p.disabled || p.archiveDisabled, onClick: p.onArchive, children: _jsx2(Icon, { name: "archive", size: 14 }) })] });
 }
 
 // dist/session_card.js

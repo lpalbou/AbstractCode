@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Rename a conversation: the pencil next to a card's archive icon, F2 on a focused card or a
+  double-click on its name turns the name into a text box; Enter keeps the new name, Escape or a
+  click elsewhere keeps the old one, and an empty name brings back the first message. The name is
+  stored by the gateway (`PUT /api/gateway/sessions/{session_id}/title`), so it is the same after a
+  reload, in another browser and on another device; the sidebar, the header, **Archived · N** and
+  search use it. A refusal brings the previous name back and is said under the card. Offered only
+  when the gateway advertises `session_titles`; with an older gateway nothing changes. Built on
+  `@abstractframework/ui-kit` 0.9.30 (the shared card's rename).
+
 ## [web 0.16.3] - 2026-11-24
 
 - When your sign-in to the gateway has ended (for example after the admin password was changed

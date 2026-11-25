@@ -35,6 +35,7 @@ import {
   type GatewayDefaultState,
 } from "./workflow_selection";
 import { archivedConversationCount } from "./archived_conversations";
+import { renameSession as storeSessionTitle, SessionTitleOverrides } from "./session_titles";
 import { withoutNotesEntries } from "./notes_work";
 import {
   CONVERSATIONS_PAGE,
@@ -144,6 +145,10 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     identity: string;
     values: Record<string, unknown>;
   }>({ identity: "", values: {} });
+  // Names this client set, over the listed ones until a later list shows them (session_titles.ts),
+  // and the last runs page, to show a name change (or its refusal) without reading the list again.
+  const titles = useRef(new SessionTitleOverrides());
+  const lastRuns = useRef<unknown>(null);
   const fetchRuns = useCallback(
     (signal: AbortSignal) =>
       fetchConversationRuns(
@@ -157,7 +162,7 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
   );
   const pageOf = (runs: any) =>
     conversationPage(
-      normalizeSessionSummaries(runs, inputCache.current.values),
+      titles.current.apply(normalizeSessionSummaries(runs, inputCache.current.values)),
       visible.current,
     );
   // Run summaries intentionally omit user input. Hydrate the SHOWN conversations' labels through
@@ -210,6 +215,8 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
         return;
       }
       if (listGeneration.current !== listGen) return;
+      titles.current.landed(listGen);
+      lastRuns.current = runs;
       const page = pageOf(runs);
       setState((s) => ({
         ...s,
@@ -252,8 +259,11 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     pending.current?.abort();
     const abort = new AbortController();
     pending.current = abort;
-    if (inputCache.current.identity !== identity)
+    if (inputCache.current.identity !== identity) {
       inputCache.current = { identity, values: {} };
+      titles.current.clear();
+      lastRuns.current = null;
+    }
     if (!identity) {
       setState(empty);
       return;
@@ -365,7 +375,29 @@ export function useWorkspaceCatalog(identity: string, onAuthError: () => void) {
     }));
     void loadConversations();
   }, [loadConversations]);
-  return { ...state, refresh, refreshSessions: loadConversations, loadMore, forgetSession };
+  /**
+   * Rename (or, with "", clear the name of) a conversation: shown at once, the gateway's normalised
+   * name once it answers, the previous name again if it refuses (the rejection is the caller's to
+   * show). Only the name changes: the order and the "updated" times stay the list's.
+   */
+  const renameSession = useCallback(async (sessionId: string, title: string) => {
+    const show = () =>
+      setState((s) => ({ ...s, sessions: lastRuns.current ? pageOf(lastRuns.current).sessions : titles.current.apply(s.sessions) }));
+    const turn = titles.current.begin(sessionId, title, listGeneration.current);
+    show();
+    let stored: Awaited<ReturnType<typeof storeSessionTitle>>;
+    try {
+      stored = await storeSessionTitle(sessionId, title, gatewayRequest);
+    } catch (reason: any) {
+      titles.current.refused(sessionId, turn);
+      show();
+      if (reason?.status === 401) onAuthError();
+      throw reason;
+    }
+    titles.current.stored(sessionId, turn, stored.title, listGeneration.current);
+    show();
+  }, [onAuthError]); // eslint-disable-line react-hooks/exhaustive-deps
+  return { ...state, refresh, refreshSessions: loadConversations, loadMore, forgetSession, renameSession };
 }
 
 /**

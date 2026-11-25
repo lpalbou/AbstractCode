@@ -42,21 +42,22 @@ export function conversationMetaLine(
 export const UNTITLED_CONVERSATION = "Untitled conversation";
 
 /**
- * A conversation's name (ADR 0043: never a computer id): its first message, else a plain
- * fallback. The gateway serves no session title, so the opening message is the name.
+ * A conversation's name wherever one is shown (ADR 0043: never a computer id): the name a person
+ * gave it (the gateway's stored title, `session_titles.ts`), else its first message, else a plain
+ * fallback. Clearing the stored name brings the first message back.
  */
-export function conversationTitle(item: Pick<SessionSummary, "prompt">): string {
-  return item.prompt?.trim() || UNTITLED_CONVERSATION;
+export function conversationTitle(item: Pick<SessionSummary, "title" | "prompt">): string {
+  return item.title?.trim() || item.prompt?.trim() || UNTITLED_CONVERSATION;
 }
 
 /**
- * The search box over the listed conversations: the query (any case) in the shown name or the
- * session id (support pastes ids). It searches the list it is given, so whatever the list leaves
- * out (AbstractNote's background work) is never found either.
+ * The search box over the listed conversations: the query (any case) in the stored name, the
+ * first message or the session id (support pastes ids). It searches the list it is given, so
+ * whatever the list leaves out (AbstractNote's background work) is never found either.
  */
-export function searchConversations<T extends Pick<SessionSummary, "prompt" | "sessionId">>(items: readonly T[], query: string): T[] {
+export function searchConversations<T extends Pick<SessionSummary, "title" | "prompt" | "sessionId">>(items: readonly T[], query: string): T[] {
   const q = query.toLowerCase();
-  return items.filter((item) => `${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
+  return items.filter((item) => `${item.title || ""} ${item.prompt || ""} ${item.sessionId}`.toLowerCase().includes(q));
 }
 
 const WEEKDAYS: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
@@ -155,6 +156,13 @@ export function ConversationCard(props: {
   onAskArchive?(): void;
   /** The inline confirm, while this card's archive is being asked. */
   confirm?: React.ReactNode;
+  /**
+   * Rename in place (only when the gateway stores names): resolves once stored; a rejection keeps
+   * the typed name in the card's input while `renameError` says why.
+   */
+  onRename?(title: string): Promise<void>;
+  /** The gateway's refusal of this card's last rename, as a sentence. */
+  renameError?: string;
 }): React.ReactElement {
   const { item } = props;
   const title = conversationTitle(item);
@@ -164,7 +172,9 @@ export function ConversationCard(props: {
       <SessionCard sessionId={item.sessionId} title={title} selected={props.selected} unread={props.unread}
         needsAttention={props.needsAttention ?? props.activity?.needsAttention} working={props.activity?.working ?? item.state === "running"}
         turnCount={item.turnCount} toolCount={item.toolCalls} countsPartial={item.truncated} updatedAt={item.updatedAt} nowMs={Date.now()}
-        onOpen={props.onClick} onArchive={props.onAskArchive} archiveDisabled={item.state === "running" || item.state === "waiting"} />
+        onOpen={props.onClick} onArchive={props.onAskArchive} archiveDisabled={item.state === "running" || item.state === "waiting"}
+        onRename={props.onRename} />
+      {props.renameError ? <p className="code-inline-error" role="alert">{props.renameError}</p> : null}
       {props.confirm}
     </div>
   );

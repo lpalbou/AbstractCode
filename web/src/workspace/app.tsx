@@ -59,7 +59,8 @@ import { SidebarDrawer } from "./sidebar_drawer";
 import { CodeDefaultWorkspacesDialog } from "./workspace_folders";
 import { ArchiveConfirm, ArchivedFooter, ConversationsPanel, SidebarLists, useArchivedOpen, useSidebarPanels } from "./sidebar_panels";
 import { ArchivedConversations, archiveSession, nextConversationAfterArchive } from "./archived_conversations";
-import { ConversationCard, UNTITLED_CONVERSATION, searchConversations } from "./sidebar_cards";
+import { ConversationCard, conversationTitle, searchConversations } from "./sidebar_cards";
+import { gatewaySupportsSessionTitles } from "./session_titles";
 import {
   WorkspaceBrowser,
   uploadRefusal,
@@ -630,10 +631,13 @@ export function CodeWorkspace() {
   const currentSession =
     catalog.sessions.find((item) => item.sessionId === session.sessionId) ??
     catalog.notesSessions.find((item) => item.sessionId === session.sessionId);
+  // The header names the conversation as its sidebar row does (conversationTitle): its stored
+  // name, else its first message (the shown one while the list has none yet).
+  const firstAsked = currentSession?.prompt || messages.find((m) => m.role === "user")?.content;
   const title =
-    currentSession?.prompt ||
-    messages.find((m) => m.role === "user")?.content ||
-    (session.runId ? UNTITLED_CONVERSATION : "New conversation");
+    currentSession || session.runId || firstAsked
+      ? conversationTitle({ title: currentSession?.title, prompt: firstAsked })
+      : "New conversation";
   // "Email isn't set up — open My email": the gateway console's Users tab,
   // in a new tab (the console has its own sign-in).
   const myEmailUrl = myEmailConsoleUrl(connection.status?.gateway_url);
@@ -1687,6 +1691,19 @@ export function CodeWorkspace() {
   const archiveConfirm = (
     <ArchiveConfirm busy={archiveBusy} error={archiveError} onConfirm={() => void confirmArchive()} onCancel={cancelArchive} />
   );
+  // Rename (backlog 1343): only on a gateway that stores conversation names; an older one gets no
+  // rename anywhere and is never asked. A refusal is said under the card, as an archive refusal is.
+  const renameSupported = connection.connected && gatewaySupportsSessionTitles(catalog.capabilities);
+  const [renameError, setRenameError] = useState<{ sessionId: string; message: string } | null>(null);
+  const renameConversation = async (sessionId: string, name: string) => {
+    setRenameError(null);
+    try {
+      await catalog.renameSession(sessionId, name);
+    } catch (e) {
+      setRenameError({ sessionId, message: `Not renamed: ${formatError(e)}` });
+      throw e;
+    }
+  };
 
   // Settings: one renderer for a conversation (its run preferences) and an
   // automation (its definition, through AutomationSettingsPanel).
@@ -2120,6 +2137,8 @@ export function CodeWorkspace() {
                 openConversation(item.sessionId, item.latestRunId)
               }
               onAskArchive={connection.connected ? () => askArchive(item.sessionId, "card") : undefined}
+              onRename={renameSupported ? (name) => renameConversation(item.sessionId, name) : undefined}
+              renameError={renameError?.sessionId === item.sessionId ? renameError.message : undefined}
               confirm={archiveAsk?.where === "card" && archiveAsk.sessionId === item.sessionId ? archiveConfirm : undefined}
             />
           ))}

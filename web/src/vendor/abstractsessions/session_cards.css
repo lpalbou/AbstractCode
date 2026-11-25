@@ -7,7 +7,7 @@
 .af-session-card[data-attention] { border-color: color-mix(in srgb, var(--warning) 22%, var(--ui-border-1)); background: color-mix(in srgb, var(--warning) 4%, var(--af-session-bg)); }
 .af-session-card[data-selected] { background: color-mix(in srgb, var(--accent) 10%, var(--af-session-bg)); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
 .af-session-card__open { flex: 1; min-width: 0; min-height: 64px; padding: 9px 10px; border: 0; border-radius: inherit; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.af-session-card__open:focus-visible, .af-session-card__archive:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.af-session-card__open:focus-visible, .af-session-card__archive:focus-visible, .af-session-card__rename:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .af-session-card__heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .af-session-card__title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: max(13px, var(--font-size-sm, 13px)); font-weight: 400; line-height: 1.35; }
 .af-session-card__marker { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--af-session-new); }
@@ -21,13 +21,24 @@
 .af-session-card__time > span { overflow: hidden; text-overflow: ellipsis; }
 .af-session-card__attention { color: color-mix(in srgb, var(--warning) 75%, var(--af-session-fg)); font-weight: 400; }
 .af-session-card__archive { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; border: 0; border-radius: 6px; margin-right: 6px; background: transparent; color: var(--error); cursor: pointer; opacity: 0; pointer-events: none; }
-.af-session-card:hover .af-session-card__archive, .af-session-card__open:focus-visible + .af-session-card__archive, .af-session-card__archive:focus-visible { opacity: 1; visibility: visible; pointer-events: auto; }
+.af-session-card:hover .af-session-card__archive, .af-session-card__open:focus-visible ~ .af-session-card__archive, .af-session-card__archive:focus-visible { opacity: 1; visibility: visible; pointer-events: auto; }
+/* Rename (only when the host offers it): the archive icon's twin in the row's muted ink, before it. */
+.af-session-card__rename { display: grid; place-items: center; flex: 0 0 28px; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--af-session-muted); cursor: pointer; opacity: 0; pointer-events: none; }
+.af-session-card__rename:last-child { margin-right: 6px; }
+.af-session-card:hover .af-session-card__rename, .af-session-card__open:focus-visible ~ .af-session-card__rename, .af-session-card__rename:focus-visible, .af-session-card__rename:focus-visible ~ .af-session-card__archive { opacity: 1; visibility: visible; pointer-events: auto; }
+.af-session-card:has(.af-session-card__archive:focus-visible) .af-session-card__rename { opacity: 1; visibility: visible; pointer-events: auto; }
+.af-session-card__rename:hover { background: color-mix(in srgb, var(--af-session-fg) 10%, transparent); color: var(--af-session-fg); }
+.af-session-card__edit { flex: 1; min-width: 0; min-height: 64px; padding: 9px 10px; box-sizing: border-box; }
+.af-session-card__title-input { flex: 1; min-width: 0; box-sizing: border-box; margin: -3px 0; padding: 2px 6px; border: 1px solid var(--ui-border-1); border-radius: 6px; background: var(--bg-primary); color: var(--af-session-fg); font: inherit; font-size: max(13px, var(--font-size-sm, 13px)); line-height: 1.35; }
+.af-session-card__title-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.af-session-card__title-input:disabled { opacity: .6; cursor: progress; }
 .af-session-card__archive:hover { background: color-mix(in srgb, var(--error) 10%, transparent); }
 @media (hover: none), (pointer: coarse) { .af-session-card__archive { flex-basis: 44px; width: 44px; height: 44px; opacity: 1; visibility: visible; pointer-events: auto; } }
+@media (hover: none), (pointer: coarse) { .af-session-card__rename { flex-basis: 44px; width: 44px; height: 44px; opacity: 1; visibility: visible; pointer-events: auto; } }
 .af-session-card button:disabled { opacity: .5; cursor: not-allowed; }
-.af-session-card .af-session-card__archive:disabled { opacity: 0; }
-.af-session-card:hover .af-session-card__archive:disabled, .af-session-card__open:focus-visible + .af-session-card__archive:disabled { opacity: .5; }
-@media (hover: none), (pointer: coarse) { .af-session-card .af-session-card__archive:disabled { opacity: .5; } }
+.af-session-card .af-session-card__archive:disabled, .af-session-card .af-session-card__rename:disabled { opacity: 0; }
+.af-session-card:hover .af-session-card__archive:disabled, .af-session-card__open:focus-visible ~ .af-session-card__archive:disabled, .af-session-card:hover .af-session-card__rename:disabled, .af-session-card__open:focus-visible ~ .af-session-card__rename:disabled { opacity: .5; }
+@media (hover: none), (pointer: coarse) { .af-session-card .af-session-card__archive:disabled, .af-session-card .af-session-card__rename:disabled { opacity: .5; } }
 @keyframes af-session-working { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .af-session-card__marker.is-working { animation: none; } }
 

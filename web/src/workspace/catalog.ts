@@ -96,6 +96,11 @@ export interface SessionSummary {
    */
   toolCalls?: number;
   prompt?: string;
+  /**
+   * The name a person gave the conversation (`session_title` on its rows; `session_titles.ts`).
+   * Absent when it has none, or on an older gateway: the first message names it.
+   */
+  title?: string;
   /** True when the source run page says there are more rows. */
   truncated: boolean;
 }
@@ -736,6 +741,8 @@ export function normalizeSessionSummaries(
         promptFrom(run);
       if (prompt) break;
     }
+    // The stored name rides on every row of a titled session; any listed row says it.
+    const title = newest.map(({ run }) => text(run.session_title)).find(Boolean);
     let toolCalls: number | undefined = 0;
     for (const { run } of group) {
       const count = run.tool_calls;
@@ -760,6 +767,7 @@ export function normalizeSessionSummaries(
       turnCount: exact ? exactTurns : group.length,
       ...(toolCalls !== undefined ? { toolCalls } : {}),
       ...(prompt ? { prompt } : {}),
+      ...(title ? { title } : {}),
       truncated: exact ? false : truncated,
     });
   }

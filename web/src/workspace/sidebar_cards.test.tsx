@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { AutomationSummary } from "@abstractframework/ui-kit";
 
 import { normalizeSessionSummaries } from "./catalog";
-import { ConversationCard } from "./sidebar_cards";
+import { ConversationCard, conversationTitle, searchConversations } from "./sidebar_cards";
 import { AutomationHeaderBar, HEADER_BUTTONS } from "./automation_header";
 
 const run = (session: string, id: string, at: string, tools: unknown) => ({
@@ -41,6 +41,25 @@ describe("shared conversation card", () => {
     expect(html).toContain('data-unread="true" data-attention="true"');
     expect(html).toContain('Needs you');
     expect(html).not.toContain('0 tool');
+  });
+});
+
+describe("a conversation's name and search (backlog 1343)", () => {
+  const titled = (over: Record<string, unknown>) => ({ ...normalizeSessionSummaries({ items: [run("s1", "r1", "2026-10-02T10:00:00Z", 0)] })[0], ...over });
+  it("the card shows the stored name over the first message, and the first message once it is cleared", () => {
+    expect(renderToStaticMarkup(<ConversationCard item={titled({ prompt: "Write a snake game", title: "Snake" })} selected={false} onClick={() => {}} />)).toContain(">Snake</span>");
+    expect(renderToStaticMarkup(<ConversationCard item={titled({ prompt: "Write a snake game" })} selected={false} onClick={() => {}} />)).toContain(">Write a snake game</span>");
+    expect(conversationTitle(titled({}))).toBe("Untitled conversation");
+  });
+  it("search matches the stored name, the first message and the session id", () => {
+    const items = [titled({ sessionId: "a", title: "Arcade", prompt: "Write a snake game" }), titled({ sessionId: "b", prompt: "Fix the parser" })];
+    expect(searchConversations(items, "ARCADE").map((s) => s.sessionId)).toEqual(["a"]);
+    expect(searchConversations(items, "snake").map((s) => s.sessionId)).toEqual(["a"]);
+    expect(searchConversations(items, "parser").map((s) => s.sessionId)).toEqual(["b"]);
+    expect(searchConversations(items, "b").map((s) => s.sessionId)).toEqual(["b"]);
+  });
+  it("without onRename the card offers no Rename (an older gateway)", () => {
+    expect(renderToStaticMarkup(<ConversationCard item={titled({})} selected onClick={() => {}} />)).not.toContain("af-session-card__rename");
   });
 });
 
